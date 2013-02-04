@@ -1,9 +1,16 @@
-lmdb
-----
 
-Dirty wrapper around the OpenLDAP MDB 'Lightning Database' library. The wrapper
-is not thread-safe, thoroughly documented or tested particularly heavily, but
-it already works well.
+lmdb
+====
+
+`http://github.com/dw/py-lmdb <http://github.com/dw/py-lmdb>`_
+
+.. toctree::
+    :hidden:
+    :maxdepth: 2
+
+This is a quick wrapper around the OpenLDAP MDB 'Lightning Database' library.
+The wrapper is not yet thread-safe, thoroughly documented or tested
+particularly heavily, but it already works well.
 
 More information on MDB can be found at:
 
@@ -11,6 +18,11 @@ More information on MDB can be found at:
 * `UKUUG introductory paper <http://symas.com/mdb/20120322-UKUUG-MDB-txt.pdf>`_
 * `git://git.openldap.org/openldap.git <git://git.openldap.org/openldap.git>`_
   (branch ``mdb.master``)
+
+
+
+Introduction
+++++++++++++
 
 MDB is interesting because:
 
@@ -21,9 +33,9 @@ MDB is interesting because:
 * Like LevelDB but unlike SQLite, it exports an ordered-map interface.
 * Like SQLite but unlike LevelDB, it supports multiple namespaces per database.
 * Like SQLite 3.x prior to WAL mode, and most certainly unlike LevelDB, no
-  surprising quantities of background processing or sporadic maintainance must
-  occur in order to continue functioning under heavy write load, nor are writes
-  throttled except by contention.
+  surprising background processing or sporadic maintainance must occur in order
+  to continue functioning under heavy write load, nor are writes throttled
+  except by contention.
 * Like SQLite and unlike LevelDB, predictable latency variance and runtime
   profile (no background threads).
 * Similar to SQLite and unlike LevelDB, relies exclusively on the OS buffer
@@ -52,5 +64,50 @@ In future it would be nice to buffers instead of strings to exploit the zero
 copy nature of MDB's design, for example to allow in-place parsing of JSON/XML
 documents or zero-copy serving HTTP clients directly from the OS buffer cache.
 
-As no packages are available it is currently bundled in this repository and
-built statically.
+As no packages are available the MDB library itself is currently bundled in
+this repository and built statically into the module.
+
+
+
+Interface
++++++++++
+
+It is recommended that you also refer to the
+`excellent Doxygen comments in the MDB source code <http://www.openldap.org/devel/gitweb.cgi?p=openldap.git;a=blob;f=libraries/liblmdb/lmdb.h>`_,
+particularly with regard to thread safety.
+
+
+Environment class
+#################
+
+.. autoclass:: lmdb.Environment
+    :members:
+
+
+Transaction class
+#################
+
+.. autoclass:: lmdb.Transaction
+    :members:
+
+
+Database class
+##############
+
+.. autoclass:: lmdb.Database
+    :members:
+
+
+Cursor class
+###########
+
+.. autoclass:: lmdb.Cursor
+    :members:
+
+
+Exceptions
+##########
+
+.. autoclass:: lmdb.Error
+
+

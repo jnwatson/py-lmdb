@@ -1,3 +1,4 @@
 build
 MANIFEST
 dist
+docs/_build
