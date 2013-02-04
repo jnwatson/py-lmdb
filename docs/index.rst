@@ -68,9 +68,10 @@ be nice to have, however fixed mappings interact badly with ASLR at least on OS
 X and will not be supported, and it's really not a useful feature for scripting
 languages anyway.
 
-In future it would be nice to buffers instead of strings to exploit the zero
-copy nature of MDB's design, for example to allow in-place parsing of JSON/XML
-documents or zero-copy serving HTTP clients directly from the OS buffer cache.
+In future it would be nice to return buffers instead of strings to exploit the
+zero copy nature of MDB's design, for example to allow in-place parsing of
+JSON/XML documents or zero-copy serving HTTP clients directly from the OS
+buffer cache.
 
 As no packages are available the MDB library itself is currently bundled in
 this repository and built statically into the module.
@@ -90,6 +91,7 @@ Environment class
 
 .. autoclass:: lmdb.Environment
     :members:
+    :special-members:
 
 
 Transaction class
@@ -97,6 +99,7 @@ Transaction class
 
 .. autoclass:: lmdb.Transaction
     :members:
+    :special-members:
 
 
 Database class
@@ -104,6 +107,7 @@ Database class
 
 .. autoclass:: lmdb.Database
     :members:
+    :special-members:
 
 
 Cursor class
@@ -111,6 +115,7 @@ Cursor class
 
 .. autoclass:: lmdb.Cursor
     :members:
+    :special-members:
 
 
 Exceptions
