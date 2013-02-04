@@ -32,7 +32,7 @@ ext_modules = [
 
 setup(
     name = 'lmdb',
-    version = '0.1',
+    version = '0.2',
     description = "Python wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
