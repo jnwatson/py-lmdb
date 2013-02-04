@@ -181,13 +181,51 @@ cdef class Environment:
     """
     cdef MDB_env *env_
 
-    def __cinit__(self, const char *path, size_t map_size=10485760,
+    def __init__(self, const char *path, size_t map_size=10485760,
             subdir=True, readonly=False, metasync=True,
             sync=True, map_async=False, mode_t mode=0644,
-            create=True):
-        """Create and open an environment."""
+            create=True, int max_readers=126, int max_dbs=0):
+        """
+        Environment(path, map_size=(64Mb), subdir=True, readonly=False,
+                    metasync=True, sync=True, mode=0644, create=True,
+                    max_readers=126, max_dbs=0)
+
+        Create and open an environment.
+
+            path: Location of directory (if subdir=True) or file prefix to
+                store the database.
+            map_size: Maximum size database may grow to; used to size the
+                memory mapping. If database grows larger than map_size, exception
+                will be raised and Environment must be recreated. On 64-bit
+                there is no penalty for making this huge (say 1TB). Must be
+                <2GB on 32-bit.
+            subdir: If True, `path` refers to a subdirectory to store the data
+                and lock files within, otherwise it refers to a filename prefix.
+            readonly: If True, disallow any write operations. Note the lock
+                file is still modified.
+            metasync: If False, never explicitly flush metadata pages to disk.
+                OS will flush at its disgression, or user can flush with
+                Environment.sync().
+            sync: If False, never explicitly fluh data pages to disk. OS will
+                flush at its disgression, or user can flush with
+                Environment.sync(). This optimization means a system crash can
+                corrupt the database or lose the last transactions if buffers
+                are not yet flushed to disk.
+            mode: File creation mode.
+            create: If False, do not create the directory `path` if it is
+                missing.
+            max_readers: Slots to allocate in lock file for read threads;
+                attempts to open the environment by more than this many clients
+                simultaneously will fail. only meaningful for environments that
+                aren't already open.
+            max_dbs: Maximum number of databases available. If 0, assume
+                environment will be used as a single database.
+        """
         _throw("Creating environment", mdb_env_create(&self.env_))
         _throw("Setting map size", mdb_env_set_mapsize(self.env_, map_size))
+        _throw("Setting max readers",
+               mdb_env_set_maxreaders(self.env_, max_readers))
+        _throw("Setting max DBs", mdb_env_set_maxdbs(self.env_, max_dbs))
 
         flags = 0
         if not subdir:
@@ -203,14 +241,49 @@ cdef class Environment:
 
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
-
         _throw(path, mdb_env_open(self.env_, path, flags, mode))
 
     def __dealloc__(self):
         mdb_env_close(self.env_)
 
+    property path:
+        """Directory path or file name prefix where this environment is
+        stored."""
+        def __get__(self):
+            cdef const char *path
+            mdb_env_get_path(self.env_, &path)
+            return path
+
+    property max_readers:
+        """Maximum number of client threads that may read this environment
+        simultaneously."""
+        def __get__(self):
+            cdef unsigned int readers
+            mdb_env_get_maxreaders(self.env_, &readers)
+            return readers
+
+    def sync(self, force=False):
+        """sync(force=False)
+
+        Flush the data buffers to disk.
+
+        Data is always written to disk when #mdb_txn_commit() is called, but
+        the operating system may keep it buffered. MDB always flushes the OS
+        buffers upon commit as well, unless the environment was opened with
+        #MDB_NOSYNC or in part #MDB_NOMETASYNC.
+     
+        @param[in] env An environment handle returned by #mdb_env_create()
+	    @param[in] force If non-zero, force a synchronous flush.
+        
+        Otherwise if the environment has the #MDB_NOSYNC flag set the flushes
+        will be omitted, and with #MDB_MAPASYNC they will be asynchronous.
+        """
+        _throw("Flushing", mdb_env_sync(self.env_, force))
+
     def stat(self):
-        """Return some nice environment statistics as a dict:
+        """stat()
+
+        Return some nice environment statistics as a dict:
             psize: Size of a database page.
             depth: Height of the B-tree.
             branch_pages: Number of internal (non-leaf) pages.
@@ -230,10 +303,17 @@ cdef class Environment:
             "entries": st.ms_entries
         }
 
+    def transaction(self, **kwargs):
+        """transaction(parent=None, readonly=False)
+
+        Shortcut for lmdb.Transaction(self, **kwargs)
+        """
+        return Transaction(self, **kwargs)
+
 
 cdef class Transaction:
     """
-    Structure for a transaction handle.
+    A transaction handle.
 
     All database operations require a transaction handle. Transactions may be
     read-only or read-write.
@@ -243,12 +323,20 @@ cdef class Transaction:
     cdef int running
     cdef int readonly
 
-    cdef _throw_if_aborted(self):
+    cdef _throw(self):
+        """Raise an exception if this transaction is complete."""
         if not self.running:
             raise Error("transaction already aborted or committed")
 
-    def __cinit__(self, Environment env not None, Transaction parent=None,
+    def __init__(self, Environment env not None, Transaction parent=None,
             readonly=False):
+        """Transaction(env, parent=None, readonly=False)
+
+        Start a new transaction.
+            env: Environment the transaction should be on.
+            parent: None, or a parent transaction (see lmdb.h).
+            readonly: Read-only?
+        """
         self.env = env
         self.readonly = readonly
         cdef const char *what
@@ -268,14 +356,31 @@ cdef class Transaction:
             mdb_txn_abort(self.txn_)
 
     def db(self, **kwargs):
+        """db(**kwargs)
+
+        Shorthand for lmdb.Database(self, **kwargs)
+        """
         return Database(self, **kwargs)
 
-    cpdef commit(self):
-        self._throw_if_aborted()
+    def commit(self):
+        """commit()
+
+        Commit the pending transaction.
+        """
+        self._throw()
         try:
             _throw("Committing transaction", mdb_txn_commit(self.txn_))
         finally:
             self.running = 0
+
+    def abort(self):
+        """abort()
+
+        Abort the pending transaction.
+        """
+        self._throw()
+        self.running = 0
+        mdb_txn_abort(self.txn_)
 
 
 cdef class Database:
@@ -284,10 +389,27 @@ cdef class Database:
     """
     cdef Transaction txn
     cdef MDB_dbi dbi_
+    cdef int dropped
 
-    def __cinit__(self, Transaction txn not None, name=None, reverse_key=False,
+    def __init__(self, Transaction txn not None, name=None, reverse_key=False,
             dupsort=False, create=True):
+        """Database(txn, name=None, reverse_key=False, dupsort=False, create=True)
+
+        Get a reference to or create a database within an environment.
+            txn: Transaction.
+            reverse_key: If True, keys are compared from right to left (e.g. DNS
+                names)
+            dupsort: Duplicate keys may be used in the database. (Or, from
+                another perspective, keys may have multiple data items, stored
+                in sorted order.) By default keys must be unique and may have
+                only a single data item.
+            create: If True, create the database if it doesn't exist, otherwise
+                raise an exception.
+
+        The Python module does not yet fully support dupsort.
+        """
         self.txn = txn
+        self.dropped = 0
         cdef const char *c_name = NULL
         if name:
             c_name = name
@@ -302,11 +424,63 @@ cdef class Database:
                mdb_dbi_open(self.txn.txn_, c_name, flags, &self.dbi_))
 
     def __dealloc__(self):
-        if self.txn.running:
+        if self.txn.running and not self.dropped:
             mdb_dbi_close(self.txn.env.env_, self.dbi_)
 
-    def put(self, key, value, dupdata=True, overwrite=True):
-        self.txn._throw_if_aborted()
+    cdef _throw(self):
+        if self.dropped:
+            raise Error("database was dropped.")
+        self.txn._throw()
+
+    def drop(self, delete=True):
+        """drop(delete=True)
+
+        Delete all keys and optionally delete the database itself. Deleting the
+        database causes it to become unavailable, and invalidates existing
+        cursors.
+        """
+        self._throw()
+        mdb_drop(self.txn.txn_, self.dbi_, delete)
+        if delete:
+            self.dropped = 1
+
+    def get(self, key, default=None):
+        """get(key, default=None)
+
+        Fetch the first value matching `key`, otherwise return `default`. A
+        cursor must be used to fetch all values for a key in a `dupsort=True`
+        database.
+        """
+        self._throw()
+        cdef MDB_val key_val
+        cdef MDB_val value_val
+        key_val.mv_size = len(key)
+        key_val.mv_data = <char *>key
+        cdef int rc = mdb_get(self.txn.txn_, self.dbi_, &key_val, &value_val)
+        if rc:
+            if rc == MDB_NOTFOUND:
+                return default
+            _throw("Getting key", rc)
+        return <bytes> (<char *>value_val.mv_data)[:value_val.mv_size]
+
+    def put(self, key, value, dupdata=False, overwrite=True, append=False):
+        """put(key, value, dupdata=False, overwrite=True, append=False)
+
+        Store key/value pairs in the database.
+            key: String key to store.
+            value: String value to store.
+            dupdata: If True and database was opened with dupsort=True, add
+                pair as a duplicate if the given key already exists. Otherwise
+                overwrite any existing matching key.
+            overwrite: If False, do not overwrite any existing matching key.
+            append: If True, append the pair to the end of the database without
+                comparing its order first. Appending a key that is not greater
+                than the highest existing key will cause corruption.
+
+        Returns True if the pair was written or False to indicate the key was
+        already present and override=False.
+        """
+        self._throw()
         cdef MDB_val key_val
         cdef MDB_val value_val
 
@@ -320,39 +494,41 @@ cdef class Database:
             flags |= MDB_NODUPDATA
         if not overwrite:
             flags |= MDB_NOOVERWRITE
+        if append:
+            flags |= MDB_APPEND
 
-        _throw("Setting key", mdb_put(self.txn.txn_, self.dbi_,
-                                      &key_val, &value_val, flags))
-
-    def get(self, key, default=None):
-        self.txn._throw_if_aborted()
-        cdef MDB_val key_val
-        cdef MDB_val value_val
-        key_val.mv_size = len(key)
-        key_val.mv_data = <char *>key
-        cdef int rc = mdb_get(self.txn.txn_, self.dbi_, &key_val, &value_val)
-        if rc:
-            if rc == MDB_NOTFOUND:
-                return default
-            _throw("Getting key", rc)
-        return <bytes> (<char *>value_val.mv_data)[:value_val.mv_size]
+        cdef int rc = mdb_put(self.txn.txn_, self.dbi_,
+                              &key_val, &value_val, flags)
+        if rc == MDB_KEYEXIST:
+            return False
+        _throw("Setting key", rc)
+        return True
 
     def delete(self, key, value=None):
-        self.txn._throw_if_aborted()
+        """delete(key, value=None)
+
+        Delete a key from the database.
+            key: The key to delete.
+            value: If the database was opened with dupsort=True and value is
+                not None, then delete elements matching only this (key, value)
+                pair, otherwise all values for key are deleted.
+
+        Returns True if at least one key was deleted.
+        """
+        self._throw()
         cdef MDB_val key_val
         cdef MDB_val value_val
-        cdef MDB_val *value_val_ptr
+        cdef MDB_val *val_ptr
         key_val.mv_size = len(key)
         key_val.mv_data = <char *>key
         if value is None:
-            value_val_ptr = NULL
+            val_ptr = NULL
         else:
             value_val.mv_size = len(value)
             value_val.mv_data = <char *>value
-            value_val_ptr = &value_val
+            val_ptr = &value_val
 
-        cdef int rc = mdb_del(self.txn.txn_, self.dbi_,
-                              &key_val, value_val_ptr)
+        cdef int rc = mdb_del(self.txn.txn_, self.dbi_, &key_val, val_ptr)
         if rc:
             if rc == MDB_NOTFOUND:
                 return False
@@ -360,12 +536,18 @@ cdef class Database:
         return True
 
     def cursor(self, **kwargs):
+        """cursor(**kwargs)
+
+        Shorthand for lmdb.Cursor(self, **kwargs)
+        """
         return Cursor(self, **kwargs)
 
 
 cdef class Cursor:
     """
     Structure for navigating through a database.
+
+    Cursors by default are positioned on the first element in the database.
     """
     cdef Database db
     cdef Transaction txn
@@ -376,10 +558,17 @@ cdef class Cursor:
     cdef int do_keys_
     cdef int do_values_
 
-    def __cinit__(self, Database db not None, keys=True, values=True):
+    def __init__(self, Database db not None, keys=True, values=True):
+        """Cursor(db, keys=True, values=True)
+
+        Create a new cursor. If both `keys` and `values` are True, the Python
+        iterator protocol applied to this object will yield ``(key, value)``
+        tuples, if only `value` is True then a sequence of values will be
+        generated, otherwise a sequence of keys will be generated.
+        """
         self.db  = db
         self.txn = db.txn
-        self.txn._throw_if_aborted()
+        self.txn._throw()
         self.do_keys_ = keys
         self.do_values_ = values
         # Sentinel indicating iteration has not started.
@@ -400,20 +589,21 @@ cdef class Cursor:
         _throw(what, rc)
 
     cpdef _cursor_get(self, MDB_cursor_op op):
-        self.txn._throw_if_aborted()
+        self.db._throw()
         rc = mdb_cursor_get(self.cursor_, &self.key_, &self.val_, op)
         self._throw_stop("Advancing cursor", rc)
 
     property key:
-        """Returns the current key."""
+        """The current key. Raises an exception if the cursor is invalid."""
         def __get__(self):
-            self.txn._throw_if_aborted()
+            self.db._throw()
             return <bytes> (<char *>self.key_.mv_data)[:self.key_.mv_size]
 
     property value:
-        """Returns the current value."""
+        """Returns the current value. Raises an exception if the cursor is
+        invalid."""
         def __get__(self):
-            self.txn._throw_if_aborted()
+            self.db._throw()
             return <bytes> (<char *>self.val_.mv_data)[:self.val_.mv_size]
 
     cpdef _itervalue(self):
@@ -429,18 +619,30 @@ cdef class Cursor:
         return self
 
     cpdef first(self):
+        """first()
+        
+        Reposition the cursor on the first element in the database."""
         self._cursor_get(MDB_FIRST)
         return self._itervalue()
 
     cpdef last(self):
+        """last()
+        
+        Reposition the cursor on the last element in the database."""
         self._cursor_get(MDB_LAST)
         return self._itervalue()
 
     cpdef prev(self):
+        """prev()
+        
+        Reposition the cursor on the previous element in the database."""
         self._cursor_get(MDB_PREV)
         return self._itervalue()
 
     cpdef next(self):
+        """next()
+        
+        Reposition the cursor on the next element in the database."""
         self._cursor_get(MDB_NEXT)
         return self._itervalue()
 
@@ -449,6 +651,21 @@ cdef class Cursor:
         return self._itervalue()
 
     cpdef delete(self):
+        """delete()
+
+        Delete the current key, and position the cursor on the next element in
+        the database, if any.
+        """
         self._throw_stop("Deleting current key",
                          mdb_cursor_del(self.cursor_, 0))
         self._cursor_get(MDB_GET_CURRENT)
+
+    property count:
+        """Count of duplicates for the current key. Raises an exception if the
+        cursor is invalid."""
+        def __get__(self):
+            self.db._throw()
+            cdef size_t count
+            _throw("Getting duplicate count",
+                   mdb_cursor_count(self.cursor_, &count))
+            return count

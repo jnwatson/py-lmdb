@@ -1,8 +1,9 @@
 lmdb
 ----
 
-Dirty wrapper around the OpenLDAP MDB library. It is not thread-safe,
-documented, or tested particularly heavily, but it already works well.
+Dirty wrapper around the OpenLDAP MDB 'Lightning Database' library. The wrapper
+is not thread-safe, thoroughly documented or tested particularly heavily, but
+it already works well.
 
 More information on MDB can be found at:
 
@@ -13,41 +14,43 @@ More information on MDB can be found at:
 
 MDB is interesting because:
 
-* Like SQLite and LevelDB it is small, transactional, and supports
-  multi-reader single-writer access within a process.
-* Like SQLite but unlike LevelDB, supports multi-reader single-writer
-  within a single host.
+* Like SQLite and LevelDB it is small, transactional, and supports multi-reader
+  single-writer access within a process.
+* Like SQLite but unlike LevelDB, it supports multi-reader single-writer within
+  a host.
 * Like LevelDB but unlike SQLite, it exports an ordered-map interface.
-* Like SQLite but unlike LevelDB, it supports multiple namespaces per
-  database.
+* Like SQLite but unlike LevelDB, it supports multiple namespaces per database.
 * Like SQLite 3.x prior to WAL mode, and most certainly unlike LevelDB, no
-  surprising quantities of background processing or sporadic maintainance
-  must occur in order to continue functioning under heavy write load, nor
-  are writes throttled except by contention.
-* Like SQLite and unlike LevelDB, predictable latency variance and
-  runtime profile (no background threads).
-* Similar to SQLite and unlike LevelDB, modest (nonexistent) RAM
-  requirements to achieve good write performance.
+  surprising quantities of background processing or sporadic maintainance must
+  occur in order to continue functioning under heavy write load, nor are writes
+  throttled except by contention.
+* Like SQLite and unlike LevelDB, predictable latency variance and runtime
+  profile (no background threads).
+* Similar to SQLite and unlike LevelDB, relies exclusively on the OS buffer
+  cache to achieve good performance.
 * Unlike SQLite and LevelDB, it is 32kb of object code and 6kLOC of C.
-* Unlike SQLite and LevelDB, it is exclusively memory mapped and thus
-  limited to 2GB databases on 32bit, however the resulting performance is
+* Unlike SQLite and LevelDB, it is exclusively memory mapped and thus limited
+  to 2GB databases on 32bit (e.g. ARM), however the resulting performance is
   excellent.
+* Unlike SQLite or LevelDB, the code can be read in a single late evening.
+* Library and CPython extension (this package) are 120kb of object code.
 
-MDB is less interesting because:
+
+MDB may be unattractive because:
 
 * Like SQLite but unlike LevelDB, the resulting database is not always
   optimally packed.
-* Its source is #ifdef soup straight out of the 80s.
-* It doesn't waste bytes on useful things like diagnostics.
+* Source is very traditional #ifdef soup.
+* Logging and diagnostics are somewhat sparse.
 
-Some features like duplicate keys and fixed address mappings aren't done yet.
-Duplicate keys would be useful to have, however fixed mappings interact badly
-with ASLR at least on OS X and will not be supported, and it's really not a
-useful feature for scripting language anyway.
+Duplicate keys and fixed address mappings aren't done yet. Duplicate keys would
+be nice to have, however fixed mappings interact badly with ASLR at least on OS
+X and will not be supported, and it's really not a useful feature for scripting
+languages anyway.
 
-In future it would be nice to return buffer objects instead of strings, to
-exploit the zero copy nature of MDB's design, for example to allow in-place
-parsing of JSON/XML documents.
+In future it would be nice to buffers instead of strings to exploit the zero
+copy nature of MDB's design, for example to allow in-place parsing of JSON/XML
+documents or zero-copy serving HTTP clients directly from the OS buffer cache.
 
 As no packages are available it is currently bundled in this repository and
 built statically.
