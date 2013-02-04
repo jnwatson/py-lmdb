@@ -30,14 +30,15 @@ MDB is interesting because:
   requirements to achieve good write performance.
 * Unlike SQLite and LevelDB, it is 32kb of object code and 6kLOC of C.
 * Unlike SQLite and LevelDB, it is exclusively memory mapped and thus
-  limited to 2GB databases on 32bit.
+  limited to 2GB databases on 32bit, however the resulting performance is
+  excellent.
 
-MDB sucks because:
+MDB is less interesting because:
 
 * Like SQLite but unlike LevelDB, the resulting database is not always
   optimally packed.
-* Its source code is #ifdef soup straight out of the 80s.
-* It desn't waste bytes on useful things like diagnostics.
+* Its source is #ifdef soup straight out of the 80s.
+* It doesn't waste bytes on useful things like diagnostics.
 
 Some features like duplicate keys and fixed address mappings aren't done yet.
 Duplicate keys would be useful to have, however fixed mappings interact badly
