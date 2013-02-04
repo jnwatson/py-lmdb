@@ -26,7 +26,7 @@ are available, and type:
 
     pip install lmdb
     # or
-    easy_instal lmdb
+    easy_install lmdb
 
 
 Introduction
