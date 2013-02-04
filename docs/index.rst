@@ -22,7 +22,8 @@ More information on MDB can be found at:
 To install the Python module, ensure a C compiler and `pip` or `easy_install`
 are available, and type:
 
-..
+::
+
     pip install lmdb
     # or
     easy_instal lmdb
