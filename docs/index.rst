@@ -19,6 +19,12 @@ More information on MDB can be found at:
 * `git://git.openldap.org/openldap.git <git://git.openldap.org/openldap.git>`_
   (branch ``mdb.master``)
 
+To install the Python module, ensure a C compiler and `pip` or `easy_install`
+are available, and type:
+
+    pip install lmdb
+    # or
+    easy_instal lmdb
 
 
 Introduction
