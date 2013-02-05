@@ -18,7 +18,9 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+import shutil
 import os
+import tempfile
 import warnings
 
 cdef extern from "sys/stat.h":
@@ -172,8 +174,8 @@ cdef _throw(const char *what, int rc):
         raise Error(what + ": " + mdb_strerror(rc))
 
 
-def connect(path, **kwargs):
-    """connect(path, **kwargs)
+def connect(path=None, **kwargs):
+    """connect(path=None, **kwargs)
 
     Shorthand for ``lmdb.Environment(path, **kwargs)``
     """
@@ -188,20 +190,22 @@ cdef class Environment:
     shared-memory map.
     """
     cdef MDB_env *env_
+    cdef int temp
 
-    def __init__(self, const char *path, size_t map_size=10485760,
+    def __init__(self, path=None, size_t map_size=10485760,
             subdir=True, readonly=False, metasync=True,
             sync=True, map_async=False, mode_t mode=0644,
             create=True, int max_readers=126, int max_dbs=0):
-        """\\__init__(self, path, map_size=(64Mb), subdir=True, readonly=False,
-        metasync=True, sync=True, mode=0644, create=True, max_readers=126,
-        max_dbs=0)
+        """\\__init__(self, path=None, map_size=(64Mb), subdir=True,
+        readonly=False, metasync=True, sync=True, mode=0644, create=True,
+        max_readers=126, max_dbs=0)
 
         Create and open an environment.
 
         ``path``
             Location of directory (if ``subdir=True``) or file prefix to store
-            the database.
+            the database. If unspecified, an Environment will be created in the
+            system TEMP and deleted when closed.
         ``map_size``
             Maximum size database may grow to; used to size the memory mapping.
             If database grows larger than ``map_size``, exception will be
@@ -240,6 +244,13 @@ cdef class Environment:
                mdb_env_set_maxreaders(self.env_, max_readers))
         _throw("Setting max DBs", mdb_env_set_maxdbs(self.env_, max_dbs))
 
+        if path is None:
+            path = tempfile.mkdtemp(prefix='lmdb')
+            self.temp = 1
+            subdir = True
+        if create and subdir and not os.path.exists(path):
+            os.mkdir(path)
+
         flags = 0
         if not subdir:
             flags |= MDB_NOSUBDIR
@@ -252,12 +263,13 @@ cdef class Environment:
         if map_async:
             flags |= MDB_MAPASYNC
 
-        if create and subdir and not os.path.exists(path):
-            os.mkdir(path)
         _throw(path, mdb_env_open(self.env_, path, flags, mode))
 
     def __dealloc__(self):
+        path = self.path
         mdb_env_close(self.env_)
+        if self.temp:
+            shutil.rmtree(path)
 
     property path:
         """Directory path or file name prefix where this environment is
@@ -274,6 +286,14 @@ cdef class Environment:
             cdef unsigned int readers
             mdb_env_get_maxreaders(self.env_, &readers)
             return readers
+
+    def copy(self, path):
+        """copy(path)
+
+        Make a consistent copy of the environment in the given destination
+        directory.
+        """
+        _throw("Copying environment", mdb_env_copy(self.env_, path))
 
     def sync(self, force=False):
         """sync(force=False)
