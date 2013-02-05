@@ -175,7 +175,7 @@ cdef _throw(const char *what, int rc):
 def connect(path, **kwargs):
     """connect(path, **kwargs)
 
-    Shorthand for lmdb.Environment(path, **kwargs)
+    Shorthand for ``lmdb.Environment(path, **kwargs)``
     """
     return Environment(path, **kwargs)
 
@@ -193,41 +193,46 @@ cdef class Environment:
             subdir=True, readonly=False, metasync=True,
             sync=True, map_async=False, mode_t mode=0644,
             create=True, int max_readers=126, int max_dbs=0):
-        """
-        Environment(path, map_size=(64Mb), subdir=True, readonly=False,
-                    metasync=True, sync=True, mode=0644, create=True,
-                    max_readers=126, max_dbs=0)
+        """\\__init__(self, path, map_size=(64Mb), subdir=True, readonly=False,
+        metasync=True, sync=True, mode=0644, create=True, max_readers=126,
+        max_dbs=0)
 
         Create and open an environment.
 
-            path: Location of directory (if subdir=True) or file prefix to
-                store the database.
-            map_size: Maximum size database may grow to; used to size the
-                memory mapping. If database grows larger than map_size, exception
-                will be raised and Environment must be recreated. On 64-bit
-                there is no penalty for making this huge (say 1TB). Must be
-                <2GB on 32-bit.
-            subdir: If True, `path` refers to a subdirectory to store the data
-                and lock files within, otherwise it refers to a filename prefix.
-            readonly: If True, disallow any write operations. Note the lock
-                file is still modified.
-            metasync: If False, never explicitly flush metadata pages to disk.
-                OS will flush at its disgression, or user can flush with
-                Environment.sync().
-            sync: If False, never explicitly fluh data pages to disk. OS will
-                flush at its disgression, or user can flush with
-                Environment.sync(). This optimization means a system crash can
-                corrupt the database or lose the last transactions if buffers
-                are not yet flushed to disk.
-            mode: File creation mode.
-            create: If False, do not create the directory `path` if it is
-                missing.
-            max_readers: Slots to allocate in lock file for read threads;
-                attempts to open the environment by more than this many clients
-                simultaneously will fail. only meaningful for environments that
-                aren't already open.
-            max_dbs: Maximum number of databases available. If 0, assume
-                environment will be used as a single database.
+        ``path``
+            Location of directory (if ``subdir=True``) or file prefix to store
+            the database.
+        ``map_size``
+            Maximum size database may grow to; used to size the memory mapping.
+            If database grows larger than ``map_size``, exception will be
+            raised and Environment must be recreated. On 64-bit there is no
+            penalty for making this huge (say 1TB). Must be <2GB on 32-bit.
+        ``subdir``
+            If True, `path` refers to a subdirectory to store the data and lock
+            files within, otherwise it refers to a filename prefix.
+        ``readonly``
+            If True, disallow any write operations. Note the lock file is still
+            modified.
+        ``metasync``
+            If False, never explicitly flush metadata pages to disk. OS will
+            flush at its disgression, or user can flush with
+            Environment.sync().
+        ``sync``
+            If False, never explicitly fluh data pages to disk. OS will flush
+            at its disgression, or user can flush with ``Environment.sync()``.
+            This optimization means a system crash can corrupt the database or
+            lose the last transactions if buffers are not yet flushed to disk.
+        ``mode``
+            File creation mode.
+        ``create``
+            If False, do not create the directory `path` if it is missing.
+        ``max_readers``
+            Slots to allocate in lock file for read threads; attempts to open
+            the environment by more than this many clients simultaneously will
+            fail. only meaningful for environments that aren't already open.
+        ``max_dbs``
+            Maximum number of databases available. If 0, assume environment
+            will be used as a single database.
         """
         _throw("Creating environment", mdb_env_create(&self.env_))
         _throw("Setting map size", mdb_env_set_mapsize(self.env_, map_size))
@@ -275,16 +280,15 @@ cdef class Environment:
 
         Flush the data buffers to disk.
 
-        Data is always written to disk when #mdb_txn_commit() is called, but
-        the operating system may keep it buffered. MDB always flushes the OS
-        buffers upon commit as well, unless the environment was opened with
-        #MDB_NOSYNC or in part #MDB_NOMETASYNC.
+        Data is always written to disk when ``Transaction.commit()`` is called,
+        but the operating system may keep it buffered. MDB always flushes the
+        OS buffers upon commit as well, unless the environment was opened with
+        ``sync=False`` or ``metasync=False``.
      
-        @param[in] env An environment handle returned by #mdb_env_create()
-	    @param[in] force If non-zero, force a synchronous flush.
-        
-        Otherwise if the environment has the #MDB_NOSYNC flag set the flushes
-        will be omitted, and with #MDB_MAPASYNC they will be asynchronous.
+        ``force``
+            If non-zero, force a synchronous flush. Otherwise if the
+            environment was opened with ``sync=False`` the flushes will be
+            omitted, and with #MDB_MAPASYNC they will be asynchronous.
         """
         _throw("Flushing", mdb_env_sync(self.env_, force))
 
@@ -292,12 +296,20 @@ cdef class Environment:
         """stat()
 
         Return some nice environment statistics as a dict:
-            psize: Size of a database page.
-            depth: Height of the B-tree.
-            branch_pages: Number of internal (non-leaf) pages.
-            leaf_pages: Number of leaf pages.
-            overflow_pages: Number of overflow pages.
-            entries: Number of data items.
+
+        +--------------------+---------------------------------------+
+        | ``psize``          | Size of a database page in bytes.     |
+        +--------------------+---------------------------------------+
+        | ``depth``          | Height of the B-tree.                 |
+        +--------------------+---------------------------------------+
+        | ``branch_pages``   | Number of internal (non-leaf) pages.  |
+        +--------------------+---------------------------------------+
+        | ``leaf_pages``     | Number of leaf pages.                 |
+        +--------------------+---------------------------------------+
+        | ``overflow_pages`` | Number of overflow pages.             |
+        +--------------------+---------------------------------------+
+        | ``entries``        | Number of data items.                 |
+        +--------------------+---------------------------------------+
         """
         cdef MDB_stat st
         _throw("Getting environment statistics",
@@ -314,7 +326,7 @@ cdef class Environment:
     def begin(self, **kwargs):
         """begin(parent=None, readonly=False)
 
-        Shortcut for lmdb.Transaction(self, **kwargs)
+        Shortcut for ``lmdb.Transaction(self, **kwargs)``
         """
         return Transaction(self, **kwargs)
 
@@ -366,7 +378,7 @@ cdef class Transaction:
     def open(self, **kwargs):
         """open(**kwargs)
 
-        Shorthand for lmdb.Database(self, **kwargs)
+        Shorthand for ``lmdb.Database(self, **kwargs)``
         """
         return Database(self, **kwargs)
 
