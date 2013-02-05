@@ -85,6 +85,8 @@ It is recommended that you also refer to the
 `excellent Doxygen comments in the MDB source code <http://www.openldap.org/devel/gitweb.cgi?p=openldap.git;a=blob;f=libraries/liblmdb/lmdb.h>`_,
 particularly with regard to thread safety.
 
+.. autofunction:: lmdb.connect
+
 
 Environment class
 #################

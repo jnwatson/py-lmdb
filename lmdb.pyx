@@ -172,6 +172,14 @@ cdef _throw(const char *what, int rc):
         raise Error(what + ": " + mdb_strerror(rc))
 
 
+def connect(path, **kwargs):
+    """connect(path, **kwargs)
+
+    Shorthand for lmdb.Environment(path, **kwargs)
+    """
+    return Environment(path, **kwargs)
+
+
 cdef class Environment:
     """
     Structure for a database environment.
@@ -303,8 +311,8 @@ cdef class Environment:
             "entries": st.ms_entries
         }
 
-    def transaction(self, **kwargs):
-        """transaction(parent=None, readonly=False)
+    def begin(self, **kwargs):
+        """begin(parent=None, readonly=False)
 
         Shortcut for lmdb.Transaction(self, **kwargs)
         """
@@ -355,8 +363,8 @@ cdef class Transaction:
             self.running = 0
             mdb_txn_abort(self.txn_)
 
-    def db(self, **kwargs):
-        """db(**kwargs)
+    def open(self, **kwargs):
+        """open(**kwargs)
 
         Shorthand for lmdb.Database(self, **kwargs)
         """
