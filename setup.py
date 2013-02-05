@@ -21,20 +21,32 @@
 from distutils.core import setup
 from distutils.extension import Extension
 
+# Install Cython's builder if available, otherwise use the pre-generated C file
+# in the repository.
+try:
+    import Cython.Distutils
+    kwargs = dict(cmdclass={
+        'build_ext': Cython.Distutils.build_ext
+    })
+    mod_filename = 'lmdb.pyx'
+except ImportError:
+    kwargs = {}
+    mod_filename = 'lmdb.c'
 
 ext_modules = [
     Extension("lmdb",
-        sources=["lmdb.c", "lib/mdb.c", "lib/midl.c"],
+        sources=[mod_filename, "lib/mdb.c", "lib/midl.c"],
         include_dirs=['lib'],
     )
 ]
 
 setup(
     name = 'lmdb',
-    version = '0.4',
+    version = '0.5',
     description = "Python wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
-    ext_modules = ext_modules
+    ext_modules = ext_modules,
+    **kwargs
 )
