@@ -1,4 +1,5 @@
 graft .
 graft lib
 include *.c
+include *.pyx
 include *.py
