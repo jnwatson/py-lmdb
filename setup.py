@@ -20,12 +20,11 @@
 
 from distutils.core import setup
 from distutils.extension import Extension
-from Cython.Distutils import build_ext
 
 
 ext_modules = [
     Extension("lmdb",
-        sources=["lmdb.pyx", "lib/mdb.c", "lib/midl.c"],
+        sources=["lmdb.c", "lib/mdb.c", "lib/midl.c"],
         include_dirs=['lib'],
     )
 ]
@@ -37,6 +36,5 @@ setup(
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
-    cmdclass = {'build_ext': build_ext},
     ext_modules = ext_modules
 )
