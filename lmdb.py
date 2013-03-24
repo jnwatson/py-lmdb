@@ -1,4 +1,4 @@
-# Copyright 2013 The Python-lmdb authors, all rights reserved.
+# Copyright 2013 The py-lmdb authors, all rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -421,7 +421,7 @@ class Environment(object):
 
         _throw(path, mdb_env_open(self._env, path, flags, mode))
         with self.begin() as txn:
-            self._default_db = Database(self, txn)
+            self._db = Database(self, txn)
 
     def close(self):
         _invalidate(self)
@@ -536,7 +536,7 @@ class Environment(object):
     def open(self, **kwargs):
         """Shorthand for ``lmdb.Database(self, **kwargs)``"""
         if not kwargs.get('name'):
-            return self._default_db
+            return self._db
         with self.begin() as txn:
             return Database(self, txn, **kwargs)
 
@@ -550,7 +550,7 @@ class Database(object):
     Handle for an individual database in the DB environment.
     """
     def __init__(self, env, txn, name=None, reverse_key=False,
-                 dupsort=False, create=True, buffers=False):
+                 dupsort=False, create=True):
         """Get a reference to or create a database within an environment.
 
             txn: Transaction.
@@ -568,9 +568,6 @@ class Database(object):
         _depend(env, self)
         self.env = env
 
-        self._key = _ffi.new('MDB_val *')
-        self._val = _ffi.new('MDB_val *')
-        self._to_py = _mvbuf if buffers else _mvstr
         flags = 0
         if reverse_key:
             flags |= MDB_REVERSEKEY
@@ -603,7 +600,7 @@ class Transaction(object):
     All database operations require a transaction handle. Transactions may be
     read-only or read-write.
     """
-    def __init__(self, env, parent=None, readonly=False):
+    def __init__(self, env, parent=None, readonly=False, buffers=False):
         """Start a new transaction.
 
             env: Environment the transaction should be on.
@@ -611,7 +608,11 @@ class Transaction(object):
             readonly: Read-only?
         """
         _depend(env, self)
+        self.env = env
         self._env = env._env
+        self._key = _ffi.new('MDB_val *')
+        self._val = _ffi.new('MDB_val *')
+        self._to_py = _mvbuf if buffers else _mvstr
         self.readonly = readonly
         if readonly:
             what = "Beginning read-only transaction"
@@ -653,14 +654,16 @@ class Transaction(object):
         cursor must be used to fetch all values for a key in a `dupsort=True`
         database.
         """
-        rc = mdb_get_helper(self.txn._txn, self._dbi, key, len(key), self._val)
+        rc = mdb_get_helper(self._txn, (db or self.env._db)._dbi,
+                            key, len(key), self._val)
         if rc:
             if rc == MDB_NOTFOUND:
                 return default
             raise Error(repr(key), rc)
         return self._to_py(self._val)
 
-    def put(self, key, value, dupdata=False, overwrite=True, append=False):
+    def put(self, key, value, dupdata=False, overwrite=True, append=False,
+            db=None):
         """Store key/value pairs in the database.
 
             key: String key to store.
@@ -684,15 +687,15 @@ class Transaction(object):
         if append:
             flags |= MDB_APPEND
 
-        rc = mdb_put_helper(self.txn._txn, self._dbi, key, len(key),
-                            value, len(value), flags)
+        rc = mdb_put_helper(self._txn, (db or self.env._db)._dbi,
+                            key, len(key), value, len(value), flags)
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
             raise Error("Setting key", rc)
         return True
 
-    def delete(self, key, value=''):
+    def delete(self, key, value='', db=None):
         """Delete a key from the database.
 
             key: The key to delete.
@@ -702,7 +705,7 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
-        rc = mdb_del_helper(self.txn._txn, self._dbi,
+        rc = mdb_del_helper(self.txn._txn, (db or self.env._db)._dbi,
                             key, len(key), value, len(value))
         if rc:
             if rc == MDB_NOTFOUND:
@@ -710,9 +713,9 @@ class Transaction(object):
             raise Error("Deleting key", rc)
         return True
 
-    def cursor(self, **kwargs):
+    def cursor(self, db=None, **kwargs):
         """Shorthand for ``lmdb.Cursor(self, **kwargs)``"""
-        return Cursor(self, **kwargs)
+        return Cursor(db or self.env._db, self, **kwargs)
 
 
 class Cursor(object):
@@ -721,7 +724,7 @@ class Cursor(object):
 
     Cursors by default are positioned on the first element in the database.
     """
-    def __init__(self, db, txn, buffers=False):
+    def __init__(self, db, txn):
         """Create a new cursor. If both `keys` and `values` are True, the
         Python iterator protocol applied to this object will yield ``(key,
         value)`` tuples, if only `value` is True then a sequence of values will
@@ -731,10 +734,9 @@ class Cursor(object):
         _depend(txn, self)
         self._dbi = db._dbi
         self._txn = txn._txn
-
-        self._to_py = _mvbuf if buffers else _mvstr
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
+        self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
         _throw("Creating cursor",
                mdb_cursor_open(self._txn, self._dbi, curpp))
