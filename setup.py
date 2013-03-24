@@ -18,35 +18,24 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
-from distutils.core import setup
-from distutils.extension import Extension
+from setuptools import setup
 
-# Install Cython's builder if available, otherwise use the pre-generated C file
-# in the repository.
 try:
-    import Cython.Distutils
-    kwargs = dict(cmdclass={
-        'build_ext': Cython.Distutils.build_ext
-    })
-    mod_filename = 'lmdb.pyx'
+    import lmdb
+    ext_modules = [lmdb._ffi.verifier.get_extension()]
 except ImportError:
-    kwargs = {}
-    mod_filename = 'lmdb.c'
-
-ext_modules = [
-    Extension("lmdb",
-        sources=[mod_filename, "lib/mdb.c", "lib/midl.c"],
-        include_dirs=['lib'],
-    )
-]
+    raise
+    ext_modules = []
 
 setup(
     name = 'lmdb',
-    version = '0.5',
-    description = "Python wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
+    version = '0.51',
+    description = "CFFI wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
+    py_modules = ['lmdb'],
     ext_modules = ext_modules,
-    **kwargs
+    install_requires = ['cffi'],
+    zip_safe = False
 )
