@@ -4,6 +4,8 @@ lmdb
 
 `http://github.com/dw/py-lmdb <http://github.com/dw/py-lmdb>`_
 
+.. currentmodule:: lmdb
+
 .. toctree::
     :hidden:
     :maxdepth: 2
@@ -56,13 +58,6 @@ MDB is interesting because:
 * Library and CPython extension (this package) are 120kb of object code.
 
 
-MDB may be unattractive because:
-
-* Like SQLite but unlike LevelDB, the resulting database is not always
-  optimally packed.
-* Source is very traditional #ifdef soup.
-* Logging and diagnostics are somewhat sparse.
-
 Duplicate keys and fixed address mappings aren't done yet. Duplicate keys would
 be nice to have, however fixed mappings interact badly with ASLR at least on OS
 X and will not be supported, and it's really not a useful feature for scripting
@@ -75,7 +70,6 @@ buffer cache.
 
 As no packages are available the MDB library itself is currently bundled in
 this repository and built statically into the module.
-
 
 
 Interface
@@ -115,14 +109,12 @@ Database class
 Cursor class
 ###########
 
+.. currentclass:: lmdb.Cursor
 .. autoclass:: lmdb.Cursor
     :members:
-    :special-members:
 
 
 Exceptions
 ##########
 
 .. autoclass:: lmdb.Error
-
-
