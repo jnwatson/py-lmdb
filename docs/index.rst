@@ -57,7 +57,6 @@ MDB is interesting because:
 * Unlike SQLite and LevelDB, it is exclusively memory mapped and thus limited
   to 2GB databases on 32bit (e.g. ARM), however the resulting performance is
   excellent.
-* Unlike SQLite or LevelDB, the code can be read in a single late evening.
 * Library and CPython extension (this package) are 120kb of object code.
 
 
