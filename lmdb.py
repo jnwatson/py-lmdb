@@ -278,7 +278,7 @@ class Error(Exception):
         Exception.__init__(self, msg)
 
 
-class Invalid(object):
+class Invalid:
     """Dummy class substituted for an instance's type when a dependent object
     (transaction, database, environment) is rendered invalid (deleted, closed,
     dropped).
@@ -286,7 +286,9 @@ class Invalid(object):
     This allows avoiding a set of expensive checks on every single operation
     (e.g. during cursor iteration).
     """
-    def __getattribute__(self, k):
+    def __getattr__(self, k):
+        if k.startswith('_'):
+            raise AttributeError
         raise Error('Invalid state: you closed/deleted/dropped a parent object')
 
 _deps = {}
@@ -296,13 +298,15 @@ def _invalidate_id(parid):
     while pardeps:
         chid, chref = pardeps.popitem()
         obj = chref()
-        if obj:
-            _invalidate_id(chid)
-            obj.__dict__.clear()
-            obj.__type__ = Invalid
+        _invalidate_id(chid)
+        getattr(obj, '__del__', lambda: None)()
+        obj.__dict__.clear()
+        obj.__class__ = Invalid
 
-def _invalidate(obj):
+def _invalidate(obj, kill=False):
     _invalidate_id(id(obj))
+    obj.__dict__.clear()
+    obj.__class__ = Invalid
 
 def _depend(parent, child):
     parid = id(parent)
@@ -339,7 +343,7 @@ def connect(path=None, **kwargs):
 
 
 
-class Environment(object):
+class Environment:
     """
     Structure for a database environment.
 
@@ -400,9 +404,9 @@ class Environment(object):
         _throw("Setting max DBs",
                mdb_env_set_maxdbs(self._env, max_dbs))
 
-        if path is None:
+        self.temp = path is None
+        if self.temp:
             path = tempfile.mkdtemp(prefix='lmdb')
-            self.temp = 1
             subdir = True
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
@@ -425,14 +429,14 @@ class Environment(object):
 
     def close(self):
         _invalidate(self)
-        self.__del__()
+        path = self.path
+        mdb_env_close(self._env)
+        if self.temp:
+            shutil.rmtree(path)
+        _kill(self)
 
     def __del__(self):
-        if self._env:
-            path = self.path
-            mdb_env_close(self._env)
-            if self.temp:
-                shutil.rmtree(path)
+        self.close()
 
     @property
     def path(self):
@@ -545,7 +549,7 @@ class Environment(object):
         return Transaction(self, **kwargs)
 
 
-class Database(object):
+class Database:
     """
     Handle for an individual database in the DB environment.
     """
@@ -581,19 +585,25 @@ class Database(object):
         self._dbi = dbipp[0]
 
     def __del__(self):
+        self.close()
+
+    def close(self):
+        """Close the database handle."""
         _invalidate(self)
         mdb_dbi_close(self.env._env, self._dbi)
+        _kill(self)
 
     def drop(self, delete=True):
         """Delete all keys and optionally delete the database itself. Deleting
         the database causes it to become unavailable, and invalidates existing
         cursors.
         """
-        mdb_drop(self.txn._txn, self._dbi, delete)
         _invalidate(self)
+        mdb_drop(self.txn._txn, self._dbi, delete)
+        _kill(self)
 
 
-class Transaction(object):
+class Transaction:
     """
     A transaction handle.
 
@@ -608,7 +618,7 @@ class Transaction(object):
             readonly: Read-only?
         """
         _depend(env, self)
-        self.env = env
+        self.env = env # hold ref
         self._env = env._env
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
@@ -627,27 +637,33 @@ class Transaction(object):
         self._txn = txnpp[0]
 
     def __del__(self):
-        if self._txn:
-            mdb_txn_abort(self._txn)
-            self._txn = None
+        self.abort()
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.__del__()
+        if self.__class__ is not Invalid:
+            if exc_type:
+                self.abort()
+            else:
+                self.commit()
 
     def commit(self):
         """Commit the pending transaction."""
-        _throw("Committing transaction",
-               mdb_txn_commit(self._txn))
-        self._txn = None
-        _invalidate(self)
+        txn = self._txn
+        _invalidate(self, True)
+        rc = mdb_txn_commit(txn)
+        if rc:
+            _throw("Committing transaction", rc)
 
     def abort(self):
         """Abort the pending transaction."""
-        self.__del__()
-        _invalidate(self)
+        txn = self._txn
+        _invalidate(self, True)
+        rc = mdb_txn_abort(txn)
+        if rc:
+            _throw("Aborting transaction", rc)
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, otherwise return `default`. A
@@ -718,24 +734,80 @@ class Transaction(object):
         return Cursor(db or self.env._db, self, **kwargs)
 
 
-class Cursor(object):
+class Cursor:
     """
     Structure for navigating a database.
 
-    Cursors by default are positioned on the first element in the database.
+        `db`: :py:class:`Database` to navigate.
+
+        `txn`: :py:class:`Transaction` to navigate.
+
+    As a convenience, :py:meth:`Transaction.cursor` can be used to quickly
+    return a cursor:
+
+        ::
+
+            >>> env = lmdb.connect()
+            >>> child_db = lmdb.open(name='child_db')
+            >>> with env.begin() as txn:
+            ...     cursor = txn.cursor()           # Cursor on main database.
+            ...     cursor2 = txn.cursor(child_db)  # Cursor on child database.
+
+    Cursors start in an unpositioned state: if :py:meth:`forward` or
+    :py:meth:`reverse` are used to create an iterator in this state, iteration
+    proceeds from the first or last key respectively. Iterators directly track
+    position using the cursor, meaning strange behavior will result when
+    multiple iterators exist on the same cursor.
+
+        ::
+
+            >>> with env.begin() as txn:
+            ...     for i, (key, value) in enumerate(txn.cursor().reverse()):
+            ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
+
+    Both :py:meth:`forward` and :py:meth:`reverse` accept `keys` and `values`
+    arguments. If both are ``True``, then the value of :py:meth:`item` is
+    yielded on each iteration. If only `keys` is ``True``, :py:meth:`key` is
+    yielded, otherwise only :py:meth:`value` is yielded.
+
+    Prior to iteration, a cursor can be positioned anywhere in the database:
+
+        ::
+
+            >>> with env.begin() as txn:
+            ...     cursor = txn.cursor()
+            ...     if not cursor.set_range('5'): # Position at first key >= '5'.
+            ...         print 'Not found!'
+            ...     else:
+            ...         for key, value in cursor: # Iterate from first key >= '5'.
+            ...             print key, value
+
+    Iteration is not required to navigate, and sometimes results in ugly or
+    inefficient code. In cases where the iteration order is not obvious, or is
+    related to the data being read, use of :py:meth:`set_key`,
+    :py:meth:`set_range`, :py:meth:`key`, :py:meth:`value`, and :py:meth:`item`
+    are often preferable:
+
+        ::
+
+            >>> # Record the path from a child to the root of a tree.
+            >>> path = ['child14123']
+            >>> while path[-1] != 'root':
+            ...     assert cursor.set_key(path[-1]), \\
+            ...         'Tree is broken! Path: %s' % (path,)
+            ...     path.append(cursor.value())
+
     """
     def __init__(self, db, txn):
-        """Create a new cursor. If both `keys` and `values` are True, the
-        Python iterator protocol applied to this object will yield ``(key,
-        value)`` tuples, if only `value` is True then a sequence of values will
-        be generated, otherwise a sequence of keys will be generated.
-        """
         _depend(db, self)
         _depend(txn, self)
+        self.db = db # hold ref
+        self.txn = txn # hold ref
         self._dbi = db._dbi
         self._txn = txn._txn
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
+        self._positioned = False
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
         _throw("Creating cursor",
@@ -743,31 +815,27 @@ class Cursor(object):
         self._cur = curpp[0]
 
     def __del__(self):
-        if self._cur:
-            mdb_cursor_close(self._cur)
+        mdb_cursor_close(self._cur)
 
-    def _get_key(self):
-        """The current key."""
+    def key(self):
+        """Return the current key."""
         return self._to_py(self._key)
-    key = property(_get_key)
 
-    def _get_value(self):
-        """The current value."""
+    def value(self):
+        """Return the current value."""
         return self._to_py(self._val)
-    value = property(_get_value)
 
-    def _get_item(self):
-        """The current (key, value) pair."""
+    def item(self):
+        """Return the current (key, value) pair."""
         return self._to_py(self._key), self._to_py(self._val)
-    item = property(_get_item)
 
     def _iter(self, advance, keys, values):
         if not values:
-            get = self._get_key
+            get = self.key
         elif not keys:
-            get = self._get_value
+            get = self.value
         else:
-            get = self._get_item
+            get = self.item
 
         go = True
         while go:
@@ -775,66 +843,107 @@ class Cursor(object):
             go = advance()
 
     def forward(self, keys=True, values=True):
-        """Return an iterator that repeatedly returns the current key then
-        advances the cursor, until the end of the database is reached."""
+        """Return a forward iterator that yields the current element before
+        advancing the cursor, repeating until the end of the database is
+        reached. As a convenience, :py:class:`Cursor` implements the iterator
+        protocol by automatically returning a forward iterator when invoked:
+
+            ::
+
+                >>> # Equivalent:
+                >>> it = iter(cursor)
+                >>> it = cursor.forward(keys=True, values=True)
+        """
+        if not self._positioned:
+            if not self.first():
+                return iter(xrange(0))
         return self._iter(self.next, keys, values)
     __iter__ = forward
 
     def reverse(self, keys=True, values=True):
         """Return an iterator that repeatedly returns the current key then
         steps the cursor back, until the start of the database is reached."""
+        if not self._positioned:
+            if not self.last():
+                return iter(xrange(0))
         return self._iter(self.prev, keys, values)
 
     def _cursor_get(self, op, k):
         rc = mdb_cursor_get_helper(self._cur, k, len(k),
                                    self._key, self._val, op)
         if rc:
+            self._positioned = False
             if rc == MDB_NOTFOUND:
                 return False
             raise Error("Advancing cursor", rc)
         return True
 
     def first(self):
-        """Reposition the cursor on the first element in the database."""
+        """Move to the first element, returning ``True`` on success or
+        ``False`` if the database is empty."""
+        self._positioned = True
         self._cursor_get(MDB_FIRST, '')
+        return self._positioned
 
     def last(self):
-        """Reposition the cursor on the last element in the database."""
-        self._cursor_get(MDB_LAST, '')
+        """Move to the last element, returning ``True`` on success or ``False``
+        if the database is empty."""
+        self._positioned = True
+        if self._cursor_get(MDB_LAST, ''):
+            self._cursor_get(MDB_PREV, '') # TODO: why is this necessary?
+        return self._positioned
 
     def prev(self):
-        """Move the cursor to the previous element, returning ``True`` on
-        success or ``False`` if there is no previous element."""
-        return self._cursor_get(MDB_PREV, '')
+        """Move to the previous element, returning ``True`` on success or
+        ``False`` if there is no previous element."""
+        if self._positioned:
+            return self._cursor_get(MDB_PREV, '')
+        return self.last()
 
     def next(self):
-        """Move the cursor to the next element, returning ``True`` on success
-        or ``False`` if there is no next element."""
-        return self._cursor_get(MDB_NEXT, '')
+        """Move to the next element, returning ``True`` on success or ``False``
+        if there is no next element."""
+        if self._positioned:
+            return self._cursor_get(MDB_NEXT, '')
+        return self.first()
 
-    def set_key(self, k):
-        """Seek exactly to `k`, returning ``True`` on success or ``False`` if
-        the exact key was not found."""
-        return self._cursor_get(MDB_SET_KEY, k)
+    def set_key(self, key):
+        """Seek exactly to `key`, returning ``True`` on success or ``False`` if
+        the exact key was not found.
 
-    def set_range(self, k):
-        """Seek to the first key greater than or equal to the specified key.
-        Returns ``True`` on success, or ``False`` to indicate key was past end
-        of database."""
-        return self._cursor_get(MDB_SET_RANGE, k)
+        Behaves like :py:meth:`first` if `key` is the empty string.
+        """
+        if not key: # TODO: set_range() throws INVAL on an empty store, whereas
+                    # set_key() returns NOTFOUND
+            return self.first()
+        self._positioned = True
+        return self._cursor_get(MDB_SET_KEY, key)
+
+    def set_range(self, key):
+        """Seek to the first key greater than or equal `key`, returning
+        ``True`` on success, or ``False`` to indicate key was past end of
+        database.
+
+        Behaves like :py:meth:`first` if `key` is the empty string.
+        """
+        if not key: # TODO: set_range() throws INVAL on an empty store, whereas
+                    # set_key() returns NOTFOUND
+            return self.first()
+        self._positioned = True
+        return self._cursor_get(MDB_SET_RANGE, key)
 
     def delete(self):
-        """Delete the current key, and position the cursor on the next element
-        in the database, if any."""
+        """Delete the current element and move to the next element, returning
+        ``True`` on success or ``False`` if the database was empty, or if there
+        are no more elements."""
         rc = mdb_cursor_del(self._cur, 0)
         if rc:
             raise Error("Deleting current key", rc)
         self._cursor_get(MDB_GET_CURRENT)
 
-    @property
     def count(self):
-        """Count of duplicates for the current key. Raises an exception if the
-        cursor is invalid."""
+        """Return the number of duplicates for the current key. This is only
+        meaningful for databases that have `dupdata=True`."""
         countp = _ffi.new('size_t *')
         rc = mdb_cursor_count(self._cur, countp)
         if rc:
