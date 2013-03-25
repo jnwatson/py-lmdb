@@ -109,9 +109,8 @@ Database class
 
 
 Cursor class
-###########
+############
 
-.. currentclass:: lmdb.Cursor
 .. autoclass:: lmdb.Cursor
     :members:
 
