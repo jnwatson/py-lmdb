@@ -192,7 +192,14 @@ typedef unsigned int	MDB_dbi;
 /** @brief Opaque structure for navigating through a database */
 typedef struct MDB_cursor MDB_cursor;
 
-/** @brief Generic structure used for passing keys and data in and out of the database. */
+/** @brief Generic structure used for passing keys and data in and out
+ * of the database.
+ *
+ * Key sizes must be between 1 and the liblmdb build-time constant
+ * #MDB_MAXKEYSIZE inclusive. This currently defaults to 511. The
+ * same applies to data sizes in databases with the #MDB_DUPSORT flag.
+ * Other data items can in theory be from 0 to 0xffffffff bytes long.
+ */
 typedef struct MDB_val {
 	size_t		 mv_size;	/**< size of the data item */
 	void		*mv_data;	/**< address of the data item */
@@ -353,7 +360,11 @@ typedef enum MDB_cursor_op {
 #define MDB_CURSOR_FULL	(-30787)
 	/** Page has not enough space - internal error */
 #define MDB_PAGE_FULL	(-30786)
-#define MDB_LAST_ERRCODE	MDB_PAGE_FULL
+	/** Database contents grew beyond environment mapsize */
+#define MDB_MAP_RESIZED	(-30785)
+	/** Database flags changed or would change */
+#define MDB_INCOMPATIBLE	(-30784)
+#define MDB_LAST_ERRCODE	MDB_INCOMPATIBLE
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -481,7 +492,7 @@ int  mdb_env_create(MDB_env **env);
 	 * <ul>
 	 *	<li>#MDB_VERSION_MISMATCH - the version of the MDB library doesn't match the
 	 *	version that created the database environment.
-	 *	<li>EINVAL - the environment file headers are corrupted.
+	 *	<li>#MDB_INVALID - the environment file headers are corrupted.
 	 *	<li>ENOENT - the directory specified by the path parameter doesn't exist.
 	 *	<li>EACCES - the user didn't have permission to access the environment files.
 	 *	<li>EAGAIN - the environment was locked by another process.
@@ -675,9 +686,12 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	 * errors are:
 	 * <ul>
 	 *	<li>#MDB_PANIC - a fatal error occurred earlier and the environment
-	 *		must be shut down.
-	 *	<li>ENOMEM - out of memory, or a read-only transaction was requested and
+-	 *		must be shut down.
+	 *	<li>#MDB_MAP_RESIZED - another process wrote data beyond this MDB_env's
+	 *		mapsize and the environment must be shut down.
+	 *	<li>#MDB_READERS_FULL - a read-only transaction was requested and
 	 *		the reader lock table is full. See #mdb_env_set_maxreaders().
+	 *	<li>ENOMEM - out of memory.
 	 * </ul>
 	 */
 int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **txn);
@@ -693,7 +707,7 @@ int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 *	<li>ENOSPC - no more disk space.
 	 *	<li>EIO - a low-level I/O error occurred while writing.
-	 *	<li>ENOMEM - the transaction is nested and could not be merged into its parent.
+	 *	<li>ENOMEM - out of memory.
 	 * </ul>
 	 */
 int  mdb_txn_commit(MDB_txn *txn);
@@ -746,10 +760,15 @@ int  mdb_txn_renew(MDB_txn *txn);
 
 	/** @brief Open a database in the environment.
 	 *
-	 * The database handle may be discarded by calling #mdb_dbi_close().  The
+	 * The database handle may be discarded by calling #mdb_dbi_close().
+	 * It denotes the name and parameters of a database, independently of
+	 * whether such a database exists. It will not exist if the transaction
+	 * which created it aborted, nor if another process deleted it. The
 	 * database handle resides in the shared environment, it is not owned
 	 * by the given transaction. Only one thread should call this function;
 	 * it is not mutex-protected in a read-only transaction.
+	 * Preexisting transactions, other than the current transaction and
+	 * any parents, must not use the new handle. Nor must their children.
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
 	 * must be called before opening the environment.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
@@ -793,7 +812,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * <ul>
 	 *	<li>#MDB_NOTFOUND - the specified database doesn't exist in the environment
 	 *		and #MDB_CREATE was not specified.
-	 *	<li>ENFILE - too many databases have been opened. See #mdb_env_set_maxdbs().
+	 *	<li>#MDB_DBS_FULL - too many databases have been opened. See #mdb_env_set_maxdbs().
 	 * </ul>
 	 */
 int  mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *dbi);
@@ -816,7 +835,8 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 *
 	 * This call is not mutex protected. Handles should only be closed by
 	 * a single thread, and only if no other threads are going to reference
-	 * the database handle or one of its cursors any further.
+	 * the database handle or one of its cursors any further. Do not close
+	 * a handle if an existing transaction has modified its database.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */
@@ -978,9 +998,10 @@ int  mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
+	 *	<li>#MDB_MAP_FULL - the database is full, see #mdb_env_set_mapsize().
+	 *	<li>#MDB_TXN_FULL - the transaction has too many dirty pages.
 	 *	<li>EACCES - an attempt was made to write in a read-only transaction.
 	 *	<li>EINVAL - an invalid parameter was specified.
-	 *	<li>ENOMEM - the database is full, see #mdb_env_set_mapsize().
 	 * </ul>
 	 */
 int  mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
@@ -1120,6 +1141,8 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * @return A non-zero error value on failure and 0 on success. Some possible
 	 * errors are:
 	 * <ul>
+	 *	<li>#MDB_MAP_FULL - the database is full, see #mdb_env_set_mapsize().
+	 *	<li>#MDB_TXN_FULL - the transaction has too many dirty pages.
 	 *	<li>EACCES - an attempt was made to modify a read-only database.
 	 *	<li>EINVAL - an invalid parameter was specified.
 	 * </ul>
