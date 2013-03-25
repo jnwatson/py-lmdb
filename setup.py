@@ -18,13 +18,14 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+import sys
 from setuptools import setup
 
 try:
     import lmdb
     ext_modules = [lmdb._ffi.verifier.get_extension()]
 except ImportError:
-    raise
+    print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
     ext_modules = []
 
 setup(
