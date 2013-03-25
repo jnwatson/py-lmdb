@@ -256,16 +256,17 @@ globals().update((k, getattr(_lib, k))
 
 class Error(Exception):
     """Raised when any MDB error occurs."""
-    HINTS = {
-        MDB_MAP_FULL:
-            "Please use a larger Environment(map_size=) parameter",
-        MDB_DBS_FULL:
-            "Please use a larger Environment(max_dbs=) parameter",
-        MDB_READERS_FULL:
-            "Please use a larger Environment(max_readers=) parameter",
-        MDB_TXN_FULL:
-            "Please do less work within your transaction",
-    }
+    def hints(self):
+        return {
+            MDB_MAP_FULL:
+                "Please use a larger Environment(map_size=) parameter",
+            MDB_DBS_FULL:
+                "Please use a larger Environment(max_dbs=) parameter",
+            MDB_READERS_FULL:
+                "Please use a larger Environment(max_readers=) parameter",
+            MDB_TXN_FULL:
+                "Please do less work within your transaction",
+        }
 
     def __init__(self, what, code=0):
         self.what = what
@@ -274,8 +275,9 @@ class Error(Exception):
         msg = what
         if code:
             msg = '%s: %s' % (what, self.reason)
-            if code in self.HINTS:
-                msg += ' (%s)' % (self.HINTS[code],)
+            hint = self.hints().get(code)
+            if hint:
+                msg += ' (%s)' % (hint,)
         Exception.__init__(self, msg)
 
 
