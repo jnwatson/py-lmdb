@@ -177,6 +177,16 @@ _lib = _ffi.verify('''
     #include <sys/stat.h>
     #include "lmdb.h"
 
+    #pragma GCC visibility push(hidden)
+    #include "mdb.c"
+    #include "midl.c"
+    #pragma GCC visibility pop
+
+    #ifdef PyMODINIT_FUNC
+    #undef PyMODINIT_FUNC
+    #endif
+    #define PyMODINIT_FUNC __attribute__ ((visibility ("default"))) void
+
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
     static int mdb_get_helper(MDB_txn *txn, MDB_dbi dbi,
@@ -224,8 +234,9 @@ _lib = _ffi.verify('''
         return rc;
     }
 ''',
-    extra_compile_args=['-Wno-shorten-64-to-32'],
-    sources=['lib/mdb.c', 'lib/midl.c'])
+    ext_package='lmdb',
+    extra_compile_args=['-Wno-shorten-64-to-32', '-Ilib']
+)
 
 globals().update((k, getattr(_lib, k))
                  for k in dir(_lib) if k[:4].upper().startswith('MDB_'))
