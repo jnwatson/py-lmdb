@@ -22,8 +22,8 @@ import sys
 from setuptools import setup
 
 try:
-    import lmdb
-    ext_modules = [lmdb._ffi.verifier.get_extension()]
+    import lmdb.cffi
+    ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
 except ImportError:
     print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
     ext_modules = []
