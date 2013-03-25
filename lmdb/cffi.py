@@ -460,7 +460,6 @@ class Environment:
     def __del__(self):
         self.close()
 
-    @property
     def path(self):
         """Directory path or file name prefix where this environment is
         stored."""
@@ -468,10 +467,9 @@ class Environment:
         mdb_env_get_path(self._env, path)
         return _ffi.string(path[0])
 
-    @property
     def max_readers(self):
-        """Maximum number of client threads that may read this environment
-        simultaneously."""
+        """Return the maximum number of client threads that may read this
+        environment simultaneously."""
         readers = _ffi.new('unsigned int *')
         mdb_env_get_maxreaders(self._env, readers)
         return readers[0]
