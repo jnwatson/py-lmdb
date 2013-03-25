@@ -36,6 +36,7 @@ setup(
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
     packages = ['lmdb'],
+    ext_package = 'lmdb',
     ext_modules = ext_modules,
     install_requires = ['cffi'],
     zip_safe = False
