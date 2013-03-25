@@ -11,8 +11,11 @@ lmdb
     :maxdepth: 2
 
 This is a quick wrapper around the OpenLDAP MDB 'Lightning Database' library.
-The wrapper is not yet thread-safe, thoroughly documented or tested
-particularly heavily, but it already works well.
+The wrapper is not yet thoroughly documented or heavily tested, but it already
+works well.
+
+Since it uses the `cffi <http://cffi.readthedocs.org/en/>`_ module to wrap MDB,
+py-lmdb is automatically compatible with both CPython and PyPy.
 
 More information on MDB can be found at:
 
