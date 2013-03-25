@@ -70,7 +70,7 @@ _ffi.cdef('''
 
     struct MDB_val {
         size_t mv_size;
-        char *mv_data;
+        void *mv_data;
         ...;
     };
     typedef struct MDB_val MDB_val;
@@ -247,6 +247,7 @@ _lib = _ffi.verify('''
         return rc;
     }
 ''',
+    extra_compile_args=['-Wno-shorten-64-to-32'],
     sources=['lib/mdb.c', 'lib/midl.c'])
 
 globals().update((k, getattr(_lib, k))
@@ -337,6 +338,9 @@ def _mvset(mv, s):
     mv.mv_size = len(s)
     return buf
 
+def _mvzero(mv):
+    mv.mv_size = 0
+
 def connect(path=None, **kwargs):
     """Shorthand for ``lmdb.Environment(path, **kwargs)``"""
     return Environment(path, **kwargs)
@@ -345,52 +349,68 @@ def connect(path=None, **kwargs):
 
 class Environment:
     """
-    Structure for a database environment.
+    Structure for a database environment. An environment may contain multiple
+    databases, all residing in the same shared-memory map and underlying disk
+    file.
+    
+    To write to the environment a :py:class:`Transaction` must be created. One
+    simultaneous write transaction is allowed, however there is no limit on the
+    number of read transactions even when a write transaction exists. Due to
+    this, write transactions should be kept as short as possible.
 
-    A DB environment supports multiple databases, all residing in the same
-    shared-memory map.
+        `path`:
+            Location of directory (if `subdir=True`) or file prefix to store
+            the database. If unspecified, the environment will be created in
+            the system ``TEMP`` and deleted when closed.
+
+        `map_size`:
+            Maximum size database may grow to; used to size the memory mapping.
+            If database grows larger than ``map_size``, an exception will be
+            raised and the user must close and reopen :py:class:`Environment`.
+            On 64-bit there is no penalty for making this huge (say 1TB). Must
+            be <2GB on 32-bit.
+
+            *Note*: **the default map size is set low to encourage a crash**,
+            so users can figure out a good value before learning about this
+            option too late.
+
+        `subdir`:
+            If ``True``, `path` refers to a subdirectory to store the data and
+            lock files within, otherwise it refers to a filename prefix.
+
+        `readonly`:
+            If ``True``, disallow any write operations. Note the lock file is
+            still modified.
+
+        `metasync`:
+            If ``False``, never explicitly flush metadata pages to disk. OS
+            will flush at its disgression, or user can flush with
+            :py:meth:`sync`.
+
+        `sync`
+            If ``False``, never explicitly flush data pages to disk. OS will
+            flush at its disgression, or user can flush with :py:meth:`sync`.
+            This optimization means a system crash can corrupt the database or
+            lose the last transactions if buffers are not yet flushed to disk.
+
+        `mode`:
+            File creation mode.
+
+        `create`:
+            If ``False``, do not create the directory `path` if it is missing.
+
+        `max_readers`:
+            Slots to allocate in lock file for read threads; attempts to open
+            the environment by more than this many clients simultaneously will
+            fail. only meaningful for environments that aren't already open.
+
+        `max_dbs`:
+            Maximum number of databases available. If 0, assume environment
+            will be used as a single database.
     """
     def __init__(self, path=None, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=0644, create=True, max_readers=126, max_dbs=0):
-        """Create and open an environment.
-
-        ``path``
-            Location of directory (if ``subdir=True``) or file prefix to store
-            the database. If unspecified, an Environment will be created in the
-            system TEMP and deleted when closed.
-        ``map_size``
-            Maximum size database may grow to; used to size the memory mapping.
-            If database grows larger than ``map_size``, exception will be
-            raised and Environment must be recreated. On 64-bit there is no
-            penalty for making this huge (say 1TB). Must be <2GB on 32-bit.
-        ``subdir``
-            If True, `path` refers to a subdirectory to store the data and lock
-            files within, otherwise it refers to a filename prefix.
-        ``readonly``
-            If True, disallow any write operations. Note the lock file is still
-            modified.
-        ``metasync``
-            If False, never explicitly flush metadata pages to disk. OS will
-            flush at its disgression, or user can flush with
-            Environment.sync().
-        ``sync``
-            If False, never explicitly fluh data pages to disk. OS will flush
-            at its disgression, or user can flush with ``Environment.sync()``.
-            This optimization means a system crash can corrupt the database or
-            lose the last transactions if buffers are not yet flushed to disk.
-        ``mode``
-            File creation mode.
-        ``create``
-            If False, do not create the directory `path` if it is missing.
-        ``max_readers``
-            Slots to allocate in lock file for read threads; attempts to open
-            the environment by more than this many clients simultaneously will
-            fail. only meaningful for environments that aren't already open.
-        ``max_dbs``
-            Maximum number of databases available. If 0, assume environment
-            will be used as a single database.
-        """
         envpp = _ffi.new('MDB_env **')
 
         _throw("Creating environment",
@@ -551,24 +571,28 @@ class Environment:
 
 class Database:
     """
-    Handle for an individual database in the DB environment.
+    Get a reference to or create a database within an environment.
+
+        `txn`:
+            Transaction used to create the database if it does not exist.
+
+        `reverse_key`:
+            If ``True``, keys are compared from right to left (e.g. DNS names).
+
+        `dupsort`:
+            Duplicate keys may be used in the database. (Or, from another
+            perspective, keys may have multiple data items, stored in sorted
+            order.) By default keys must be unique and may have only a single
+            data item.
+
+            **py-lmdb** does not yet fully support dupsort.
+
+        `create`:
+            If ``True``, create the database if it doesn't exist, otherwise
+            raise an exception.
     """
     def __init__(self, env, txn, name=None, reverse_key=False,
                  dupsort=False, create=True):
-        """Get a reference to or create a database within an environment.
-
-            txn: Transaction.
-            reverse_key: If True, keys are compared from right to left (e.g. DNS
-                names)
-            dupsort: Duplicate keys may be used in the database. (Or, from
-                another perspective, keys may have multiple data items, stored
-                in sorted order.) By default keys must be unique and may have
-                only a single data item.
-            create: If True, create the database if it doesn't exist, otherwise
-                raise an exception.
-
-        The Python module does not yet fully support dupsort.
-        """
         _depend(env, self)
         self.env = env
 
@@ -609,14 +633,19 @@ class Transaction:
 
     All database operations require a transaction handle. Transactions may be
     read-only or read-write.
+
+    Start a new transaction.
+
+        `env`:
+            Environment the transaction should be on.
+
+        `parent`:
+            ``None``, or a parent transaction (see lmdb.h).
+
+        `readonly`:
+            Read-only?
     """
     def __init__(self, env, parent=None, readonly=False, buffers=False):
-        """Start a new transaction.
-
-            env: Environment the transaction should be on.
-            parent: None, or a parent transaction (see lmdb.h).
-            readonly: Read-only?
-        """
         _depend(env, self)
         self.env = env # hold ref
         self._env = env._env
@@ -680,20 +709,27 @@ class Transaction:
 
     def put(self, key, value, dupdata=False, overwrite=True, append=False,
             db=None):
-        """Store key/value pairs in the database.
+        """Store a record, returning ``True`` if it was written, or ``False``
+        to indicate the key was already present and `override=False`.
 
-            key: String key to store.
-            value: String value to store.
-            dupdata: If True and database was opened with dupsort=True, add
+            `key`:
+                String key to store.
+
+            `value`:
+                String value to store.
+
+            `dupdata`:
+                If ``True`` and database was opened with `dupsort=True`, add
                 pair as a duplicate if the given key already exists. Otherwise
                 overwrite any existing matching key.
-            overwrite: If False, do not overwrite any existing matching key.
-            append: If True, append the pair to the end of the database without
+
+            `overwrite`:
+                If ``False``, do not overwrite any existing matching key.
+
+            `append`:
+                If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will cause corruption.
-
-        Returns True if the pair was written or False to indicate the key was
-        already present and override=False.
         """
         flags = 0
         if not dupdata:
@@ -714,10 +750,13 @@ class Transaction:
     def delete(self, key, value='', db=None):
         """Delete a key from the database.
 
-            key: The key to delete.
-            value: If the database was opened with dupsort=True and value is
-                not the empty string, then delete elements matching only this
-                (key, value) pair, otherwise all values for key are deleted.
+            `key`:
+                The key to delete.
+
+            value:
+                If the database was opened with dupsort=True and value is not
+                the empty string, then delete elements matching only this
+                `(key, value)` pair, otherwise all values for key are deleted.
 
         Returns True if at least one key was deleted.
         """
@@ -738,9 +777,11 @@ class Cursor:
     """
     Structure for navigating a database.
 
-        `db`: :py:class:`Database` to navigate.
+        `db`:
+            :py:class:`Database` to navigate.
 
-        `txn`: :py:class:`Transaction` to navigate.
+        `txn`:
+            :py:class:`Transaction` to navigate.
 
     As a convenience, :py:meth:`Transaction.cursor` can be used to quickly
     return a cursor:
@@ -826,7 +867,7 @@ class Cursor:
         return self._to_py(self._val)
 
     def item(self):
-        """Return the current (key, value) pair."""
+        """Return the current `(key, value)` pair."""
         return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, advance, keys, values):
@@ -844,7 +885,7 @@ class Cursor:
 
     def forward(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
-        advancing the cursor, repeating until the end of the database is
+        calling :py:meth:`next`, repeating until the end of the database is
         reached. As a convenience, :py:class:`Cursor` implements the iterator
         protocol by automatically returning a forward iterator when invoked:
 
@@ -861,8 +902,8 @@ class Cursor:
     __iter__ = forward
 
     def reverse(self, keys=True, values=True):
-        """Return an iterator that repeatedly returns the current key then
-        steps the cursor back, until the start of the database is reached."""
+        """Return a reverse iterator that yields the current element before
+        calling :py:meth:`prev`, until the start of the database is reached."""
         if not self._positioned:
             if not self.last():
                 return iter(xrange(0))
@@ -873,6 +914,8 @@ class Cursor:
                                    self._key, self._val, op)
         if rc:
             self._positioned = False
+            self._key.mv_size = 0
+            self._val.mv_size = 0
             if rc == MDB_NOTFOUND:
                 return False
             raise Error("Advancing cursor", rc)
@@ -936,10 +979,14 @@ class Cursor:
         """Delete the current element and move to the next element, returning
         ``True`` on success or ``False`` if the database was empty, or if there
         are no more elements."""
+        if not self._positioned:
+            return False
         rc = mdb_cursor_del(self._cur, 0)
         if rc:
             raise Error("Deleting current key", rc)
-        self._cursor_get(MDB_GET_CURRENT)
+        self._cursor_get(MDB_GET_CURRENT, '')
+        print 'after delete item is now', self.item()
+        return True
 
     def count(self):
         """Return the number of duplicates for the current key. This is only

@@ -85,6 +85,11 @@ class CursorTest(unittest.TestCase):
         self.txn = self.env.begin()
         self.c = self.txn.cursor()
 
+    def testKeyValueItemEmpty(self):
+        eq('', self.c.key())
+        eq('', self.c.value())
+        eq(('', ''), self.c.item())
+
     def testFirstLastEmpty(self):
         eq(False, self.c.first())
         eq(False, self.c.last())
@@ -92,12 +97,12 @@ class CursorTest(unittest.TestCase):
     def testFirstFilled(self):
         putData(self.txn)
         eq(True, self.c.first())
-        eq(ITEMS[0], self.c.item)
+        eq(ITEMS[0], self.c.item())
 
     def testLastFilled(self):
         putData(self.txn)
         eq(True, self.c.last())
-        eq(ITEMS[-1], self.c.item)
+        eq(ITEMS[-1], self.c.item())
 
     def testSetKey(self):
         eq(False, self.c.set_key('missing'))
@@ -107,6 +112,39 @@ class CursorTest(unittest.TestCase):
 
     def testSetRange(self):
         eq(False, self.c.set_range('x'))
+        putData(self.txn)
+        eq(False, self.c.set_range('x'))
+        eq(True, self.c.set_range('a'))
+        eq('a', self.c.key())
+        eq(True, self.c.set_range('ba'))
+        eq('baa', self.c.key())
+
+    def testDeleteEmpty(self):
+        eq(False, self.c.delete())
+
+    def testDeleteFirst(self):
+        putData(self.txn)
+        eq(False, self.c.delete())
+        self.c.first()
+        eq(('a', ''), self.c.item())
+        eq(True, self.c.delete())
+        eq(('b', ''), self.c.item())
+        eq(True, self.c.delete())
+        eq(('baa', ''), self.c.item())
+        eq(True, self.c.delete())
+        eq(('d', ''), self.c.item())
+        eq(True, self.c.delete())
+        eq(('', ''), self.c.item())
+        eq(False, self.c.delete())
+        eq(('', ''), self.c.item())
+
+    def testDeleteLast(self):
+        assert 0,'crash'
+        putData(self.txn)
+        eq(True, self.c.last())
+        eq(('d', ''), self.c.item())
+        eq(True, self.c.delete())
+        eq(False, self.c.delete())
 
 
 class IteratorTest(unittest.TestCase):
