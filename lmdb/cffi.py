@@ -173,11 +173,6 @@ _lib = _ffi.verify('''
     #include <sys/stat.h>
     #include "lmdb.h"
 
-    //#pragma GCC visibility push(hidden)
-    #include "mdb.c"
-    #include "midl.c"
-    //#pragma GCC visibility pop
-
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
     static int pymdb_get(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
@@ -229,12 +224,12 @@ _lib = _ffi.verify('''
     }
 ''',
     ext_package='lmdb',
+    sources=['lib/mdb.c', 'lib/midl.c'],
     extra_compile_args=['-Wno-shorten-64-to-32', '-Ilib']
 )
 
 globals().update((k, getattr(_lib, k))
                  for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
-
 
 class Error(Exception):
     """Raised when any MDB error occurs."""
