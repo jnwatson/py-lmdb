@@ -10,8 +10,8 @@ lmdb
     :hidden:
     :maxdepth: 2
 
-This is a quick wrapper around the OpenLDAP MDB 'Lightning Database' library.
-The wrapper is not yet thoroughly documented or heavily tested, but it already
+This is a wrapper around the OpenLDAP MDB 'Lightning Database' library. The
+wrapper is not yet thoroughly documented or heavily tested, but it already
 works well.
 
 Since it uses the `cffi <http://cffi.readthedocs.org/en/>`_ module to wrap MDB,
@@ -89,7 +89,6 @@ Environment class
 
 .. autoclass:: lmdb.Environment
     :members:
-    :special-members:
 
 
 Transaction class
@@ -97,7 +96,6 @@ Transaction class
 
 .. autoclass:: lmdb.Transaction
     :members:
-    :special-members:
 
 
 Database class
@@ -105,7 +103,6 @@ Database class
 
 .. autoclass:: lmdb.Database
     :members:
-    :special-members:
 
 
 Cursor class

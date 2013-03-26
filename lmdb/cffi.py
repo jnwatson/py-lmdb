@@ -1,20 +1,20 @@
 # Copyright 2013 The py-lmdb authors, all rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
 # Public License.
-# 
+#
 # A copy of this license is available in the file LICENSE in the
 # top-level directory of the distribution or, alternatively, at
 # <http://www.OpenLDAP.org/license.html>.
-# 
+#
 # OpenLDAP is a registered trademark of the OpenLDAP Foundation.
-# 
+#
 # Individual files and/or contributed packages may be copyright by
 # other parties and/or subject to additional restrictions.
-# 
+#
 # This work also contains materials derived from public sources.
-# 
+#
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
@@ -272,6 +272,8 @@ class Error(Exception):
 
 
 def _kill_dependents(parent):
+    """Notify all dependents of `parent` that `parent` is about to become
+    invalid."""
     deps = parent._deps
     while deps:
         chid, chref = deps.popitem()
@@ -286,20 +288,25 @@ class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     def __nonzero__(self):
         return 0
     def __repr__(self):
-        return ("<This object made use of a resource that was deleted or "
-                "closed>")
+        return "<This used a resource that was deleted or closed>"
 _invalid = Some_LMDB_Resource_That_Was_Deleted_Or_Closed()
 
 def _depend(parent, child):
+    """Mark `child` as dependent on `parent`, so its `_invalidate()` method
+    will be called before the resource associated with `parent` is
+    destroyed."""
     parent._deps[id(child)] = weakref.ref(child)
 
 def _undepend(parent, child):
+    """Clean up `parent`'s dependency dict by removing `child` from it."""
     parent._deps.pop(id(child), None)
 
 def _mvbuf(mv):
+    """Convert a MDB_val cdata to a cffi buffer object."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)
 
 def _mvstr(mv):
+    """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
 def connect(path=None, **kwargs):
@@ -312,7 +319,7 @@ class Environment(object):
     Structure for a database environment. An environment may contain multiple
     databases, all residing in the same shared-memory map and underlying disk
     file.
-    
+
     To write to the environment a :py:class:`Transaction` must be created. One
     simultaneous write transaction is allowed, however there is no limit on the
     number of read transactions even when a write transaction exists. Due to
@@ -368,7 +375,7 @@ class Environment(object):
             Maximum number of databases available. If 0, assume environment
             will be used as a single database.
     """
-    def __init__(self, path=None, map_size=10485760, subdir=True,
+    def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=0644, create=True, max_readers=126, max_dbs=0):
         envpp = _ffi.new('MDB_env **')
@@ -391,10 +398,6 @@ class Environment(object):
         if rc:
             raise Error("Setting max DBs", rc)
 
-        self.temp = path is None
-        if self.temp:
-            path = tempfile.mkdtemp(prefix='lmdb')
-            subdir = True
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
 
@@ -454,7 +457,7 @@ class Environment(object):
         but the operating system may keep it buffered. MDB always flushes the
         OS buffers upon commit as well, unless the environment was opened with
         ``sync=False`` or ``metasync=False``.
-     
+
         ``force``
             If non-zero, force a synchronous flush. Otherwise if the
             environment was opened with ``sync=False`` the flushes will be
@@ -526,7 +529,11 @@ class Environment(object):
         }
 
     def open(self, **kwargs):
-        """Shorthand for ``lmdb.Database(self, **kwargs)``"""
+        """Create or open a database *inside a write transaction*. This cannot
+        be called from within an existing write transaction. Parameters are as
+        for :py:class:`Database` constructor.
+
+        As a special case, the main database is always open."""
         if not kwargs.get('name'):
             return self._db
         with self.begin() as txn:
@@ -540,6 +547,26 @@ class Environment(object):
 class Database(object):
     """
     Get a reference to or create a database within an environment.
+
+    The database handle may be discarded by calling :py:meth:`close`. A newly
+    created database will not exist if the transaction that created it aborted,
+    nor if another process deleted it. **The handle resides in the shared
+    environment, it is not owned by the current transaction or process**. Only
+    one thread should call this function; it is not mutex-protected in a
+    read-only transaction.
+
+    Preexisting transactions, other than the current transaction and any
+    parents, must not use the new handle. Nor must their children.
+
+        `env`:
+            :py:class:`Environment` the database will be opened or created in.
+
+        `name`:
+            Database name. If ``None``, indicates the main database should be
+            opened, otherwise indicates a sub-database should be created
+            **inside the main database**. In other words, **a key representing
+            the database will be visible in the main database, and the database
+            name cannot conflict with any existing key**
 
         `txn`:
             Transaction used to create the database if it does not exist.
@@ -576,21 +603,30 @@ class Database(object):
         self._dbi = None
         rc = mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
         if rc:
-            raise Error("Opening database", rc)
+            raise Error("Opening database %r" % name, rc)
         self._dbi = dbipp[0]
 
     def _invalidate(self):
-        self._dbi = _invalid
+        pass
 
     def __del__(self):
-        self.close()
         _undepend(self.env, self)
 
     def close(self):
-        """Close the database handle."""
+        """Close the database handle.
+
+        **Warning**: closing the handle closes it for all processes and threads
+        with the database open.
+
+        This call is not mutex protected. Handles should only be closed by a
+        single thread, and only if no other threads are going to reference the
+        database handle or one of its cursors any further. Do not close a
+        handle if an existing transaction has modified its database.
+        """
         if self._dbi:
             _kill_dependents(self)
             mdb_dbi_close(self.env._env, self._dbi)
+            self._dbi = _invalid
 
     def drop(self, delete=True):
         """Delete all keys and optionally delete the database itself. Deleting
@@ -608,10 +644,12 @@ class Transaction(object):
     """
     A transaction handle.
 
-    All database operations require a transaction handle. Transactions may be
-    read-only or read-write.
+    All operations require a transaction handle, transactions may be read-only
+    or read-write. Transactions may not span threads; a transaction must only
+    be used by a single thread. A thread may only have a single transaction.
 
-    Start a new transaction.
+    Cursors may not span transactions; each cursor must be opened and closed
+    within a single transaction.
 
         `env`:
             Environment the transaction should be on.
@@ -648,8 +686,8 @@ class Transaction(object):
         self._txn = txnpp[0]
 
     def _invalidate(self):
+        self.abort()
         self._env = _invalid
-        self._txn = _invalid
 
     def __del__(self):
         self.abort()
@@ -846,6 +884,8 @@ class Cursor(object):
         self._cur = curpp[0]
 
     def _invalidate(self):
+        if self._cur:
+            mdb_cursor_close(self._cur)
         self._cur = _invalid
         self._dbi = _invalid
         self._txn = _invalid

@@ -31,21 +31,26 @@ def assertCrash(fn, *args, **kwargs):
         return
     assert 0, '%r(%r, %r) did not crash as expected' % (fn, args, kwargs)
 
-def make_env():
-    if os.path.exists(DB_PATH):
+
+class EnvMixin:
+    def setUp(self):
+        if os.path.exists(DB_PATH):
+            shutil.rmtree(DB_PATH)
+        self.env = lmdb.connect(DB_PATH, max_dbs=10)
+
+    def tearDown(self):
+        self.env.close()
         shutil.rmtree(DB_PATH)
-    return lmdb.connect(DB_PATH, max_dbs=10)
 
 
-class SmashinateTestCase(unittest.TestCase):
+class CrashTest(EnvMixin, unittest.TestCase):
     # Various efforts to cause segfaults.
 
     def setUp(self):
-        self.env = make_env()
+        EnvMixin.setUp(self)
         with self.env.begin() as txn:
             txn.put('dave', '')
             txn.put('dave2', '')
-            txn.commit()
 
     def testCloseWithTxn(self):
         txn = self.env.begin()
@@ -54,10 +59,10 @@ class SmashinateTestCase(unittest.TestCase):
 
     def testDoubleClose(self):
         self.env.close()
-        assertCrash(lambda: self.env.close())
+        self.env.close()
 
     def testDbDoubleClose(self):
-        db = self.env.open(name='dave')
+        db = self.env.open(name='dave3')
         db.close()
         db.close()
 
@@ -67,10 +72,17 @@ class SmashinateTestCase(unittest.TestCase):
         assertCrash(lambda: list(it))
 
     def testDbCloseActiveIter(self):
-        db = self.env.open(name='dave')
+        db = self.env.open(name='dave3')
         with self.env.begin() as txn:
+            txn.put('a', 'b', db=db)
             it = txn.cursor(db=db).forward()
         assertCrash(lambda: list(it))
+
+
+class LeakTest(EnvMixin, unittest.TestCase):
+    # Various efforts to cause Python-level leaks.
+    pass
+
 
 
 KEYS = 'a', 'b', 'baa', 'd'
@@ -83,9 +95,9 @@ def putData(t, db=None):
         t.put(k, v, db=db)
 
 
-class CursorTest(unittest.TestCase):
+class CursorTest(EnvMixin, unittest.TestCase):
     def setUp(self):
-        self.env = make_env()
+        EnvMixin.setUp(self)
         self.txn = self.env.begin()
         self.c = self.txn.cursor()
 
@@ -143,7 +155,7 @@ class CursorTest(unittest.TestCase):
         eq(('', ''), self.c.item())
 
     def testDeleteLast(self):
-        assert 0,'crash'
+        assert 0, 'causes crash'
         putData(self.txn)
         eq(True, self.c.last())
         eq(('d', ''), self.c.item())
@@ -160,9 +172,9 @@ class CursorTest(unittest.TestCase):
     def testPut(self):
         pass
 
-class IteratorTest(unittest.TestCase):
+class IteratorTest(EnvMixin, unittest.TestCase):
     def setUp(self):
-        self.env = make_env()
+        EnvMixin.setUp(self)
         self.txn = self.env.begin()
         self.c = self.txn.cursor()
 
