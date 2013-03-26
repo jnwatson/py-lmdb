@@ -24,6 +24,13 @@ lt = make_asserter(operator.lt, '<')
 eq = make_asserter(operator.eq, '==')
 le = make_asserter(operator.le, '<=')
 
+def assertCrash(fn, *args, **kwargs):
+    try:
+        fn(*args, **kwargs)
+    except (TypeError, lmdb.Error):
+        return
+    assert 0, '%r(%r, %r) did not crash as expected' % (fn, args, kwargs)
+
 def make_env():
     if os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH)
@@ -40,17 +47,14 @@ class SmashinateTestCase(unittest.TestCase):
             txn.put('dave2', '')
             txn.commit()
 
-    def isInvalid(self, fn, *args, **kwargs):
-        self.assertRaises(lmdb.Error, fn, *args, **kwargs)
-
     def testCloseWithTxn(self):
         txn = self.env.begin()
         self.env.close()
-        self.isInvalid(lambda: list(txn.cursor()))
+        assertCrash(lambda: list(txn.cursor()))
 
     def testDoubleClose(self):
         self.env.close()
-        self.env.close()
+        assertCrash(lambda: self.env.close())
 
     def testDbDoubleClose(self):
         db = self.env.open(name='dave')
@@ -60,13 +64,13 @@ class SmashinateTestCase(unittest.TestCase):
     def testTxnCloseActiveIter(self):
         with self.env.begin() as txn:
             it = txn.cursor().forward()
-        self.isInvalid(lambda: list(it))
+        assertCrash(lambda: list(it))
 
     def testDbCloseActiveIter(self):
         db = self.env.open(name='dave')
         with self.env.begin() as txn:
             it = txn.cursor(db=db).forward()
-        self.isInvalid(lambda: list(it))
+        assertCrash(lambda: list(it))
 
 
 KEYS = 'a', 'b', 'baa', 'd'
@@ -146,6 +150,15 @@ class CursorTest(unittest.TestCase):
         eq(True, self.c.delete())
         eq(False, self.c.delete())
 
+    def testCount(self):
+        assertCrash(lambda: self.c.count())
+        putData(self.txn)
+        self.c.first()
+        # TODO: complete dup key support.
+        #eq(1, self.c.count())
+
+    def testPut(self):
+        pass
 
 class IteratorTest(unittest.TestCase):
     def setUp(self):
@@ -174,6 +187,10 @@ class IteratorTest(unittest.TestCase):
         self.c.set_range('b')
         eq(REV_ITEMS[-2:], list(self.c.reverse()))
 
+    def testFilledSkipEof(self):
+        putData(self.txn)
+        eq(False, self.c.set_range('z'))
+        eq(REV_ITEMS, list(self.c.reverse()))
 
 
 

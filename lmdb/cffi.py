@@ -26,7 +26,6 @@ Please see http://lmdb.readthedocs.org/
 
 from __future__ import absolute_import
 
-import functools
 import os
 import shutil
 import tempfile
@@ -127,14 +126,8 @@ _ffi.cdef('''
     void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
     int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del_);
     int mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
-    int mdb_put(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data,
-                unsigned int flags);
-    int mdb_del(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
     int mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
     void mdb_cursor_close(MDB_cursor *cursor);
-    int mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data, int op);
-    int mdb_cursor_put(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
-                       unsigned int flags);
     int mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
     int mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
 
@@ -171,6 +164,9 @@ _ffi.cdef('''
     static int mdb_cursor_get_helper(MDB_cursor *cursor,
                                      char *key_s, size_t keylen,
                                      MDB_val *key, MDB_val *data, int op);
+    static int mdb_cursor_put_helper(MDB_cursor *cursor,
+                                     char *key_s, size_t keylen,
+                                     char *val_s, size_t vallen, int flags);
 ''')
 
 _lib = _ffi.verify('''
@@ -181,11 +177,6 @@ _lib = _ffi.verify('''
     #include "mdb.c"
     #include "midl.c"
     #pragma GCC visibility pop
-
-    #ifdef PyMODINIT_FUNC
-    #undef PyMODINIT_FUNC
-    #endif
-    #define PyMODINIT_FUNC __attribute__ ((visibility ("default"))) void
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
@@ -233,18 +224,29 @@ _lib = _ffi.verify('''
         }
         return rc;
     }
+
+    static int mdb_cursor_put_helper(MDB_cursor *cursor,
+                                     char *key_s, size_t keylen,
+                                     char *val_s, size_t vallen, int flags)
+    {
+        MDB_val tmpkey = {keylen, key_s};
+        MDB_val tmpval = {vallen, val_s};
+        return mdb_cursor_put(cursor, &tmpkey, &tmpval, flags);
+    }
 ''',
     ext_package='lmdb',
     extra_compile_args=['-Wno-shorten-64-to-32', '-Ilib']
 )
 
 globals().update((k, getattr(_lib, k))
-                 for k in dir(_lib) if k[:4].upper().startswith('MDB_'))
+                 for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_'))
 
 
 class Error(Exception):
     """Raised when any MDB error occurs."""
     def hints(self):
+        # This is wrapped in a function to allow mocking out cffi for
+        # readthedocs.
         return {
             MDB_MAP_FULL:
                 "Please use a larger Environment(map_size=) parameter",
@@ -269,55 +271,33 @@ class Error(Exception):
         Exception.__init__(self, msg)
 
 
-class Invalid:
-    """Dummy class substituted for an instance's type when a dependent object
-    (transaction, database, environment) is rendered invalid (deleted, closed,
-    dropped).
+def _kill_dependents(parent):
+    deps = parent._deps
+    while deps:
+        chid, chref = deps.popitem()
+        child = chref()
+        if child:
+            child._invalidate()
 
-    This allows avoiding a set of checks on every operation (e.g. during cursor
-    iteration).
-    """
-    def __getattr__(self, k):
-        if k.startswith('_'):
-            raise AttributeError
-        raise Error('Invalid state: you closed/deleted/dropped a parent object')
-
-_deps = {}
-
-def _invalidate_id(parid):
-    pardeps = _deps.pop(parid, None)
-    while pardeps:
-        chid, chref = pardeps.popitem()
-        obj = chref()
-        _invalidate_id(chid)
-        getattr(obj, '__del__', lambda: None)()
-        obj.__dict__.clear()
-        obj.__class__ = Invalid
-
-def _invalidate(obj, kill=False):
-    _invalidate_id(id(obj))
-    obj.__dict__.clear()
-    obj.__class__ = Invalid
+class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
+    """We need this because cffi on PyPy treats None as cffi.NULL, instead of
+    throwing an exception it feeds MDB null pointers. We use a weird name to
+    make exceptions more obvious."""
+    def __nonzero__(self):
+        return 0
+    def __repr__(self):
+        return ("<This object made use of a resource that was deleted or "
+                "closed>")
+_invalid = Some_LMDB_Resource_That_Was_Deleted_Or_Closed()
 
 def _depend(parent, child):
-    parid = id(parent)
-    pardeps = _deps.get(parid)
-    if not pardeps:
-        weakref.ref(parent, functools.partial(_invalidate_id, parid))
-        pardeps = {}
-        _deps[parid] = pardeps
-    chid = id(child)
-    if chid not in pardeps:
-        chref = weakref.ref(child, lambda _: pardeps.pop(chid))
-        pardeps[chid] = chref
+    parent._deps[id(child)] = weakref.ref(child)
 
-
-def _throw(what, rc):
-    if rc:
-        raise Error(what, rc)
+def _undepend(parent, child):
+    parent._deps.pop(id(child), None)
 
 def _mvbuf(mv):
-    return buffer(_ffi.buffer(mv.mv_data, mv.mv_size))
+    return _ffi.buffer(mv.mv_data, mv.mv_size)
 
 def _mvstr(mv):
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
@@ -327,7 +307,7 @@ def connect(path=None, **kwargs):
     return Environment(path, **kwargs)
 
 
-class Environment:
+class Environment(object):
     """
     Structure for a database environment. An environment may contain multiple
     databases, all residing in the same shared-memory map and underlying disk
@@ -393,16 +373,23 @@ class Environment:
             mode=0644, create=True, max_readers=126, max_dbs=0):
         envpp = _ffi.new('MDB_env **')
 
-        _throw("Creating environment",
-               mdb_env_create(envpp))
+        rc = mdb_env_create(envpp)
+        if rc:
+            raise Error("Creating environment", rc)
         self._env = envpp[0]
+        self._deps = {}
 
-        _throw("Setting map size",
-               mdb_env_set_mapsize(self._env, map_size))
-        _throw("Setting max readers",
-               mdb_env_set_maxreaders(self._env, max_readers))
-        _throw("Setting max DBs",
-               mdb_env_set_maxdbs(self._env, max_dbs))
+        rc = mdb_env_set_mapsize(self._env, map_size)
+        if rc:
+            raise Error("Setting map size", rc)
+
+        rc = mdb_env_set_maxreaders(self._env, max_readers)
+        if rc:
+            raise Error("Setting max readers", rc)
+
+        rc = mdb_env_set_maxdbs(self._env, max_dbs)
+        if rc:
+            raise Error("Setting max DBs", rc)
 
         self.temp = path is None
         if self.temp:
@@ -423,17 +410,17 @@ class Environment:
         if map_async:
             flags |= MDB_MAPASYNC
 
-        _throw(path, mdb_env_open(self._env, path, flags, mode))
+        rc = mdb_env_open(self._env, path, flags, mode)
+        if rc:
+            raise Error(path, rc)
         with self.begin() as txn:
             self._db = Database(self, txn)
 
     def close(self):
-        _invalidate(self)
-        path = self.path
-        mdb_env_close(self._env)
-        if self.temp:
-            shutil.rmtree(path)
-        _kill(self)
+        if self._env:
+            _kill_dependents(self)
+            mdb_env_close(self._env)
+            self._env = _invalid
 
     def __del__(self):
         self.close()
@@ -456,8 +443,9 @@ class Environment:
         """Make a consistent copy of the environment in the given destination
         directory.
         """
-        _throw("Copying environment",
-               mdb_env_copy(self._env, path))
+        rc = mdb_env_copy(self._env, path)
+        if rc:
+            raise Error("Copying environment", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
@@ -472,8 +460,9 @@ class Environment:
             environment was opened with ``sync=False`` the flushes will be
             omitted, and with #MDB_MAPASYNC they will be asynchronous.
         """
-        _throw("Flushing",
-               mdb_env_sync(self._env, force))
+        rc = mdb_env_sync(self._env, force)
+        if rc:
+            raise Error("Flushing", rc)
 
     def stat(self):
         """stat()
@@ -495,8 +484,9 @@ class Environment:
         +--------------------+---------------------------------------+
         """
         st = _ffi.new('MDB_stat *')
-        _throw("Getting environment statistics",
-               mdb_env_stat(self._env, st))
+        rc = mdb_env_stat(self._env, st)
+        if rc:
+            raise Error("Getting environment statistics", rc)
         return {
             "psize": st.ms_psize,
             "depth": st.ms_depth,
@@ -547,7 +537,7 @@ class Environment:
         return Transaction(self, **kwargs)
 
 
-class Database:
+class Database(object):
     """
     Get a reference to or create a database within an environment.
 
@@ -573,6 +563,7 @@ class Database:
                  dupsort=False, create=True):
         _depend(env, self)
         self.env = env
+        self._deps = {}
 
         flags = 0
         if reverse_key:
@@ -582,30 +573,38 @@ class Database:
         if create:
             flags |= MDB_CREATE
         dbipp = _ffi.new('MDB_dbi *')
-        _throw("Opening database",
-               mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp))
+        self._dbi = None
+        rc = mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
+        if rc:
+            raise Error("Opening database", rc)
         self._dbi = dbipp[0]
+
+    def _invalidate(self):
+        self._dbi = _invalid
 
     def __del__(self):
         self.close()
+        _undepend(self.env, self)
 
     def close(self):
         """Close the database handle."""
-        _invalidate(self)
-        mdb_dbi_close(self.env._env, self._dbi)
-        _kill(self)
+        if self._dbi:
+            _kill_dependents(self)
+            mdb_dbi_close(self.env._env, self._dbi)
 
     def drop(self, delete=True):
         """Delete all keys and optionally delete the database itself. Deleting
         the database causes it to become unavailable, and invalidates existing
         cursors.
         """
-        _invalidate(self)
-        mdb_drop(self.txn._txn, self._dbi, delete)
-        _kill(self)
+        if self._dbi:
+            _kill_dependents(self)
+            rc = mdb_drop(self.txn._txn, self._dbi, delete)
+            if rc:
+                raise Error('Dropping database', rc)
 
 
-class Transaction:
+class Transaction(object):
     """
     A transaction handle.
 
@@ -630,47 +629,58 @@ class Transaction:
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
+        self._deps = {}
         self.readonly = readonly
+        flags = 0
         if readonly:
-            what = "Beginning read-only transaction"
-            flags = MDB_RDONLY
-        else:
-            what = "Beginning write transaction"
-            flags = 0
+            flags |= MDB_RDONLY
         txnpp = _ffi.new('MDB_txn **')
-        parent_txn = parent._txn if parent else _ffi.NULL
-        _throw(what,
-            mdb_txn_begin(self._env, parent_txn, flags, txnpp))
+        if parent:
+            self._parent = parent
+            parent_txn = parent._txn
+            _depend(parent, self)
+        else:
+            parent_txn = _ffi.NULL
+        rc = mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+        if rc:
+            rdonly = 'read-only' if readonly else 'write'
+            raise Error('Beginning %s transaction' % rdonly, rc)
         self._txn = txnpp[0]
+
+    def _invalidate(self):
+        self._env = _invalid
+        self._txn = _invalid
 
     def __del__(self):
         self.abort()
+        _undepend(self.env, self)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.__class__ is not Invalid:
-            if exc_type:
-                self.abort()
-            else:
-                self.commit()
+        if exc_type:
+            self.abort()
+        else:
+            self.commit()
 
     def commit(self):
         """Commit the pending transaction."""
-        txn = self._txn
-        _invalidate(self, True)
-        rc = mdb_txn_commit(txn)
-        if rc:
-            _throw("Committing transaction", rc)
+        if self._txn:
+            _kill_dependents(self)
+            rc = mdb_txn_commit(self._txn)
+            self._txn = _invalid
+            if rc:
+                raise Error("Committing transaction", rc)
 
     def abort(self):
         """Abort the pending transaction."""
-        txn = self._txn
-        _invalidate(self, True)
-        rc = mdb_txn_abort(txn)
-        if rc:
-            _throw("Aborting transaction", rc)
+        if self._txn:
+            _kill_dependents(self)
+            rc = mdb_txn_abort(self._txn)
+            self._txn = _invalid
+            if rc:
+                raise Error("Aborting transaction", rc)
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, otherwise return `default`. A
@@ -751,7 +761,7 @@ class Transaction:
         return Cursor(db or self.env._db, self, **kwargs)
 
 
-class Cursor:
+class Cursor(object):
     """
     Structure for navigating a database.
 
@@ -829,12 +839,22 @@ class Cursor:
         self._positioned = False
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
-        _throw("Creating cursor",
-               mdb_cursor_open(self._txn, self._dbi, curpp))
+        self._cur = None
+        rc = mdb_cursor_open(self._txn, self._dbi, curpp)
+        if rc:
+            raise Error("Creating cursor", rc)
         self._cur = curpp[0]
 
+    def _invalidate(self):
+        self._cur = _invalid
+        self._dbi = _invalid
+        self._txn = _invalid
+
     def __del__(self):
-        mdb_cursor_close(self._cur)
+        if self._cur:
+            mdb_cursor_close(self._cur)
+        _undepend(self.db, self)
+        _undepend(self.txn, self)
 
     def key(self):
         """Return the current key."""
@@ -973,3 +993,44 @@ class Cursor:
         if rc:
             raise Error("Getting duplicate count", rc)
         return countp[0]
+
+    def put(self, key, value, dupdata=False, overwrite=True, append=False):
+        """Store a record, returning ``True`` if it was written, or ``False``
+        to indicate the key was already present and `override=False`. On
+        success, the cursor is positioned on the key.
+
+            `key`:
+                String key to store.
+
+            `value`:
+                String value to store.
+
+            `dupdata`:
+                If ``True`` and database was opened with `dupsort=True`, add
+                pair as a duplicate if the given key already exists. Otherwise
+                overwrite any existing matching key.
+
+            `overwrite`:
+                If ``False``, do not overwrite any existing matching key.
+
+            `append`:
+                If ``True``, append the pair to the end of the database without
+                comparing its order first. Appending a key that is not greater
+                than the highest existing key will cause corruption.
+        """
+        flags = 0
+        if not dupdata:
+            flags |= MDB_NODUPDATA
+        if not overwrite:
+            flags |= MDB_NOOVERWRITE
+        if append:
+            flags |= MDB_APPEND
+
+        rc = mdb_cursor_put_helper(self._cur,
+            key, len(key), value, len(value), flags)
+        if rc:
+            if rc == MDB_KEYEXIST:
+                return False
+            raise Error("Setting key", rc)
+        self._cursor_get(MDB_GET_CURRENT, '')
+        return True
