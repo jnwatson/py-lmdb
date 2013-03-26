@@ -7,6 +7,8 @@ from time import time as now
 import random
 import lmdb
 
+big = '' # '*' * 400
+
 dbpath = '/ram/testdb'
 if os.path.exists(dbpath):
     shutil.rmtree(dbpath)
@@ -15,8 +17,8 @@ t0 = now()
 words = set(file('/usr/share/dict/words').readlines())
 words.update([w.upper() for w in words])
 words.update([w[::-1] for w in words])
-words.update([w[::-1].upper() for w in words])
-words.update(['-'.join(w) for w in words])
+#words.update([w[::-1].upper() for w in words])
+#words.update(['-'.join(w) for w in words])
 #words.update(['+'.join(w) for w in words])
 #words.update(['/'.join(w) for w in words])
 words = list(words)
@@ -35,9 +37,9 @@ last = t0
 while run:
     with env.begin() as txn:
         try:
-            for _ in xrange(500000):
+            for _ in xrange(50000):
                 word = getword()
-                txn.put(word, word)
+                txn.put(word, big or word)
         except StopIteration:
             run = False
 
@@ -60,20 +62,27 @@ print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
 
 with env.begin() as txn:
     t0 = now()
-    lst = sum(1 for _ in txn.cursor().forward(values=False))
+    lst = sum(1 for _ in txn.cursor().forward())
     t1 = now()
     print 'enum %d (key, value) pairs took %.2f sec' % ((lst), t1-t0)
 
 with env.begin() as txn:
     t0 = now()
     for word in words:
-        assert txn.get(word) == word
+        txn.get(word)
     t1 = now()
     print 'rand lookup+verify all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
 with env.begin(buffers=True) as txn:
     t0 = now()
-    lst = sum(1 for _ in txn.cursor().forward(values=False))
+    for word in words:
+        txn.get(word)
+    t1 = now()
+    print 'rand lookup all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
+
+with env.begin(buffers=True) as txn:
+    t0 = now()
+    lst = sum(1 for _ in txn.cursor().forward())
     t1 = now()
     print 'enum %d (key, value) buffers took %.2f sec' % ((lst), t1-t0)
 
