@@ -151,22 +151,22 @@ _ffi.cdef('''
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
-    static int mdb_del_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              char *val_s, size_t vallen);
-    static int mdb_put_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              char *val_s, size_t vallen,
-                              unsigned int flags);
-    static int mdb_get_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              MDB_val *val_out);
-    static int mdb_cursor_get_helper(MDB_cursor *cursor,
-                                     char *key_s, size_t keylen,
-                                     MDB_val *key, MDB_val *data, int op);
-    static int mdb_cursor_put_helper(MDB_cursor *cursor,
-                                     char *key_s, size_t keylen,
-                                     char *val_s, size_t vallen, int flags);
+    static int pymdb_del(MDB_txn *txn, MDB_dbi dbi,
+                         char *key_s, size_t keylen,
+                         char *val_s, size_t vallen);
+    static int pymdb_put(MDB_txn *txn, MDB_dbi dbi,
+                         char *key_s, size_t keylen,
+                         char *val_s, size_t vallen,
+                         unsigned int flags);
+    static int pymdb_get(MDB_txn *txn, MDB_dbi dbi,
+                         char *key_s, size_t keylen,
+                         MDB_val *val_out);
+    static int pymdb_cursor_get(MDB_cursor *cursor,
+                                char *key_s, size_t keylen,
+                                MDB_val *key, MDB_val *data, int op);
+    static int pymdb_cursor_put(MDB_cursor *cursor,
+                                char *key_s, size_t keylen,
+                                char *val_s, size_t vallen, int flags);
 ''')
 
 _lib = _ffi.verify('''
@@ -180,27 +180,23 @@ _lib = _ffi.verify('''
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
-    static int mdb_get_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              MDB_val *val_out)
+    static int pymdb_get(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
+                         MDB_val *val_out)
     {
         MDB_val key = {keylen, key_s};
         return mdb_get(txn, dbi, &key, val_out);
     }
 
-    static int mdb_put_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              char *val_s, size_t vallen,
-                              unsigned int flags)
+    static int pymdb_put(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
+                         char *val_s, size_t vallen, unsigned int flags)
     {
         MDB_val key = {keylen, key_s};
         MDB_val val = {vallen, val_s};
         return mdb_put(txn, dbi, &key, &val, flags);
     }
 
-    static int mdb_del_helper(MDB_txn *txn, MDB_dbi dbi,
-                              char *key_s, size_t keylen,
-                              char *val_s, size_t vallen)
+    static int pymdb_del(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
+                         char *val_s, size_t vallen)
     {
         MDB_val key = {keylen, key_s};
         MDB_val val = {vallen, val_s};
@@ -213,9 +209,8 @@ _lib = _ffi.verify('''
         return mdb_del(txn, dbi, &key, valptr);
     }
 
-    static int mdb_cursor_get_helper(MDB_cursor *cursor,
-                                     char *key_s, size_t keylen,
-                                     MDB_val *key, MDB_val *data, int op)
+    static int pymdb_cursor_get(MDB_cursor *cursor, char *key_s, size_t keylen,
+                                MDB_val *key, MDB_val *data, int op)
     {
         MDB_val tmpkey = {keylen, key_s};
         int rc = mdb_cursor_get(cursor, &tmpkey, data, op);
@@ -225,9 +220,8 @@ _lib = _ffi.verify('''
         return rc;
     }
 
-    static int mdb_cursor_put_helper(MDB_cursor *cursor,
-                                     char *key_s, size_t keylen,
-                                     char *val_s, size_t vallen, int flags)
+    static int pymdb_cursor_put(MDB_cursor *cursor, char *key_s, size_t keylen,
+                                char *val_s, size_t vallen, int flags)
     {
         MDB_val tmpkey = {keylen, key_s};
         MDB_val tmpval = {vallen, val_s};
@@ -239,7 +233,7 @@ _lib = _ffi.verify('''
 )
 
 globals().update((k, getattr(_lib, k))
-                 for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_'))
+                 for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
 
 
 class Error(Exception):
@@ -736,8 +730,8 @@ class Transaction(object):
         cursor must be used to fetch all values for a key in a `dupsort=True`
         database.
         """
-        rc = mdb_get_helper(self._txn, (db or self.env._db)._dbi,
-                            key, len(key), self._val)
+        rc = pymdb_get(self._txn, (db or self.env._db)._dbi,
+                       key, len(key), self._val)
         if rc:
             if rc == MDB_NOTFOUND:
                 return default
@@ -776,8 +770,8 @@ class Transaction(object):
         if append:
             flags |= MDB_APPEND
 
-        rc = mdb_put_helper(self._txn, (db or self.env._db)._dbi,
-                            key, len(key), value, len(value), flags)
+        rc = pymdb_put(self._txn, (db or self.env._db)._dbi,
+                       key, len(key), value, len(value), flags)
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
@@ -797,8 +791,8 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
-        rc = mdb_del_helper(self._txn, (db or self.env._db)._dbi,
-                            key, len(key), value, len(value))
+        rc = pymdb_del(self._txn, (db or self.env._db)._dbi,
+                       key, len(key), value, len(value))
         if rc:
             if rc == MDB_NOTFOUND:
                 return False
@@ -885,7 +879,7 @@ class Cursor(object):
         self._txn = txn._txn
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
-        self._positioned = False
+        self._valid = False
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
         self._cur = None
@@ -927,10 +921,9 @@ class Cursor(object):
         else:
             get = self.item
 
-        go = True
-        while go:
+        while self._valid:
             yield get()
-            go = advance()
+            self._valid = advance()
 
     def forward(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
@@ -944,60 +937,53 @@ class Cursor(object):
                 >>> it = iter(cursor)
                 >>> it = cursor.forward(keys=True, values=True)
         """
-        if not self._positioned:
-            if not self.first():
-                return iter(xrange(0))
+        if not self._valid:
+            self.first()
         return self._iter(self.next, keys, values)
     __iter__ = forward
 
     def reverse(self, keys=True, values=True):
         """Return a reverse iterator that yields the current element before
         calling :py:meth:`prev`, until the start of the database is reached."""
-        if not self._positioned:
-            if not self.last():
-                return iter(xrange(0))
+        if not self._valid:
+            self.last()
         return self._iter(self.prev, keys, values)
 
     def _cursor_get(self, op, k):
-        rc = mdb_cursor_get_helper(self._cur, k, len(k),
-                                   self._key, self._val, op)
+        rc = pymdb_cursor_get(self._cur, k, len(k), self._key, self._val, op)
         if rc:
-            self._positioned = False
+            v = False
             self._key.mv_size = 0
             self._val.mv_size = 0
-            if rc == MDB_NOTFOUND:
-                return False
-            raise Error("Advancing cursor", rc)
-        return True
+            if rc != MDB_NOTFOUND:
+                raise Error("Advancing cursor", rc)
+        else:
+            v = True
+        self._valid = v
+        return v
 
     def first(self):
         """Move to the first element, returning ``True`` on success or
         ``False`` if the database is empty."""
-        self._positioned = True
-        self._cursor_get(MDB_FIRST, '')
-        return self._positioned
+        return self._cursor_get(MDB_FIRST, '')
 
     def last(self):
         """Move to the last element, returning ``True`` on success or ``False``
         if the database is empty."""
-        self._positioned = True
-        if self._cursor_get(MDB_LAST, ''):
-            self._cursor_get(MDB_PREV, '') # TODO: why is this necessary?
-        return self._positioned
+        v = self._cursor_get(MDB_LAST, '')
+        if v: # TODO: why is this necessary?
+            return self._cursor_get(MDB_PREV, '')
+        return v
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
         ``False`` if there is no previous element."""
-        if self._positioned:
-            return self._cursor_get(MDB_PREV, '')
-        return self.last()
+        return self._cursor_get(MDB_PREV, '')
 
     def next(self):
         """Move to the next element, returning ``True`` on success or ``False``
         if there is no next element."""
-        if self._positioned:
-            return self._cursor_get(MDB_NEXT, '')
-        return self.first()
+        return self._cursor_get(MDB_NEXT, '')
 
     def set_key(self, key):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
@@ -1008,7 +994,6 @@ class Cursor(object):
         if not key: # TODO: set_range() throws INVAL on an empty store, whereas
                     # set_key() returns NOTFOUND
             return self.first()
-        self._positioned = True
         return self._cursor_get(MDB_SET_KEY, key)
 
     def set_range(self, key):
@@ -1021,20 +1006,19 @@ class Cursor(object):
         if not key: # TODO: set_range() throws INVAL on an empty store, whereas
                     # set_key() returns NOTFOUND
             return self.first()
-        self._positioned = True
         return self._cursor_get(MDB_SET_RANGE, key)
 
     def delete(self):
         """Delete the current element and move to the next element, returning
         ``True`` on success or ``False`` if the database was empty, or if there
         are no more elements."""
-        if not self._positioned:
-            return False
-        rc = mdb_cursor_del(self._cur, 0)
-        if rc:
-            raise Error("Deleting current key", rc)
-        self._cursor_get(MDB_GET_CURRENT, '')
-        return True
+        v = self._valid
+        if v:
+            rc = mdb_cursor_del(self._cur, 0)
+            if rc:
+                raise Error("Deleting current key", rc)
+            return self._cursor_get(MDB_GET_CURRENT, '')
+        return v
 
     def count(self):
         """Return the number of duplicates for the current key. This is only
@@ -1045,7 +1029,7 @@ class Cursor(object):
             raise Error("Getting duplicate count", rc)
         return countp[0]
 
-    def put(self, key, value, dupdata=False, overwrite=True, append=False):
+    def put(self, key, val, dupdata=False, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `override=False`. On
         success, the cursor is positioned on the key.
@@ -1053,7 +1037,7 @@ class Cursor(object):
             `key`:
                 String key to store.
 
-            `value`:
+            `val`:
                 String value to store.
 
             `dupdata`:
@@ -1077,8 +1061,7 @@ class Cursor(object):
         if append:
             flags |= MDB_APPEND
 
-        rc = mdb_cursor_put_helper(self._cur,
-            key, len(key), value, len(value), flags)
+        rc = pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         if rc:
             if rc == MDB_KEYEXIST:
                 return False

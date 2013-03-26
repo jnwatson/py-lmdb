@@ -149,7 +149,7 @@ class CursorTest(EnvMixin, unittest.TestCase):
         eq(('baa', ''), self.c.item())
         eq(True, self.c.delete())
         eq(('d', ''), self.c.item())
-        eq(True, self.c.delete())
+        eq(False, self.c.delete()) # delete, but no more elements.
         eq(('', ''), self.c.item())
         eq(False, self.c.delete())
         eq(('', ''), self.c.item())
