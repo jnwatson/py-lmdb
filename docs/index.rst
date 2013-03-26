@@ -101,6 +101,10 @@ Transaction class
 Database class
 ##############
 
+**Note:** unless working with sub-databases, you never need to explicitly
+handle the :py:class:`Database` class, as all :py:class:`Transaction` methods
+default to the main database.
+
 .. autoclass:: lmdb.Database
     :members:
 

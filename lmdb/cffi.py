@@ -659,6 +659,17 @@ class Transaction(object):
 
         `readonly`:
             Read-only?
+
+        `buffers`:
+            If ``True``, indicates **py-lmdb** should not convert database
+            values into Python strings, but instead return buffer objects. This
+            setting applies to the :py:class:`Transaction` instance itself and
+            any :py:class:`Cursors <Cursor>` created within the transaction.
+
+            This feature significantly improves performance, since MDB has a
+            totally zero-copy read design, but it requires care when
+            manipulating the returned buffer objects. With small keys and
+            values, the benefit of this facility is greatly diminished.
     """
     def __init__(self, env, parent=None, readonly=False, buffers=False):
         _depend(env, self)
