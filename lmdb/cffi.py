@@ -173,10 +173,10 @@ _lib = _ffi.verify('''
     #include <sys/stat.h>
     #include "lmdb.h"
 
-    #pragma GCC visibility push(hidden)
+    //#pragma GCC visibility push(hidden)
     #include "mdb.c"
     #include "midl.c"
-    #pragma GCC visibility pop
+    //#pragma GCC visibility pop
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
