@@ -30,7 +30,7 @@ except ImportError:
 
 setup(
     name = 'lmdb',
-    version = '0.53',
+    version = '0.54',
     description = "CFFI wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
