@@ -27,11 +27,18 @@ More information on MDB can be found at:
 To install the Python module, ensure a C compiler and `pip` or `easy_install`
 are available, and type:
 
-::
+    ::
 
-    pip install lmdb
-    # or
-    easy_install lmdb
+        pip install lmdb
+        # or
+        easy_install lmdb
+
+*Note:* the cffi library depends on ``libffi``, so you may need to install the
+developmnt package for it. On Debian/Ubuntu:
+
+    ::
+
+        apt-get install libffi-dev
 
 
 Introduction
