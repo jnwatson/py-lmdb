@@ -227,7 +227,8 @@ _lib = _ffi.verify('''
 ''',
     ext_package='lmdb',
     sources=['lib/mdb.c', 'lib/midl.c'],
-    extra_compile_args=['-Wno-shorten-64-to-32', '-Ilib']
+    extra_compile_args=['-Wno-shorten-64-to-32'],
+    include_dirs=['lib']
 )
 
 globals().update((k, getattr(_lib, k))
@@ -425,13 +426,6 @@ class Environment(object):
         path = _ffi.new('char **')
         mdb_env_get_path(self._env, path)
         return _ffi.string(path[0])
-
-    def max_readers(self):
-        """Return the maximum number of client threads that may read this
-        environment simultaneously."""
-        readers = _ffi.new('unsigned int *')
-        mdb_env_get_maxreaders(self._env, readers)
-        return readers[0]
 
     def copy(self, path):
         """Make a consistent copy of the environment in the given destination
