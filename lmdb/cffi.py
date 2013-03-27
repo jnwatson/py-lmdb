@@ -953,7 +953,7 @@ class Cursor(object):
             self._key.mv_size = 0
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
-                if rc != EINVAL and op == MDB_GET_CURRENT:
+                if not (rc == EINVAL and op == MDB_GET_CURRENT):
                     raise Error("Advancing cursor", rc)
         else:
             v = True
@@ -987,11 +987,8 @@ class Cursor(object):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
         the exact key was not found.
 
-        Behaves like :py:meth:`first` if `key` is the empty string.
+        It is an error to :py:meth:`set_key` the empty string.
         """
-        if not key: # TODO: set_range() throws INVAL on an empty store, whereas
-                    # set_key() returns NOTFOUND
-            return self.first()
         return self._cursor_get(MDB_SET_KEY, key)
 
     def set_range(self, key):

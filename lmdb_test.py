@@ -121,6 +121,7 @@ class CursorTest(EnvMixin, unittest.TestCase):
         eq(ITEMS[-1], self.c.item())
 
     def testSetKey(self):
+        assertCrash(lambda: self.c.set_key(''))
         eq(False, self.c.set_key('missing'))
         putData(self.txn)
         eq(True, self.c.set_key('b'))
@@ -134,6 +135,8 @@ class CursorTest(EnvMixin, unittest.TestCase):
         eq('a', self.c.key())
         eq(True, self.c.set_range('ba'))
         eq('baa', self.c.key())
+        self.c.set_range('')
+        eq('a', self.c.key())
 
     def testDeleteEmpty(self):
         eq(False, self.c.delete())
