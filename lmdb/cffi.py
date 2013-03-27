@@ -131,6 +131,7 @@ _ffi.cdef('''
     int mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
     int mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
 
+    #define EINVAL ...
     #define MDB_APPEND ...
     #define MDB_CREATE ...
     #define MDB_DBS_FULL ...
@@ -230,6 +231,7 @@ _lib = _ffi.verify('''
 
 globals().update((k, getattr(_lib, k))
                  for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
+EINVAL = _lib.EINVAL
 
 class Error(Exception):
     """Raised when any MDB error occurs."""
@@ -951,7 +953,8 @@ class Cursor(object):
             self._key.mv_size = 0
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
-                raise Error("Advancing cursor", rc)
+                if rc != EINVAL and op == MDB_GET_CURRENT:
+                    raise Error("Advancing cursor", rc)
         else:
             v = True
         self._valid = v
@@ -1005,14 +1008,14 @@ class Cursor(object):
 
     def delete(self):
         """Delete the current element and move to the next element, returning
-        ``True`` on success or ``False`` if the database was empty, or if there
-        are no more elements."""
+        ``True`` on success or ``False`` if the database was empty."""
         v = self._valid
         if v:
             rc = mdb_cursor_del(self._cur, 0)
             if rc:
                 raise Error("Deleting current key", rc)
-            return self._cursor_get(MDB_GET_CURRENT, '')
+            self._cursor_get(MDB_GET_CURRENT, '')
+            v = rc == 0
         return v
 
     def count(self):

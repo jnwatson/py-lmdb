@@ -149,18 +149,19 @@ class CursorTest(EnvMixin, unittest.TestCase):
         eq(('baa', ''), self.c.item())
         eq(True, self.c.delete())
         eq(('d', ''), self.c.item())
-        eq(False, self.c.delete()) # delete, but no more elements.
+        eq(True, self.c.delete())
         eq(('', ''), self.c.item())
         eq(False, self.c.delete())
         eq(('', ''), self.c.item())
 
     def testDeleteLast(self):
-        assert 0, 'causes crash'
         putData(self.txn)
         eq(True, self.c.last())
         eq(('d', ''), self.c.item())
         eq(True, self.c.delete())
+        eq(('', ''), self.c.item())
         eq(False, self.c.delete())
+        eq(('', ''), self.c.item())
 
     def testCount(self):
         assertCrash(lambda: self.c.count())
