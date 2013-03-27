@@ -301,7 +301,7 @@ def _mvstr(mv):
     """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
-def connect(path=None, **kwargs):
+def connect(path, **kwargs):
     """Shorthand for ``lmdb.Environment(path, **kwargs)``"""
     return Environment(path, **kwargs)
 
@@ -319,8 +319,7 @@ class Environment(object):
 
         `path`:
             Location of directory (if `subdir=True`) or file prefix to store
-            the database. If unspecified, the environment will be created in
-            the system ``TEMP`` and deleted when closed.
+            the database.
 
         `map_size`:
             Maximum size database may grow to; used to size the memory mapping.
