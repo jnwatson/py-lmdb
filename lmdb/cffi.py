@@ -130,6 +130,7 @@ _ffi.cdef('''
     void mdb_cursor_close(MDB_cursor *cursor);
     int mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
     int mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
+    int mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val*data, int op);
 
     #define EINVAL ...
     #define MDB_APPEND ...
@@ -910,7 +911,7 @@ class Cursor(object):
         """Return the current `(key, value)` pair."""
         return self._to_py(self._key), self._to_py(self._val)
 
-    def _iter(self, advance, keys, values):
+    def _iter(self, op, keys, values):
         if not values:
             get = self.key
         elif not keys:
@@ -918,9 +919,15 @@ class Cursor(object):
         else:
             get = self.item
 
+        cur = self._cur
+        key = self._key
+        val = self._val
         while self._valid:
             yield get()
-            self._valid = advance()
+            rc = mdb_cursor_get(cur, key, val, op)
+            self._valid = not rc
+            if rc and rc != MDB_NOTFOUND:
+                raise Error('during iteration', rc)
 
     def forward(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
@@ -936,7 +943,7 @@ class Cursor(object):
         """
         if not self._valid:
             self.first()
-        return self._iter(self.next, keys, values)
+        return self._iter(MDB_NEXT, keys, values)
     __iter__ = forward
 
     def reverse(self, keys=True, values=True):
@@ -944,44 +951,54 @@ class Cursor(object):
         calling :py:meth:`prev`, until the start of the database is reached."""
         if not self._valid:
             self.last()
-        return self._iter(self.prev, keys, values)
+        return self._iter(MDB_PREV, keys, values)
 
-    def _cursor_get(self, op, k):
-        rc = pymdb_cursor_get(self._cur, k, len(k), self._key, self._val, op)
+    def _cursor_get(self, op):
+        rc = mdb_cursor_get(self._cur, self._key, self._val, op)
+        v = not rc
         if rc:
-            v = False
             self._key.mv_size = 0
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
                     raise Error("Advancing cursor", rc)
-        else:
-            v = True
+        self._valid = v
+        return v
+
+    def _cursor_get_key(self, op, k):
+        rc = pymdb_cursor_get(self._cur, k, len(k), self._key, self._val, op)
+        v = not rc
+        if rc:
+            self._key.mv_size = 0
+            self._val.mv_size = 0
+            if rc != MDB_NOTFOUND:
+                if not (rc == EINVAL and op == MDB_GET_CURRENT):
+                    raise Error("Advancing cursor", rc)
         self._valid = v
         return v
 
     def first(self):
         """Move to the first element, returning ``True`` on success or
         ``False`` if the database is empty."""
-        return self._cursor_get(MDB_FIRST, '')
+        return self._cursor_get(MDB_FIRST)
 
     def last(self):
         """Move to the last element, returning ``True`` on success or ``False``
         if the database is empty."""
-        v = self._cursor_get(MDB_LAST, '')
+        v = self._cursor_get(MDB_LAST)
         if v: # TODO: why is this necessary?
-            return self._cursor_get(MDB_PREV, '')
+            return self._cursor_get(MDB_PREV)
         return v
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
         ``False`` if there is no previous element."""
-        return self._cursor_get(MDB_PREV, '')
+        return self._cursor_get(MDB_PREV)
 
     def next(self):
         """Move to the next element, returning ``True`` on success or ``False``
         if there is no next element."""
-        return self._cursor_get(MDB_NEXT, '')
+        return self._cursor_get(MDB_NEXT)
 
     def set_key(self, key):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
@@ -989,7 +1006,7 @@ class Cursor(object):
 
         It is an error to :py:meth:`set_key` the empty string.
         """
-        return self._cursor_get(MDB_SET_KEY, key)
+        return self._cursor_get_key(MDB_SET_KEY, key)
 
     def set_range(self, key):
         """Seek to the first key greater than or equal `key`, returning
@@ -1001,7 +1018,7 @@ class Cursor(object):
         if not key: # TODO: set_range() throws INVAL on an empty store, whereas
                     # set_key() returns NOTFOUND
             return self.first()
-        return self._cursor_get(MDB_SET_RANGE, key)
+        return self._cursor_get_key(MDB_SET_RANGE, key)
 
     def delete(self):
         """Delete the current element and move to the next element, returning
@@ -1011,7 +1028,7 @@ class Cursor(object):
             rc = mdb_cursor_del(self._cur, 0)
             if rc:
                 raise Error("Deleting current key", rc)
-            self._cursor_get(MDB_GET_CURRENT, '')
+            self._cursor_get(MDB_GET_CURRENT)
             v = rc == 0
         return v
 
@@ -1061,5 +1078,5 @@ class Cursor(object):
             if rc == MDB_KEYEXIST:
                 return False
             raise Error("Setting key", rc)
-        self._cursor_get(MDB_GET_CURRENT, '')
+        self._cursor_get(MDB_GET_CURRENT)
         return True
