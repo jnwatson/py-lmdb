@@ -48,7 +48,7 @@ copyright = u'2013, David Wilson'
 # built documents.
 #
 # The short X.Y version.
-version = '0.54'
+version = '0.55'
 # The full version, including alpha/beta/rc tags.
 release = '0.53'
 
