@@ -34,7 +34,7 @@ are available, and type:
         easy_install lmdb
 
 *Note:* the cffi library depends on ``libffi``, so you may need to install the
-developmnt package for it. On Debian/Ubuntu:
+development package for it. On Debian/Ubuntu:
 
     ::
 
