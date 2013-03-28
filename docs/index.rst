@@ -116,9 +116,9 @@ Sub-databases
     **Caution:** when a sub-database has been opened with
     :py:meth:`Environment.open` or :py:class:`Database`, the resulting handle
     is shared with all environment users. In particular, this means any user
-    calling :py:meth:`Database.close` will invalidate the handle for all
-    readers. For this reason the :py:class:`Database` destructor never deletes
-    native handles, you must do it explicitly.
+    calling :py:meth:`Database.close` will invalidate the handle for all users.
+    For this reason the :py:class:`Database` destructor never deletes native
+    handles, you must do it explicitly.
 
     There is little reason to close a handle: open handles only consume slots
     in the shared environment, and repeated calls to
