@@ -4,3 +4,4 @@ dist
 docs/_build
 __pycache__
 lmdb.egg-info
+old
