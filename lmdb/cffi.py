@@ -338,7 +338,7 @@ class Environment(object):
 
         `subdir`:
             If ``True``, `path` refers to a subdirectory to store the data and
-            lock files within, otherwise it refers to a filename prefix.
+            lock files in, otherwise it refers to a filename prefix.
 
         `readonly`:
             If ``True``, disallow any write operations. Note the lock file is
