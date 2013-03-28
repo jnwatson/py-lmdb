@@ -48,12 +48,12 @@ class CrashTest(EnvMixin, unittest.TestCase):
 
     def setUp(self):
         EnvMixin.setUp(self)
-        with self.env.begin() as txn:
+        with self.env.begin(write=True) as txn:
             txn.put('dave', '')
             txn.put('dave2', '')
 
     def testCloseWithTxn(self):
-        txn = self.env.begin()
+        txn = self.env.begin(write=True)
         self.env.close()
         assertCrash(lambda: list(txn.cursor()))
 
@@ -73,7 +73,7 @@ class CrashTest(EnvMixin, unittest.TestCase):
 
     def testDbCloseActiveIter(self):
         db = self.env.open(name='dave3')
-        with self.env.begin() as txn:
+        with self.env.begin(write=True) as txn:
             txn.put('a', 'b', db=db)
             it = txn.cursor(db=db).forward()
         assertCrash(lambda: list(it))
@@ -98,7 +98,7 @@ def putData(t, db=None):
 class CursorTest(EnvMixin, unittest.TestCase):
     def setUp(self):
         EnvMixin.setUp(self)
-        self.txn = self.env.begin()
+        self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
     def testKeyValueItemEmpty(self):
@@ -179,7 +179,7 @@ class CursorTest(EnvMixin, unittest.TestCase):
 class IteratorTest(EnvMixin, unittest.TestCase):
     def setUp(self):
         EnvMixin.setUp(self)
-        self.txn = self.env.begin()
+        self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
     def testEmpty(self):

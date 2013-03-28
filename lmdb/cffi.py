@@ -424,7 +424,9 @@ class Environment(object):
         """Directory path or file name prefix where this environment is
         stored."""
         path = _ffi.new('char **')
-        mdb_env_get_path(self._env, path)
+        rc = mdb_env_get_path(self._env, path)
+        if rc:
+            raise Error('Getting path', rc)
         return _ffi.string(path[0])
 
     def copy(self, path):
@@ -521,7 +523,7 @@ class Environment(object):
         As a special case, the main database is always open."""
         if not kwargs.get('name'):
             return self._db
-        with self.begin() as txn:
+        with self.begin(write=True) as txn:
             return Database(self, txn, **kwargs)
 
     def begin(self, **kwargs):
@@ -613,17 +615,6 @@ class Database(object):
             mdb_dbi_close(self.env._env, self._dbi)
             self._dbi = _invalid
 
-    def drop(self, delete=True):
-        """Delete all keys and optionally delete the database itself. Deleting
-        the database causes it to become unavailable, and invalidates existing
-        cursors.
-        """
-        if self._dbi:
-            _kill_dependents(self)
-            rc = mdb_drop(self.txn._txn, self._dbi, delete)
-            if rc:
-                raise Error('Dropping database', rc)
-
 
 class Transaction(object):
     """
@@ -642,8 +633,9 @@ class Transaction(object):
         `parent`:
             ``None``, or a parent transaction (see lmdb.h).
 
-        `readonly`:
-            Read-only?
+        `write`:
+            Transactions are read-only by default. To modify the database, you
+            must pass `write=True`.
 
         `buffers`:
             If ``True``, indicates **py-lmdb** should not convert database
@@ -656,7 +648,7 @@ class Transaction(object):
             manipulating the returned buffer objects. With small keys and
             values, the benefit of this facility is greatly diminished.
     """
-    def __init__(self, env, parent=None, readonly=False, buffers=False):
+    def __init__(self, env, parent=None, write=False, buffers=False):
         _depend(env, self)
         self.env = env # hold ref
         self._env = env._env
@@ -664,9 +656,8 @@ class Transaction(object):
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
-        self.readonly = readonly
         flags = 0
-        if readonly:
+        if not write:
             flags |= MDB_RDONLY
         txnpp = _ffi.new('MDB_txn **')
         if parent:
@@ -697,6 +688,16 @@ class Transaction(object):
             self.abort()
         else:
             self.commit()
+
+    def drop(self, db, delete=True):
+        """Delete all keys in a sub-database, and optionally delete the
+        sub-database itself. Deleting the sub-database causes it to become
+        unavailable, and invalidates existing cursors.
+        """
+        _kill_dependents(db)
+        rc = mdb_drop(self._txn, db._dbi, delete)
+        if rc:
+            raise Error('Dropping database', rc)
 
     def commit(self):
         """Commit the pending transaction."""
