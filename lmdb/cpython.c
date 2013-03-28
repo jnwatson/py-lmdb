@@ -63,7 +63,6 @@ typedef struct {
 typedef struct {
     PyObject_HEAD
     int valid;
-    struct EnvObject *env;
     MDB_dbi dbi;
 } DbObject;
 
@@ -231,8 +230,6 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     }
 
     DbObject *dbo = PyObject_New(DbObject, &PyDatabase_Type);
-    dbo->env = env;
-    Py_INCREF(env);
     dbo->dbi = dbi;
     dbo->valid = 1;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
@@ -264,65 +261,13 @@ txn_db_from_name(EnvObject *env, const char *name,
     return dbo;
 }
 
-static PyObject *
-db_close(DbObject *self)
-{
-    if(2 != (self->valid + self->env->valid)) {
-        return err_invalid();
-    }
-
-    mdb_dbi_close(self->env->env, self->dbi);
-    self->valid = 0;
-    Py_RETURN_NONE;
-}
-
-
 static struct PyMethodDef db_methods[] = {
-    {"close", (PyCFunction)db_close, METH_NOARGS},
     {NULL, NULL}
 };
-
-static PyObject *
-db_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    static char *kwlist[] = {
-        "env", "txn", "name", "reverse_key", "dupsort", "create", NULL
-    };
-    const char *name = NULL;
-    EnvObject *env;
-    TransObject *trans;
-    int reverse_key = 0;
-    int dupsort = 0;
-    int create = 1;
-
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "O!O!|ziii", kwlist,
-        &PyEnvironment_Type, &env,
-        &PyTransaction_Type, &trans,
-        &name, &reverse_key, &dupsort, &create)) {
-        return NULL;
-    }
-
-    if(2 != (env->valid + trans->valid)) {
-        return err_invalid();
-    }
-
-    int flags = 0;
-    if(reverse_key) {
-        flags |= MDB_REVERSEKEY;
-    }
-    if(dupsort) {
-        flags |= MDB_DUPSORT;
-    }
-    if(create) {
-        flags |= MDB_CREATE;
-    }
-    return (PyObject *) db_from_name(env, trans->txn, name, flags);
-}
 
 static void
 db_dealloc(DbObject *self)
 {
-    Py_DECREF(self->env);
     PyObject_Del(self);
 }
 
@@ -332,8 +277,7 @@ PyTypeObject PyDatabase_Type = {
     .tp_dealloc = (destructor) db_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = db_methods,
-    .tp_name = "Database",
-    .tp_new = db_new
+    .tp_name = "_Database"
 };
 
 
@@ -573,18 +517,20 @@ env_info(EnvObject *self)
 
 
 static PyObject *
-env_open(EnvObject *self, PyObject *args, PyObject *kwds)
+env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     static char *kwlist[] = {
-        "name", "reverse_key", "dupsort", "create", NULL
+        "name", "txn", "reverse_key", "dupsort", "create", NULL
     };
     const char *name = NULL;
+    TransObject *txn = NULL;
     int reverse_key = 0;
     int dupsort = 0;
     int create = 1;
 
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "|ziii", kwlist,
-        &name, &reverse_key, &dupsort, &create)) {
+    if(!PyArg_ParseTupleAndKeywords(args, kwds, "|zO!iii", kwlist,
+            &name, &PyTransaction_Type, &txn, &reverse_key, &dupsort,
+            &create)) {
         return NULL;
     }
 
@@ -599,7 +545,11 @@ env_open(EnvObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_CREATE;
     }
 
-    return (PyObject *) txn_db_from_name(self, name, flags);
+    if(txn) {
+        return (PyObject *) db_from_name(self, txn->txn, name, flags);
+    } else {
+        return (PyObject *) txn_db_from_name(self, name, flags);
+    }
 }
 
 
@@ -672,7 +622,7 @@ static struct PyMethodDef env_methods[] = {
     {"close", (PyCFunction)env_close, METH_NOARGS},
     {"copy", (PyCFunction)env_copy, METH_VARARGS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
-    {"open", (PyCFunction)env_open, METH_VARARGS|METH_KEYWORDS},
+    {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
     {"sync", (PyCFunction)env_sync, METH_OLDARGS},
@@ -1457,12 +1407,6 @@ initcpython(void)
         return;
     }
     if(add_type(mod, &PyCursor_Type)) {
-        return;
-    }
-    if(add_type(mod, &PyDatabase_Type)) {
-        return;
-    }
-    if(add_type(mod, &PyDatabase_Type)) {
         return;
     }
     if(add_type(mod, &PyTransaction_Type)) {
