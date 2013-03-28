@@ -52,7 +52,7 @@ else:
 
 setup(
     name = 'lmdb',
-    version = '0.55',
+    version = '0.56',
     description = "cffi/CPython native wrapper for OpenLDAP MDB 'Lightning Database' library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
