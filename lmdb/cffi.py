@@ -318,6 +318,9 @@ class Environment(object):
     number of read transactions even when a write transaction exists. Due to
     this, write transactions should be kept as short as possible.
 
+    Equivalent to `mdb_env_open()
+    <http://symas.com/mdb/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
+
         `path`:
             Location of directory (if `subdir=True`) or file prefix to store
             the database.
@@ -412,6 +415,13 @@ class Environment(object):
             self._db = Database(self, txn)
 
     def close(self):
+        """Close the environment, invalidating any open iterators, cursors,
+        transactions, and database handles. Note that open database handles are
+        preserved if at least one other process has the environment open.
+
+        Equivalent to `mdb_env_close()
+        <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
+        """
         if self._env:
             _kill_dependents(self)
             mdb_env_close(self._env)
@@ -422,7 +432,11 @@ class Environment(object):
 
     def path(self):
         """Directory path or file name prefix where this environment is
-        stored."""
+        stored.
+
+        Equivalent to `mdb_env_get_path()
+        <http://symas.com/mdb/doc/group__mdb.html#gac699fdd8c4f8013577cb933fb6a757fe>`_
+        """
         path = _ffi.new('char **')
         rc = mdb_env_get_path(self._env, path)
         if rc:
@@ -432,6 +446,9 @@ class Environment(object):
     def copy(self, path):
         """Make a consistent copy of the environment in the given destination
         directory.
+
+        Equivalent to `mdb_env_copy()
+        <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
         rc = mdb_env_copy(self._env, path)
         if rc:
@@ -439,6 +456,9 @@ class Environment(object):
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
+
+        Equivalent to `mdb_env_sync()
+        <http://symas.com/mdb/doc/group__mdb.html#ga85e61f05aa68b520cc6c3b981dba5037>`_
 
         Data is always written to disk when ``Transaction.commit()`` is called,
         but the operating system may keep it buffered. MDB always flushes the
@@ -472,6 +492,9 @@ class Environment(object):
         +--------------------+---------------------------------------+
         | ``entries``        | Number of data items.                 |
         +--------------------+---------------------------------------+
+
+        Equivalent to `mdb_env_stat()
+        <http://symas.com/mdb/doc/group__mdb.html#gaf881dca452050efbd434cd16e4bae255>`_
         """
         st = _ffi.new('MDB_stat *')
         rc = mdb_env_stat(self._env, st)
@@ -502,6 +525,9 @@ class Environment(object):
         +--------------------+---------------------------------------+
         | num_readers        | Number of threads in use.             |
         +--------------------+---------------------------------------+
+
+        Equivalent to `mdb_env_info()
+        <http://symas.com/mdb/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
         """
         info = _ffi.new('MDB_envinfo *')
         rc = mdb_env_info(self._env, info)
@@ -520,7 +546,12 @@ class Environment(object):
         be called from within an existing write transaction. Parameters are as
         for :py:class:`Database` constructor.
 
-        As a special case, the main database is always open."""
+        As a special case, the main database is always open.
+
+        Equivalent to `mdb_dbi_open()
+        <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
+        inside a write transaction.
+        """
         if not kwargs.get('name'):
             return self._db
         with self.begin(write=True) as txn:
@@ -534,6 +565,9 @@ class Environment(object):
 class Database(object):
     """
     Get a reference to or create a database within an environment.
+
+    Equivalent to `mdb_dbi_open()
+    <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
 
     The database handle may be discarded by calling :py:meth:`close`. A newly
     created database will not exist if the transaction that created it aborted,
@@ -602,6 +636,9 @@ class Database(object):
     def close(self):
         """Close the database handle.
 
+        Equivalent to `mdb_dbi_close()
+        <http://symas.com/mdb/doc/group__mdb.html#ga52dd98d0c542378370cd6b712ff961b5>`_
+
         **Warning**: closing the handle closes it for all processes and threads
         with the database open.
 
@@ -626,6 +663,9 @@ class Transaction(object):
 
     Cursors may not span transactions; each cursor must be opened and closed
     within a single transaction.
+
+    Equivalent to `mdb_txn_begin()
+    <http://symas.com/mdb/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
 
         `env`:
             Environment the transaction should be on.
@@ -693,6 +733,9 @@ class Transaction(object):
         """Delete all keys in a sub-database, and optionally delete the
         sub-database itself. Deleting the sub-database causes it to become
         unavailable, and invalidates existing cursors.
+
+        Equivalent to `mdb_drop()
+        <http://symas.com/mdb/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
         """
         _kill_dependents(db)
         rc = mdb_drop(self._txn, db._dbi, delete)
@@ -700,7 +743,11 @@ class Transaction(object):
             raise Error('Dropping database', rc)
 
     def commit(self):
-        """Commit the pending transaction."""
+        """Commit the pending transaction.
+
+        Equivalent to `mdb_txn_commit()
+        <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
+        """
         if self._txn:
             _kill_dependents(self)
             rc = mdb_txn_commit(self._txn)
@@ -709,7 +756,11 @@ class Transaction(object):
                 raise Error("Committing transaction", rc)
 
     def abort(self):
-        """Abort the pending transaction."""
+        """Abort the pending transaction.
+
+        Equivalent to `mdb_txn_abort()
+        <http://symas.com/mdb/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
+        """
         if self._txn:
             _kill_dependents(self)
             rc = mdb_txn_abort(self._txn)
@@ -721,6 +772,9 @@ class Transaction(object):
         """Fetch the first value matching `key`, otherwise return `default`. A
         cursor must be used to fetch all values for a key in a `dupsort=True`
         database.
+
+        Equivalent to `mdb_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
         """
         rc = pymdb_get(self._txn, (db or self.env._db)._dbi,
                        key, len(key), self._val)
@@ -734,6 +788,9 @@ class Transaction(object):
             db=None):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `override=False`.
+
+        Equivalent to `mdb_put()
+        <http://symas.com/mdb/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
 
             `key`:
                 String key to store.
@@ -773,6 +830,9 @@ class Transaction(object):
     def delete(self, key, value='', db=None):
         """Delete a key from the database.
 
+        Equivalent to `mdb_del()
+        <http://symas.com/mdb/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0>`_
+
             `key`:
                 The key to delete.
 
@@ -799,6 +859,9 @@ class Transaction(object):
 class Cursor(object):
     """
     Structure for navigating a database.
+
+    Equivalent to `mdb_cursor_open()
+    <http://symas.com/mdb/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa>`_
 
         `db`:
             :py:class:`Database` to navigate.
@@ -973,12 +1036,24 @@ class Cursor(object):
 
     def first(self):
         """Move to the first element, returning ``True`` on success or
-        ``False`` if the database is empty."""
+        ``False`` if the database is empty.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_FIRST
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
         return self._cursor_get(MDB_FIRST)
 
     def last(self):
         """Move to the last element, returning ``True`` on success or ``False``
-        if the database is empty."""
+        if the database is empty.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_LAST
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
         v = self._cursor_get(MDB_LAST)
         if v: # TODO: why is this necessary?
             return self._cursor_get(MDB_PREV)
@@ -986,12 +1061,24 @@ class Cursor(object):
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
-        ``False`` if there is no previous element."""
+        ``False`` if there is no previous element.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_PREV
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
         return self._cursor_get(MDB_PREV)
 
     def next(self):
         """Move to the next element, returning ``True`` on success or ``False``
-        if there is no next element."""
+        if there is no next element.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_NEXT
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
         return self._cursor_get(MDB_NEXT)
 
     def set_key(self, key):
@@ -999,6 +1086,11 @@ class Cursor(object):
         the exact key was not found.
 
         It is an error to :py:meth:`set_key` the empty string.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_SET_KEY
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get_key(MDB_SET_KEY, key)
 
@@ -1008,6 +1100,9 @@ class Cursor(object):
         database.
 
         Behaves like :py:meth:`first` if `key` is the empty string.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_ with `MDB_SET_RANGE <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         if not key: # TODO: set_range() throws INVAL on an empty store, whereas
                     # set_key() returns NOTFOUND
@@ -1016,7 +1111,11 @@ class Cursor(object):
 
     def delete(self):
         """Delete the current element and move to the next element, returning
-        ``True`` on success or ``False`` if the database was empty."""
+        ``True`` on success or ``False`` if the database was empty.
+
+        Equivalent to `mdb_cursor_del()
+        <http://symas.com/mdb/doc/group__mdb.html#ga26a52d3efcfd72e5bf6bd6960bf75f95>`_
+        """
         v = self._valid
         if v:
             rc = mdb_cursor_del(self._cur, 0)
@@ -1028,7 +1127,11 @@ class Cursor(object):
 
     def count(self):
         """Return the number of duplicates for the current key. This is only
-        meaningful for databases that have `dupdata=True`."""
+        meaningful for databases that have `dupdata=True`.
+
+        Equivalent to `mdb_cursor_count()
+        <http://symas.com/mdb/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
+        """
         countp = _ffi.new('size_t *')
         rc = mdb_cursor_count(self._cur, countp)
         if rc:
@@ -1039,6 +1142,9 @@ class Cursor(object):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `override=False`. On
         success, the cursor is positioned on the key.
+
+        Equivalent to `mdb_cursor_put()
+        <http://symas.com/mdb/doc/group__mdb.html#ga1f83ccb40011837ff37cc32be01ad91e>`_
 
             `key`:
                 String key to store.
