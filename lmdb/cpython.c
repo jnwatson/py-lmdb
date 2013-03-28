@@ -1,3 +1,24 @@
+/*
+ * Copyright 2013 The py-lmdb authors, all rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted only as authorized by the OpenLDAP
+ * Public License.
+ *
+ * A copy of this license is available in the file LICENSE in the
+ * top-level directory of the distribution or, alternatively, at
+ * <http://www.OpenLDAP.org/license.html>.
+ *
+ * OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+ *
+ * Individual files and/or contributed packages may be copyright by
+ * other parties and/or subject to additional restrictions.
+ *
+ * This work also contains materials derived from public sources.
+ *
+ * Additional information about OpenLDAP can be obtained at
+ * <http://www.openldap.org/>.
+ */
 #include <sys/stat.h>
 #include <stdbool.h>
 #include <string.h>
@@ -441,7 +462,7 @@ fail:
 
 
 static TransObject *
-make_trans(EnvObject *env, TransObject *parent, int readonly, int buffers)
+make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
 {
     if(! env->valid) {
         return err_invalid();
@@ -460,7 +481,7 @@ make_trans(EnvObject *env, TransObject *parent, int readonly, int buffers)
         return NULL;
     }
 
-    int flags = readonly ? MDB_RDONLY : 0;
+    int flags = write ? 0 : MDB_RDONLY;
     int rc = mdb_txn_begin(env->env, parent_txn, flags, &(self->txn));
     if(rc) {
         PyObject_Del(self);
@@ -483,17 +504,17 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     TransObject *parent = NULL;
-    int readonly = 0;
+    int write = 0;
     int buffers = 0;
 
     static char *kwlist[] = {
-        "parent", "readonly", "buffers", NULL
+        "parent", "write", "buffers", NULL
     };
     if(!PyArg_ParseTupleAndKeywords(args, kwds, "|O!ii", kwlist,
-            &PyTransaction_Type, &parent, &readonly, &buffers)) {
+            &PyTransaction_Type, &parent, &write, &buffers)) {
         return NULL;
     }
-    return (PyObject *) make_trans(self, parent, readonly, buffers);
+    return (PyObject *) make_trans(self, parent, write, buffers);
 }
 
 static PyObject *
@@ -1159,18 +1180,18 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     EnvObject *env = NULL;
     TransObject *parent = NULL;
-    int readonly = 0;
+    int write = 0;
     int buffers = 0;
 
     static char *kwlist[] = {
-        "env", "parent", "readonly", "buffers", NULL
+        "env", "parent", "write", "buffers", NULL
     };
     if(!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!ii", kwlist,
             &PyEnvironment_Type, &env,
-            &PyTransaction_Type, &parent, &readonly, &buffers)) {
+            &PyTransaction_Type, &parent, &write, &buffers)) {
         return NULL;
     }
-    return (PyObject *) make_trans(env, parent, readonly, buffers);
+    return (PyObject *) make_trans(env, parent, write, buffers);
 }
 
 static PyObject *
