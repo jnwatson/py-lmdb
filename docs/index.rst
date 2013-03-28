@@ -28,8 +28,8 @@ selected during installation: a `cffi
 <http://www.pypy.org/>`_, and a custom module for CPython. Python 3.x is not
 supported yet.
 
-As no packages are available, the MDB library is currently bundled inline with
-the wrapper and built statically.
+As no packages are available, the MDB library is bundled inline with the
+wrapper and built statically.
 
 
 Introduction
@@ -41,7 +41,7 @@ Introduction
     * Reader/writer transactions: readers don't block writers and writers don't
       block readers. Each environment supports one concurrent write transaction.
     * Read transactions are extremely cheap: under 400 nanoseconds on CPython.
-    * The database may be opened by multiple processes on the same host, making
+    * Environments may be opened by multiple processes on the same host, making
       it ideal for working around Python's GIL.
     * Multiple sub-databases may be created, with transactions covering all
       sub-databases.
@@ -142,8 +142,8 @@ Storage efficiency & limits
              'overflow_pages': 0L,
              'psize': 4096L}
 
-    This database contains 3,761,848 million records, and none of the records
-    had their value spilled to a separate page (``overflow_pages``).
+    This database contains 3,761,848 records, and none of the records had their
+    value spilled to a separate page (``overflow_pages``).
 
     By default, record keys are limited to 511 bytes in length, however this
     can be adjusted by rebuilding the library.
@@ -153,10 +153,10 @@ Buffers
 +++++++
 
     Since MDB is exclusively memory mapped, it is possible to access record
-    data without ever copying keys or values. To exploit this, the library can
-    be instructed to return :py:func:`buffer` objects instead of strings by
-    passing `buffers=True` to :py:meth:`Environment.begin` or
-    :py:class:`Transaction`.
+    data without keys or values ever being copied by the kernel, database
+    library, or application. To exploit this, the library can be instructed to
+    return :py:func:`buffer` objects instead of strings by passing
+    `buffers=True` to :py:meth:`Environment.begin` or :py:class:`Transaction`.
 
     In Python, :py:func:`buffer` objects can be used in many places where
     strings are expected. In every way they act like a regular sequence: they
