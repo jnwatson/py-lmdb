@@ -35,30 +35,30 @@ wrapper and built statically.
 Introduction
 ++++++++++++
 
-    MDB is a tiny database with some excellent properties:
+MDB is a tiny database with some excellent properties:
 
-    * Ordered-map interface (keys are always sorted)
-    * Reader/writer transactions: readers don't block writers and writers don't
-      block readers. Each environment supports one concurrent write transaction.
-    * Read transactions are extremely cheap: under 400 nanoseconds on CPython.
-    * Environments may be opened by multiple processes on the same host, making
-      it ideal for working around Python's `GIL
-      <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
-    * Multiple sub-databases may be created with transactions covering all
-      sub-databases.
-    * Memory mapped, allowing for zero copy lookup and iteration. This is
-      optionally exposed to Python using the :py:func:`buffer` interface.
-    * Maintenance requires no external process or background threads.
-    * No application-level caching is required: MDB relies entirely on the
-      operating system's buffer cache.
-    * Merely 32kb of object code and 6kLOC of C.
+* Ordered-map interface (keys are always sorted)
+* Reader/writer transactions: readers don't block writers and writers don't
+  block readers. Each environment supports one concurrent write transaction.
+* Read transactions are extremely cheap: under 400 nanoseconds on CPython.
+* Environments may be opened by multiple processes on the same host, making it
+  ideal for working around Python's `GIL
+  <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
+* Multiple sub-databases may be created with transactions covering all
+  sub-databases.
+* Memory mapped, allowing for zero copy lookup and iteration. This is
+  optionally exposed to Python using the :py:func:`buffer` interface.
+* Maintenance requires no external process or background threads.
+* No application-level caching is required: MDB relies entirely on the
+  operating system's buffer cache.
+* Merely 32kb of object code and 6kLOC of C.
 
 
 Installation
 ++++++++++++
 
-    To install the Python module, ensure a C compiler and `pip` or
-    `easy_install` are available and type:
+To install the Python module, ensure a C compiler and `pip` or `easy_install`
+are available and type:
 
     ::
 
@@ -66,17 +66,17 @@ Installation
         # or
         easy_install lmdb
 
-    *Note:* on PyPy the wrapper depends on cffi which in turn depends on
-    ``libffi``, so you may need to install the development package for it. On
-    Debian/Ubuntu:
+*Note:* on PyPy the wrapper depends on cffi which in turn depends on
+``libffi``, so you may need to install the development package for it. On
+Debian/Ubuntu:
 
     ::
 
         apt-get install libffi-dev
 
-    You may also use the cffi version on CPython. This is accomplished by
-    setting the ``LMDB_FORCE_CFFI`` environment variable before installation
-    or before module import with an existing installation:
+You may also use the cffi version on CPython. This is accomplished by setting
+the ``LMDB_FORCE_CFFI`` environment variable before installation or before
+module import with an existing installation:
 
     ::
 
@@ -90,19 +90,19 @@ Installation
 Sub-databases
 +++++++++++++
 
-    To use the sub-database feature you must call :py:func:`lmdb.connect` or
-    :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number
-    of sub-databases required. This must be done by the first process or thread
-    opening the environment as it is used to allocate resources kept in shared
-    memory.
+To use the sub-database feature you must call :py:func:`lmdb.connect` or
+:py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
+sub-databases required. This must be done by the first process or thread
+opening the environment as it is used to allocate resources kept in shared
+memory.
 
-    **Caution:** MDB implements sub-databases by *storing a special descriptor
-    key in the main database*. All databases in an environment *share the same
-    file*. Because a sub-database is just a key in the main database, attempts
-    to create a sub-database will fail if this key already exists. Furthermore
-    *the key is visible to lookups and enumerations*. If your main database
-    keyspace conflicts with the names you are using for sub-databases then
-    consider moving the contents of your main database to another sub-database.
+**Caution:** MDB implements sub-databases by *storing a special descriptor key
+in the main database*. All databases in an environment *share the same file*.
+Because a sub-database is just a key in the main database, attempts to create a
+sub-database will fail if this key already exists. Furthermore *the key is
+visible to lookups and enumerations*. If your main database keyspace conflicts
+with the names you are using for sub-databases then consider moving the
+contents of your main database to another sub-database.
 
     ::
 
@@ -113,38 +113,37 @@ Sub-databases
         >>> # Error: database cannot share name of existing key!
         >>> subdb = env.open('somename')
 
-    **Caution:** when a sub-database has been opened with
-    :py:meth:`Environment.open` or :py:class:`Database` the resulting handle
-    is shared with all environment users. In particular this means any user
-    calling :py:meth:`Database.close` will invalidate the handle for all users.
-    For this reason the :py:class:`Database` destructor never closes native
-    handles, you must do it explicitly.
+**Caution:** when a sub-database has been opened with
+:py:meth:`Environment.open_db` the resulting handle is shared with all
+environment users. In particular this means any user calling
+:py:meth:`Environment.close_db` will invalidate the handle for all users. For
+this reason databases are never closed automatically, you must do it
+explicitly.
 
-    There is little reason to close a handle: open handles only consume slots
-    in the shared environment and repeated calls to
-    :py:meth:`Environment.open` or :py:class:`Database` for the same name
-    return the same handle. Simply setting `max_dbs=` higher than the maximum
-    number of handles required will alleviate any need to coordinate management
-    amongst users.
+There is little reason to close a handle: open handles only consume slots in
+the shared environment and repeated calls to :py:meth:`Environment.open` for
+the same name return the same handle. Simply setting `max_dbs=` higher than the
+maximum number of handles required will alleviate any need to coordinate
+management amongst users.
 
 
 Storage efficiency & limits
 +++++++++++++++++++++++++++
 
-    MDB groups records in pages matching the operating system memory manager's
-    page size which is usually 4096 bytes. In order to maintain its internal
-    structure each page must contain a minimum of 2 records, in addition to 8
-    bytes per record and a 16 byte header. Due to this the engine is most
-    space-efficient when the combined size of any (8+key+value) combination
-    does not exceed 2040 bytes.
+MDB groups records in pages matching the operating system memory manager's page
+size which is usually 4096 bytes. In order to maintain its internal structure
+each page must contain a minimum of 2 records, in addition to 8 bytes per
+record and a 16 byte header. Due to this the engine is most space-efficient
+when the combined size of any (8+key+value) combination does not exceed 2040
+bytes.
 
-    When an attempt to store a record would exceed the maximum size, its value
-    part is written separately to one or more pages. Since the trailer of the
-    last page containing the record value cannot be shared with other records,
-    it is more efficient when large values are an approximate multiple of 4096
-    bytes, minus 16 bytes for an initial header.
+When an attempt to store a record would exceed the maximum size, its value part
+is written separately to one or more pages. Since the trailer of the last page
+containing the record value cannot be shared with other records, it is more
+efficient when large values are an approximate multiple of 4096 bytes, minus 16
+bytes for an initial header.
 
-    Space usage can be monitored using :py:meth:`Environment.stat`:
+Space usage can be monitored using :py:meth:`Environment.stat`:
 
         ::
 
@@ -156,27 +155,27 @@ Storage efficiency & limits
              'overflow_pages': 0L,
              'psize': 4096L}
 
-    This database contains 3,761,848 records and none of the records had their
-    value spilled (``overflow_pages``).
+This database contains 3,761,848 records and no values were spilled
+(``overflow_pages``).
 
-    By default record keys are limited to 511 bytes in length, however this
-    can be adjusted by rebuilding the library.
+By default record keys are limited to 511 bytes in length, however this can be
+adjusted by rebuilding the library.
 
 
 Buffers
 +++++++
 
-    Since MDB is exclusively memory mapped it is possible to access record
-    data without keys or values ever being copied by the kernel, database
-    library, or application. To exploit this the library can be instructed to
-    return :py:func:`buffer` objects instead of strings by passing
-    `buffers=True` to :py:meth:`Environment.begin` or :py:class:`Transaction`.
+Since MDB is exclusively memory mapped it is possible to access record data
+without keys or values ever being copied by the kernel, database library, or
+application. To exploit this the library can be instructed to return
+:py:func:`buffer` objects instead of strings by passing `buffers=True` to
+:py:meth:`Environment.begin` or :py:class:`Transaction`.
 
-    In Python :py:func:`buffer` objects can be used in many places where
-    strings are expected. In every way they act like a regular sequence: they
-    support slicing, indexing, iteration, and taking their length. Many Python
-    APIs will automatically convert them to bytestrings as necessary, since
-    they also implement ``__str__()``:
+In Python :py:func:`buffer` objects can be used in many places where strings
+are expected. In every way they act like a regular sequence: they support
+slicing, indexing, iteration, and taking their length. Many Python APIs will
+automatically convert them to bytestrings as necessary, since they also
+implement ``__str__()``:
 
     ::
 
@@ -197,11 +196,11 @@ Buffers
         >>> type(value)
         <type 'str'>
 
-    It is also possible to pass buffers directly to many native APIs, for
-    example :py:meth:`file.write`, :py:meth:`socket.send`,
-    :py:meth:`zlib.decompress` and so on.
+It is also possible to pass buffers directly to many native APIs, for example
+:py:meth:`file.write`, :py:meth:`socket.send`, :py:meth:`zlib.decompress` and
+so on.
 
-    A buffer may be sliced without copying by passing it to :py:func:`buffer`:
+A buffer may be sliced without copying by passing it to :py:func:`buffer`:
 
     ::
 
@@ -210,12 +209,11 @@ Buffers
         >>> len(sub_buf)
         200
 
-
-    **Caution:** in CPython buffers returned by :py:class:`Transaction` and
-    :py:class:`Cursor` are reused, so that consecutive calls to
-    :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
-    overwrite the objects that have already been returned. To preserve a value
-    returned in a buffer, convert it to a string using :py:func:`str`.
+**Caution:** in CPython buffers returned by :py:class:`Transaction` and
+:py:class:`Cursor` are reused, so that consecutive calls to
+:py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
+overwrite the objects that have already been returned. To preserve a value
+returned in a buffer, convert it to a string using :py:func:`str`.
 
     ::
 
@@ -239,9 +237,9 @@ Buffers
         >>> vals1
         'value1'
 
-    **Caution:** in both PyPy and CPython, *returned buffers absolutely should
-    not be used after their generating transaction has completed, or after you
-    modified the database in the same transaction!*
+**Caution:** in both PyPy and CPython, *returned buffers absolutely should not
+be used after their generating transaction has completed, or after you modified
+the database in the same transaction!*
 
 
 
@@ -266,17 +264,6 @@ Transaction class
 #################
 
 .. autoclass:: lmdb.Transaction
-    :members:
-
-
-Database class
-##############
-
-**Note:** unless working with sub-databases, you never need to explicitly
-handle the :py:class:`Database` class, as all :py:class:`Transaction` methods
-default to the main database.
-
-.. autoclass:: lmdb.Database
     :members:
 
 
