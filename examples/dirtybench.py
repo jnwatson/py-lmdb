@@ -86,3 +86,43 @@ with env.begin(buffers=True) as txn:
     t1 = now()
     print 'enum %d (key, value) buffers took %.2f sec' % ((lst), t1-t0)
 
+
+print
+print
+print '--- MDB_APPEND mode ---'
+print
+
+env.close()
+if os.path.exists(dbpath):
+    shutil.rmtree(dbpath)
+env = lmdb.connect(dbpath, map_size=1048576 * 1024)
+
+
+getword = iter(sorted(words)).next
+run = True
+t0 = now()
+last = t0
+while run:
+    with env.begin() as txn:
+        try:
+            for _ in xrange(50000):
+                word = getword()
+                txn.put(word, big or word, append=True)
+        except StopIteration:
+            run = False
+
+    t1 = now()
+    if (t1 - last) > 2:
+        print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+        last = t1
+
+t1 = now()
+print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+last = t1
+
+st = env.stat()
+print 'stat:', st
+print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
+    ((2*alllen) / 1024., (2*alllen)/len(words),
+     (st['psize'] * st['leaf_pages']) / 1024.,
+     (st['psize'] * st['leaf_pages']) / len(words))
