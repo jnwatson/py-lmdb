@@ -45,8 +45,8 @@ Installation
         # or
         easy_install lmdb
 
-    *Note:* on PyPy, the wrapper depends on cffi, which itself on ``libffi``,
-    so you may need to install the development package for it. On
+    *Note:* on PyPy, the wrapper depends on cffi, which in turn depends on
+    ``libffi``, so you may need to install the development package for it. On
     Debian/Ubuntu:
 
     ::
