@@ -46,9 +46,8 @@ Introduction
       <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
     * Multiple sub-databases may be created, with transactions covering all
       sub-databases.
-    * Completely memory mapped, allowing for zero copy lookup and iteration.
-      This is optionally directly exposed to Python using the :py:func:`buffer`
-      interface.
+    * Memory mapped, allowing for zero copy lookup and iteration. This is
+      optionally exposed to Python using the :py:func:`buffer` interface.
     * Maintenance requires no external process or background threads.
     * No application-level caching is required: MDB relies entirely on the
       operating system's buffer cache.
