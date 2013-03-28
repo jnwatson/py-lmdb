@@ -18,26 +18,48 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+import os
 import sys
-from setuptools import setup
+import platform
 
-try:
-    import lmdb.cffi
-    ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
-except ImportError:
-    print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
-    ext_modules = []
+from setuptools import setup, Extension
+
+
+use_cpython = False
+use_cpython = platform.python_implementation() == 'CPython'
+if os.getenv('LMDB_FORCE_CFFI') is not None:
+    use_cpython = False
+
+
+if use_cpython:
+    print 'Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.'
+    install_requires = []
+    ext_modules = [Extension(
+        name='lmdb.cpython',
+        sources=['lmdb/cpython.c', 'lib/mdb.c', 'lib/midl.c'],
+        extra_compile_args=['-Wno-shorten-64-to-32'],
+        include_dirs=['lib']
+    )]
+else:
+    print 'Using cffi extension.'
+    install_requires = ['cffi']
+    try:
+        import lmdb.cffi
+        ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
+    except ImportError:
+        print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
+        ext_modules = []
 
 setup(
     name = 'lmdb',
     version = '0.55',
-    description = "CFFI wrapper for OpenLDAP MDB 'Lightning Database' B-tree library",
+    description = "cffi/CPython native wrapper for OpenLDAP MDB 'Lightning Database' library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
     packages = ['lmdb'],
     ext_package = 'lmdb',
     ext_modules = ext_modules,
-    install_requires = ['cffi'],
+    install_requires = install_requires,
     zip_safe = False
 )
