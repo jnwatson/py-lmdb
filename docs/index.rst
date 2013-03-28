@@ -11,7 +11,7 @@ lmdb
                 font-size: larger">
         <strong style="color: #7f0000">WORK IN PROGRESS</strong><br>
         <br>
-        This wrapper is not yet thoroughly documented or heavily tested, but it
+        This wrapper is not yet thoroughly documented or heavily tested but it
         already works well.
     </div>
 
@@ -22,13 +22,13 @@ lmdb
     :maxdepth: 2
 
 This is a Python wrapper for the `OpenLDAP MDB 'Lightning' Database
-<http://symas.com/mdb/>`_. Two versions are provided, and automatically
+<http://symas.com/mdb/>`_. Two versions are provided and automatically
 selected during installation: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ version that supports `PyPy
-<http://www.pypy.org/>`_, and a custom module for CPython. Python 3.x is not
+<http://www.pypy.org/>`_ and a custom module for CPython. Python 3.x is not
 supported yet.
 
-As no packages are available, the MDB library is bundled inline with the
+As no packages are available the MDB library is bundled inline with the
 wrapper and built statically.
 
 
@@ -44,7 +44,7 @@ Introduction
     * Environments may be opened by multiple processes on the same host, making
       it ideal for working around Python's `GIL
       <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
-    * Multiple sub-databases may be created, with transactions covering all
+    * Multiple sub-databases may be created with transactions covering all
       sub-databases.
     * Memory mapped, allowing for zero copy lookup and iteration. This is
       optionally exposed to Python using the :py:func:`buffer` interface.
@@ -58,7 +58,7 @@ Installation
 ++++++++++++
 
     To install the Python module, ensure a C compiler and `pip` or
-    `easy_install` are available, and type:
+    `easy_install` are available and type:
 
     ::
 
@@ -66,7 +66,7 @@ Installation
         # or
         easy_install lmdb
 
-    *Note:* on PyPy the wrapper depends on cffi, which in turn depends on
+    *Note:* on PyPy the wrapper depends on cffi which in turn depends on
     ``libffi``, so you may need to install the development package for it. On
     Debian/Ubuntu:
 
@@ -75,7 +75,7 @@ Installation
         apt-get install libffi-dev
 
     You may also use the cffi version on CPython. This is accomplished by
-    setting the ``LMDB_FORCE_CFFI`` environment variable before installation,
+    setting the ``LMDB_FORCE_CFFI`` environment variable before installation
     or before module import with an existing installation:
 
     ::
@@ -93,15 +93,15 @@ Sub-databases
     To use the sub-database feature you must call :py:func:`lmdb.connect` or
     :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number
     of sub-databases required. This must be done by the first process or thread
-    opening the environment, as it is used to allocate resources kept in shared
+    opening the environment as it is used to allocate resources kept in shared
     memory.
 
     **Caution:** MDB implements sub-databases by *storing a special descriptor
     key in the main database*. All databases in an environment *share the same
     file*. Because a sub-database is just a key in the main database, attempts
-    to create a sub-database will fail if this key already exists. Furthermore,
+    to create a sub-database will fail if this key already exists. Furthermore
     *the key is visible to lookups and enumerations*. If your main database
-    keyspace conflicts with the names you are using for sub-databases, then
+    keyspace conflicts with the names you are using for sub-databases then
     consider moving the contents of your main database to another sub-database.
 
     ::
@@ -114,14 +114,14 @@ Sub-databases
         >>> subdb = env.open('somename')
 
     **Caution:** when a sub-database has been opened with
-    :py:meth:`Environment.open` or :py:class:`Database`, the resulting handle
-    is shared with all environment users. In particular, this means any user
+    :py:meth:`Environment.open` or :py:class:`Database` the resulting handle
+    is shared with all environment users. In particular this means any user
     calling :py:meth:`Database.close` will invalidate the handle for all users.
-    For this reason the :py:class:`Database` destructor never deletes native
+    For this reason the :py:class:`Database` destructor never closes native
     handles, you must do it explicitly.
 
     There is little reason to close a handle: open handles only consume slots
-    in the shared environment, and repeated calls to
+    in the shared environment and repeated calls to
     :py:meth:`Environment.open` or :py:class:`Database` for the same name
     return the same handle. Simply setting `max_dbs=` higher than the maximum
     number of handles required will alleviate any need to coordinate management
@@ -132,9 +132,9 @@ Storage efficiency & limits
 +++++++++++++++++++++++++++
 
     MDB groups records in pages matching the operating system memory manager's
-    page size, which is usually 4096 bytes. In order to maintain its internal
-    structure, each page must contain a minimum of 2 records, in addition to 8
-    bytes per record and a 16 byte header. Due to this, the engine is most
+    page size which is usually 4096 bytes. In order to maintain its internal
+    structure each page must contain a minimum of 2 records, in addition to 8
+    bytes per record and a 16 byte header. Due to this the engine is most
     space-efficient when the combined size of any (8+key+value) combination
     does not exceed 2040 bytes.
 
@@ -156,7 +156,7 @@ Storage efficiency & limits
              'overflow_pages': 0L,
              'psize': 4096L}
 
-    This database contains 3,761,848 records, and none of the records had their
+    This database contains 3,761,848 records and none of the records had their
     value spilled (``overflow_pages``).
 
     By default record keys are limited to 511 bytes in length, however this
@@ -166,9 +166,9 @@ Storage efficiency & limits
 Buffers
 +++++++
 
-    Since MDB is exclusively memory mapped, it is possible to access record
+    Since MDB is exclusively memory mapped it is possible to access record
     data without keys or values ever being copied by the kernel, database
-    library, or application. To exploit this, the library can be instructed to
+    library, or application. To exploit this the library can be instructed to
     return :py:func:`buffer` objects instead of strings by passing
     `buffers=True` to :py:meth:`Environment.begin` or :py:class:`Transaction`.
 
@@ -211,7 +211,7 @@ Buffers
         200
 
 
-    **Caution:** in CPython, buffers returned by :py:class:`Transaction` and
+    **Caution:** in CPython buffers returned by :py:class:`Transaction` and
     :py:class:`Cursor` are reused, so that consecutive calls to
     :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
     overwrite the objects that have already been returned. To preserve a value
