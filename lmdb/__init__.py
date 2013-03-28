@@ -18,9 +18,15 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+import os
+
 try:
+    if os.getenv('LMDB_FORCE_CFFI') is not None:
+        raise ImportError
     from lmdb._lmdb import *
 except ImportError:
     from lmdb.cffi import *
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
+
+del os
