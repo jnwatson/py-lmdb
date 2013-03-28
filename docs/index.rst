@@ -42,7 +42,8 @@ Introduction
       block readers. Each environment supports one concurrent write transaction.
     * Read transactions are extremely cheap: under 400 nanoseconds on CPython.
     * Environments may be opened by multiple processes on the same host, making
-      it ideal for working around Python's GIL.
+      it ideal for working around Python's `GIL
+      <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
     * Multiple sub-databases may be created, with transactions covering all
       sub-databases.
     * Completely memory mapped, allowing for zero copy lookup and iteration.
