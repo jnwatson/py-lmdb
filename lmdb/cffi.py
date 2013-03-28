@@ -346,12 +346,12 @@ class Environment(object):
 
         `metasync`:
             If ``False``, never explicitly flush metadata pages to disk. OS
-            will flush at its disgression, or user can flush with
+            will flush at its discretion, or user can flush with
             :py:meth:`sync`.
 
         `sync`
             If ``False``, never explicitly flush data pages to disk. OS will
-            flush at its disgression, or user can flush with :py:meth:`sync`.
+            flush at its discretion, or user can flush with :py:meth:`sync`.
             This optimization means a system crash can corrupt the database or
             lose the last transactions if buffers are not yet flushed to disk.
 
@@ -665,7 +665,9 @@ class Transaction(object):
 
     All operations require a transaction handle, transactions may be read-only
     or read-write. Transactions may not span threads; a transaction must only
-    be used by a single thread. A thread may only have a single transaction.
+    be used by a single thread.
+
+    Threads may only have a single transaction open for each environment.
 
     Cursors may not span transactions; each cursor must be opened and closed
     within a single transaction.
