@@ -90,7 +90,7 @@ Installation
 Sub-databases
 +++++++++++++
 
-    To use the sub-database feature, you must call :py:func:`lmdb.connect` or
+    To use the sub-database feature you must call :py:func:`lmdb.connect` or
     :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number
     of sub-databases required. This must be done by the first process or thread
     opening the environment, as it is used to allocate resources kept in shared
@@ -134,7 +134,7 @@ Storage efficiency & limits
     MDB groups records in pages matching the operating system memory manager's
     page size, which is usually 4096 bytes. In order to maintain its internal
     structure, each page must contain a minimum of 2 records, in addition to 8
-    bytes per record, and a 16 byte header. Due to this, the engine is most
+    bytes per record and a 16 byte header. Due to this, the engine is most
     space-efficient when the combined size of any (8+key+value) combination
     does not exceed 2040 bytes.
 
@@ -159,7 +159,7 @@ Storage efficiency & limits
     This database contains 3,761,848 records, and none of the records had their
     value spilled (``overflow_pages``).
 
-    By default, record keys are limited to 511 bytes in length, however this
+    By default record keys are limited to 511 bytes in length, however this
     can be adjusted by rebuilding the library.
 
 
@@ -172,7 +172,7 @@ Buffers
     return :py:func:`buffer` objects instead of strings by passing
     `buffers=True` to :py:meth:`Environment.begin` or :py:class:`Transaction`.
 
-    In Python, :py:func:`buffer` objects can be used in many places where
+    In Python :py:func:`buffer` objects can be used in many places where
     strings are expected. In every way they act like a regular sequence: they
     support slicing, indexing, iteration, and taking their length. Many Python
     APIs will automatically convert them to bytestrings as necessary, since
