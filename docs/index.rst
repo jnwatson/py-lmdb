@@ -21,7 +21,7 @@ lmdb
     :hidden:
     :maxdepth: 2
 
-This is a Python wrapper for the `OpenLDAP MDB 'Lightning Database'
+This is a Python wrapper for the `OpenLDAP MDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two versions are provided, and automatically
 selected during installation: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ version that supports `PyPy
