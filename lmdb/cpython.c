@@ -34,8 +34,8 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#undef DEBUG
-#define DEBUG(s, ...)
+//#undef DEBUG
+//#define DEBUG(s, ...)
 
 
 static PyObject *Error;
@@ -388,6 +388,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
 
     self->valid = 0;
+    self->main_db = NULL;
     self->env = NULL;
 
     int rc;
