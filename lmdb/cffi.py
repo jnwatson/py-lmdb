@@ -460,15 +460,15 @@ class Environment(object):
         Equivalent to `mdb_env_sync()
         <http://symas.com/mdb/doc/group__mdb.html#ga85e61f05aa68b520cc6c3b981dba5037>`_
 
-        Data is always written to disk when ``Transaction.commit()`` is called,
-        but the operating system may keep it buffered. MDB always flushes the
-        OS buffers upon commit as well, unless the environment was opened with
-        ``sync=False`` or ``metasync=False``.
+        Data is always written to disk when :py:meth:`Transaction.commit` is
+        called, but the operating system may keep it buffered. MDB always
+        flushes the OS buffers upon commit as well, unless the environment was
+        opened with `sync=False` or `metasync=False`.
 
-        ``force``
-            If non-zero, force a synchronous flush. Otherwise if the
-            environment was opened with ``sync=False`` the flushes will be
-            omitted, and with #MDB_MAPASYNC they will be asynchronous.
+        `force`:
+            If ``True``, force a synchronous flush. Otherwise if the
+            environment was opened with `sync=False` the flushes will be
+            omitted, and with `map_async=True` they will be asynchronous.
         """
         rc = mdb_env_sync(self._env, force)
         if rc:
@@ -546,6 +546,9 @@ class Environment(object):
         be called from within an existing write transaction. Parameters are as
         for :py:class:`Database` constructor.
 
+        Repeated calls to :py:meth:`open` for the same name will return the
+        same database handle.
+
         As a special case, the main database is always open.
 
         Equivalent to `mdb_dbi_open()
@@ -578,6 +581,9 @@ class Database(object):
 
     Preexisting transactions, other than the current transaction and any
     parents, must not use the new handle. Nor must their children.
+
+    Repeated constructions of :py:class:`Database` for the same name will
+    return the same database handle.
 
         `env`:
             :py:class:`Environment` the database will be opened or created in.
@@ -678,15 +684,15 @@ class Transaction(object):
             must pass `write=True`.
 
         `buffers`:
-            If ``True``, indicates **py-lmdb** should not convert database
-            values into Python strings, but instead return buffer objects. This
-            setting applies to the :py:class:`Transaction` instance itself and
-            any :py:class:`Cursors <Cursor>` created within the transaction.
+            If ``True``, indicates :py:func:`buffer` objects should be yielded
+            instead of strings. This setting applies to the
+            :py:class:`Transaction` instance itself and any :py:class:`Cursors
+            <Cursor>` created within the transaction.
 
             This feature significantly improves performance, since MDB has a
-            totally zero-copy read design, but it requires care when
-            manipulating the returned buffer objects. With small keys and
-            values, the benefit of this facility is greatly diminished.
+            zero-copy design, but it requires care when manipulating the
+            returned buffer objects. The benefit of this facility is diminished
+            when using small keys and values.
     """
     def __init__(self, env, parent=None, write=False, buffers=False):
         _depend(env, self)

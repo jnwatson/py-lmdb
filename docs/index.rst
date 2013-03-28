@@ -66,7 +66,7 @@ Installation
         # or
         easy_install lmdb
 
-    *Note:* on PyPy, the wrapper depends on cffi, which in turn depends on
+    *Note:* on PyPy the wrapper depends on cffi, which in turn depends on
     ``libffi``, so you may need to install the development package for it. On
     Debian/Ubuntu:
 
@@ -75,8 +75,8 @@ Installation
         apt-get install libffi-dev
 
     You may also use the cffi version on CPython. This is accomplished by
-    setting the ``LMDB_FORCE_CFFI`` environment variable before installation or
-    module import:
+    setting the ``LMDB_FORCE_CFFI`` environment variable before installation,
+    or before module import with an existing installation:
 
     ::
 
@@ -107,11 +107,25 @@ Sub-databases
     ::
 
         >>> env = lmdb.connect('/tmp/test', max_dbs=2)
-        >>> with env.begin(write=True) as txn:
+        >>> with env.begin(write=True) as txn
         ...     txn.put('somename', 'somedata')
 
         >>> # Error: database cannot share name of existing key!
         >>> subdb = env.open('somename')
+
+    **Caution:** when a sub-database has been opened with
+    :py:meth:`Environment.open` or :py:class:`Database`, the resulting handle
+    is shared with all environment users. In particular, this means any user
+    calling :py:meth:`Database.close` will invalidate the handle for all
+    readers. For this reason the :py:class:`Database` destructor never deletes
+    native handles, you must do it explicitly.
+
+    There is little reason to close a handle: open handles only consume slots
+    in the shared environment, and repeated calls to
+    :py:meth:`Environment.open` or :py:class:`Database` for the same name
+    return the same handle. Simply setting `max_dbs=` higher than the maximum
+    number of handles required will alleviate any need to coordinate management
+    amongst users.
 
 
 Storage efficiency & limits
@@ -120,15 +134,15 @@ Storage efficiency & limits
     MDB groups records in pages matching the operating system memory manager's
     page size, which is usually 4096 bytes. In order to maintain its internal
     structure, each page must contain a minimum of 2 records, in addition to 8
-    bytes per record, and a 116 byte header. Due to this, the engine is most
+    bytes per record, and a 16 byte header. Due to this, the engine is most
     space-efficient when the combined size of any (8+key+value) combination
     does not exceed 2040 bytes.
 
-    When an attempt to store a record would exceed the containing page's free
-    space, the record's value part is written separately to one or more pages
-    of its own. Since the trailer of the last page containing the record value
-    cannot be shared with other records, it is more efficient when large record
-    values are an approximate multiple of 4080 bytes (4096 - 16 byte header).
+    When an attempt to store a record would exceed the maximum size, its value
+    part is written separately to one or more pages. Since the trailer of the
+    last page containing the record value cannot be shared with other records,
+    it is more efficient when large values are an approximate multiple of 4096
+    bytes, minus 16 bytes for an initial header.
 
     Space usage can be monitored using :py:meth:`Environment.stat`:
 
@@ -143,7 +157,7 @@ Storage efficiency & limits
              'psize': 4096L}
 
     This database contains 3,761,848 records, and none of the records had their
-    value spilled to a separate page (``overflow_pages``).
+    value spilled (``overflow_pages``).
 
     By default, record keys are limited to 511 bytes in length, however this
     can be adjusted by rebuilding the library.
@@ -200,8 +214,8 @@ Buffers
     **Caution:** in CPython, buffers returned by :py:class:`Transaction` and
     :py:class:`Cursor` are reused, so that consecutive calls to
     :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
-    overwrite the objects that have already been returned. To keep hold of a
-    value returned in a buffer, convert it to a string using :py:func:`str`.
+    overwrite the objects that have already been returned. To preserve a value
+    returned in a buffer, convert it to a string using :py:func:`str`.
 
     ::
 
