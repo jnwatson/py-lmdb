@@ -13,11 +13,16 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
+#undef DEBUG
+#define DEBUG(s, ...)
+
+
 static PyObject *Error;
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
 extern PyTypeObject PyTransaction_Type;
 extern PyTypeObject PyCursor_Type;
+extern PyTypeObject PyIterator_Type;
 
 struct EnvObject;
 
@@ -77,10 +82,16 @@ typedef struct {
 typedef struct {
     PyObject_HEAD
     int valid;
+    TransObject *trans;
     EnvObject *env;
     DbObject *db;
     CursorObject *curs;
-    int reverse;
+    int op;
+    PyObject *(*val_func)(CursorObject *);
+
+    PyObject *ptype;
+    PyObject *pvalue;
+    PyObject *ptraceback;
 } IterObject;
 
 
@@ -658,229 +669,42 @@ PyTypeObject PyEnvironment_Type = {
 };
 
 
+// ==================================
+// Iterators factory
+// ==================================
+
+
+static PyObject *
+make_iterator(CursorObject *curs, enum MDB_cursor_op op,
+              PyObject *(*val_func)(CursorObject *))
+{
+    IterObject *self = PyObject_New(IterObject, &PyIterator_Type);
+    if(! self) {
+        return NULL;
+    }
+
+    self->valid = 1;
+    self->ptype = NULL;
+    self->pvalue = NULL;
+    self->ptraceback = NULL;
+    self->curs = curs;
+    Py_INCREF(curs);
+    self->env = curs->env;
+    self->db = curs->db;
+    self->trans = curs->trans;
+    self->op = op;
+    self->val_func = val_func;
+    return (PyObject *)self;
+}
+
+
 /// cursors
 //
 //
 //
 
-static int cursor_valid(CursorObject *self)
-{
-    return 4 == (self->valid + self->env->valid +
-                 self->trans->valid + self->db->valid);
-}
-
-static PyObject *
-curs_count(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-
-    size_t count;
-    int rc = mdb_cursor_count(self->curs, &count);
-    if(rc) {
-        return err_set("mdb_cursor_count", rc);
-    }
-    return PyLong_FromUnsignedLongLong(count);
-}
-
-static PyObject *
-_cursor_get(CursorObject *self, enum MDB_cursor_op op)
-{
-    int rc = mdb_cursor_get(self->curs, &(self->key), &(self->val), op);
-    self->positioned = rc == 0;
-    if(rc) {
-        self->key.mv_size = 0;
-        self->val.mv_size = 0;
-        if(rc != MDB_NOTFOUND) {
-            if(! (rc == EINVAL && op == MDB_GET_CURRENT)) {
-                return err_set("mdb_cursor_get", rc);
-            }
-        }
-    }
-    return PyBool_FromLong(self->positioned);
-}
-
-
-static PyObject *
-curs_delete(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-    if(self->positioned) {
-        int rc = mdb_cursor_del(self->curs, 0);
-        if(rc) {
-            return err_set("mdb_cursor_del", rc);
-        }
-        return _cursor_get(self, MDB_GET_CURRENT);
-    }
-    Py_RETURN_FALSE;
-}
-
-static PyObject *
-curs_first(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-    return _cursor_get(self, MDB_FIRST);
-}
-
-static PyObject *
-curs_forward(PyObject *self)
-{
-    return NULL;
-}
-
-static PyObject *
-curs_item(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-    if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
-            return NULL;
-        }
-        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
-            return NULL;
-        }
-        if(! self->item_tup) {
-            self->item_tup = PyTuple_Pack(2, self->key_buf, self->val_buf);
-        }
-        Py_INCREF(self->item_tup);
-        return self->item_tup;
-    }
-
-    PyObject *key = string_from_val(&(self->key));
-    if(! key) {
-        return NULL;
-    }
-    PyObject *val = string_from_val(&(self->val));
-    if(! val) {
-        Py_DECREF(key);
-        return NULL;
-    }
-    PyObject *tup = PyTuple_Pack(2, key, val);
-    if(! tup) {
-        Py_DECREF(key);
-        Py_DECREF(val);
-        return NULL;
-    }
-    return tup;
-}
-
-static PyObject *
-curs_key(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-    if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
-            return NULL;
-        }
-        Py_INCREF(self->key_buf);
-        return (PyObject *) self->key_buf;
-    }
-    return string_from_val(&(self->key));
-}
-
-static PyObject *
-curs_last(PyObject *self)
-{
-    return NULL;
-}
-
-static PyObject *
-curs_next(PyObject *self)
-{
-    return NULL;
-}
-
-static PyObject *
-curs_prev(PyObject *self)
-{
-    return NULL;
-}
-
-static PyObject *
-curs_put(PyObject *self, PyObject *args)
-{
-        PyObject *key;
-        PyObject *value;
-        PyObject *dupdata = false;
-        PyObject *overwrite;
-        PyObject *append;
-        if (!PyArg_ParseTuple(args, ":put",
-                              &key, &value, &dupdata, &overwrite, &append))
-                return NULL;
-        return NULL;
-}
-
-static PyObject *
-curs_reverse(PyObject *self)
-{
-    return NULL;
-}
-
-static PyObject *
-curs_set_key(PyObject *self, PyObject *args)
-{
-        PyObject *key;
-        if (!PyArg_ParseTuple(args, "O:set_key",
-                              &key))
-                return NULL;
-    return NULL;
-}
-
-static PyObject *
-curs_set_range(PyObject *self, PyObject *args)
-{
-        PyObject *key;
-        if (!PyArg_ParseTuple(args, "O:set_range",
-                              &key))
-                return NULL;
-    return NULL;
-}
-
-static PyObject *
-curs_value(CursorObject *self)
-{
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-    if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
-            return NULL;
-        }
-        Py_INCREF(self->val_buf);
-        return (PyObject *) self->val_buf;
-    }
-    return string_from_val(&self->val);
-}
-
-static struct PyMethodDef curs_methods[] = {
-    {"count", (PyCFunction)curs_count, METH_NOARGS},
-    {"delete", (PyCFunction)curs_delete, METH_NOARGS},
-    {"first", (PyCFunction)curs_first, METH_NOARGS},
-    {"forward", (PyCFunction)curs_forward, METH_NOARGS},
-    {"item", (PyCFunction)curs_item, METH_NOARGS},
-    {"key", (PyCFunction)curs_key, METH_NOARGS},
-    {"last", (PyCFunction)curs_last, METH_NOARGS},
-    {"next", (PyCFunction)curs_next, METH_NOARGS},
-    {"prev", (PyCFunction)curs_prev, METH_NOARGS},
-    {"put", (PyCFunction)curs_put, METH_VARARGS},
-    {"reverse", (PyCFunction)curs_reverse, METH_NOARGS},
-    {"set_key", (PyCFunction)curs_set_key, METH_VARARGS},
-    {"set_range", (PyCFunction)curs_set_range, METH_VARARGS},
-    {"value", (PyCFunction)curs_value, METH_NOARGS},
-    {NULL, NULL}
-};
-
 static void
-curs_dealloc(CursorObject *self)
+cursor_dealloc(CursorObject *self)
 {
     Py_DECREF(self->trans);
     Py_DECREF(self->db);
@@ -938,7 +762,7 @@ make_cursor(DbObject *db, TransObject *trans)
 }
 
 static PyObject *
-curs_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     DbObject *db;
     TransObject *trans;
@@ -951,58 +775,356 @@ curs_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return make_cursor(db, trans);
 }
 
+static int cursor_valid(CursorObject *self)
+{
+    return 4 == (self->valid + self->env->valid +
+                 self->trans->valid + self->db->valid);
+}
+
+static PyObject *
+cursor_count(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+
+    size_t count;
+    int rc = mdb_cursor_count(self->curs, &count);
+    if(rc) {
+        return err_set("mdb_cursor_count", rc);
+    }
+    return PyLong_FromUnsignedLongLong(count);
+}
+
+static PyObject *
+_cursor_get(CursorObject *self, enum MDB_cursor_op op)
+{
+    int rc = mdb_cursor_get(self->curs, &(self->key), &(self->val), op);
+    self->positioned = rc == 0;
+    if(rc) {
+        self->key.mv_size = 0;
+        self->val.mv_size = 0;
+        if(rc != MDB_NOTFOUND) {
+            if(! (rc == EINVAL && op == MDB_GET_CURRENT)) {
+                return err_set("mdb_cursor_get", rc);
+            }
+        }
+    }
+    return PyBool_FromLong(self->positioned);
+}
+
+
+static PyObject *
+cursor_delete(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(self->positioned) {
+        int rc = mdb_cursor_del(self->curs, 0);
+        if(rc) {
+            return err_set("mdb_cursor_del", rc);
+        }
+        return _cursor_get(self, MDB_GET_CURRENT);
+    }
+    Py_RETURN_FALSE;
+}
+
+static PyObject *
+cursor_first(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_FIRST);
+}
+
+static PyObject *
+cursor_item(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(self->trans->buffers) {
+        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
+            return NULL;
+        }
+        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
+            return NULL;
+        }
+        if(! self->item_tup) {
+            self->item_tup = PyTuple_Pack(2, self->key_buf, self->val_buf);
+        }
+        Py_INCREF(self->item_tup);
+        return self->item_tup;
+    }
+
+    PyObject *key = string_from_val(&(self->key));
+    if(! key) {
+        return NULL;
+    }
+    PyObject *val = string_from_val(&(self->val));
+    if(! val) {
+        Py_DECREF(key);
+        return NULL;
+    }
+    PyObject *tup = PyTuple_Pack(2, key, val);
+    if(! tup) {
+        Py_DECREF(key);
+        Py_DECREF(val);
+        return NULL;
+    }
+    return tup;
+}
+
+static PyObject *
+cursor_key(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(self->trans->buffers) {
+        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
+            return NULL;
+        }
+        Py_INCREF(self->key_buf);
+        return (PyObject *) self->key_buf;
+    }
+    return string_from_val(&(self->key));
+}
+
+static PyObject *
+cursor_last(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_LAST);
+}
+
+static PyObject *
+cursor_next(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_NEXT);
+}
+
+static PyObject *
+cursor_prev(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_PREV);
+}
+
+static PyObject *
+cursor_put(PyObject *self, PyObject *args)
+{
+        PyObject *key;
+        PyObject *value;
+        PyObject *dupdata = false;
+        PyObject *overwrite;
+        PyObject *append;
+        if (!PyArg_ParseTuple(args, ":put",
+                              &key, &value, &dupdata, &overwrite, &append))
+                return NULL;
+        return NULL;
+}
+
+static PyObject *
+cursor_set_key(PyObject *self, PyObject *args)
+{
+        PyObject *key;
+        if (!PyArg_ParseTuple(args, "O:set_key",
+                              &key))
+                return NULL;
+    return NULL;
+}
+
+static PyObject *
+cursor_set_range(PyObject *self, PyObject *args)
+{
+        PyObject *key;
+        if (!PyArg_ParseTuple(args, "O:set_range",
+                              &key))
+                return NULL;
+    return NULL;
+}
+
+static PyObject *
+cursor_value(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(self->trans->buffers) {
+        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
+            return NULL;
+        }
+        Py_INCREF(self->val_buf);
+        return (PyObject *) self->val_buf;
+    }
+    return string_from_val(&self->val);
+}
+
+static PyObject *
+iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
+                   enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+
+    int keys = 1;
+    int values = 1;
+    static char *kwlist[] = {"keys", "values", NULL};
+    if(! PyArg_ParseTupleAndKeywords(args, kwds, "|ii", kwlist, &keys,
+            &values)) {
+        return NULL;
+    }
+
+    if(! self->positioned) {
+        PyObject *ret = _cursor_get(self, pos_op);
+        if(! ret) {
+            return NULL;
+        }
+        Py_DECREF(ret);
+    }
+
+    PyObject *(*val_func)(CursorObject *);
+    if(! values) {
+        val_func = (void *)cursor_key;
+    } else if(! keys) {
+        val_func = (void *)cursor_value;
+    } else {
+        val_func = (void *)cursor_item;
+    }
+    return make_iterator(self, op, val_func);
+}
+
+static PyObject *
+cursor_iter(CursorObject *self)
+{
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+
+    if(! self->positioned) {
+        PyObject *ret = _cursor_get(self, MDB_FIRST);
+        if(! ret) {
+            return NULL;
+        }
+        Py_DECREF(ret);
+    }
+    return make_iterator(self, MDB_NEXT, (void *)cursor_item);
+}
+
+static PyObject *
+cursor_forward(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iterator_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
+}
+
+static PyObject *
+cursor_reverse(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iterator_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
+}
+
+static struct PyMethodDef cursor_methods[] = {
+    {"count", (PyCFunction)cursor_count, METH_NOARGS},
+    {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
+    {"first", (PyCFunction)cursor_first, METH_NOARGS},
+    {"forward", (PyCFunction)cursor_forward, METH_VARARGS|METH_KEYWORDS},
+    {"item", (PyCFunction)cursor_item, METH_NOARGS},
+    {"key", (PyCFunction)cursor_key, METH_NOARGS},
+    {"last", (PyCFunction)cursor_last, METH_NOARGS},
+    {"next", (PyCFunction)cursor_next, METH_NOARGS},
+    {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
+    {"put", (PyCFunction)cursor_put, METH_VARARGS},
+    {"reverse", (PyCFunction)cursor_reverse, METH_VARARGS|METH_KEYWORDS},
+    {"set_key", (PyCFunction)cursor_set_key, METH_VARARGS},
+    {"set_range", (PyCFunction)cursor_set_range, METH_VARARGS},
+    {"value", (PyCFunction)cursor_value, METH_NOARGS},
+    {NULL, NULL}
+};
+
 PyTypeObject PyCursor_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(CursorObject),
-    .tp_dealloc = (destructor) curs_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = curs_methods,
+    .tp_dealloc = (destructor) cursor_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
+    .tp_iter = (getiterfunc)cursor_iter,
+    .tp_methods = cursor_methods,
     .tp_name = "Cursor",
-    .tp_new = curs_new
+    .tp_new = cursor_new
 };
-
 
 
 // ==================================
 // Iterators
 // ==================================
 
-static PyObject *
-iter_dummy(PyObject *self)
-{
-    return NULL;
-}
-
 static struct PyMethodDef iter_methods[] = {
-        {"dummy", (PyCFunction)iter_dummy, METH_NOARGS},
+        //{"dummy", (PyCFunction)iter_dummy, METH_NOARGS},
         {NULL, NULL}
 };
 
-static PyObject *
-iter_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
-{
-    return NULL;
-}
-
 static void
-iter_dealloc(PyObject *ob)
+iter_dealloc(IterObject *self)
 {
+    Py_DECREF(self->curs);
 }
 
-static PyTypeObject PyIterator_Type = {
+
+static PyObject *
+iter_iter(PyObject *self)
+{
+    Py_INCREF(self);
+    return self;
+}
+
+
+static PyObject *
+iter_next(IterObject *self)
+{
+    if(! self->curs->positioned) {
+        return NULL;
+    }
+    if(! cursor_valid(self->curs)) {
+        return err_invalid();
+    }
+    if(self->ptype) {
+        PyErr_Restore(self->ptype, self->pvalue, self->ptraceback);
+        self->ptype = self->pvalue = self->ptraceback = NULL;
+        return NULL;
+    }
+    PyObject *val = self->val_func(self->curs);
+    if(! val) {
+        return NULL;
+    }
+    _cursor_get(self->curs, self->op);
+    if(PyErr_Occurred()) {
+        PyErr_Fetch(&(self->ptype), &(self->pvalue), &(self->ptraceback));
+    }
+    return val;
+}
+
+
+PyTypeObject PyIterator_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
-    .tp_dealloc = iter_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_dealloc = (destructor) iter_dealloc,
+    .tp_iter = (getiterfunc) iter_iter,
+    .tp_iternext = (iternextfunc)iter_next,
+    .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
     .tp_methods = iter_methods,
-    .tp_name = "Iterator",
+    .tp_name = "Iterator"
 };
 
-
-
-// ==========================
-// cursors
-// =============================
 
 
 /// ------------------------
@@ -1233,7 +1355,31 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_TRUE;
 }
 
+static PyObject *trans_enter(TransObject *self)
+{
+    if(! trans_valid(self)) {
+        return err_invalid();
+    }
+    Py_INCREF(self);
+    return (PyObject *)self;
+}
+
+static PyObject *trans_exit(TransObject *self, PyObject *args)
+{
+    if(! trans_valid(self)) {
+        return err_invalid();
+    }
+    if(PyTuple_GET_ITEM(args, 0) == Py_None) {
+        return trans_commit(self);
+    } else {
+        return trans_abort(self);
+    }
+}
+
+
 static struct PyMethodDef trans_methods[] = {
+    {"__enter__", (PyCFunction)trans_enter, METH_NOARGS},
+    {"__exit__", (PyCFunction)trans_exit, METH_VARARGS},
     {"abort", (PyCFunction)trans_abort, METH_NOARGS},
     {"commit", (PyCFunction)trans_commit, METH_NOARGS},
     {"cursor", (PyCFunction)trans_cursor, METH_VARARGS|METH_KEYWORDS},
