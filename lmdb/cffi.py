@@ -364,7 +364,7 @@ class Environment(object):
         `max_readers`:
             Slots to allocate in lock file for read threads; attempts to open
             the environment by more than this many clients simultaneously will
-            fail. only meaningful for environments that aren't already open.
+            fail. Only meaningful for environments that aren't already open.
 
         `max_dbs`:
             Maximum number of databases available. If 0, assume environment
