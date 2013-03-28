@@ -248,7 +248,7 @@ Interface
 
 .. function:: lmdb.open(path, \**kwargs)
    
-   Shorthand for :py:class:`Environment` constructor.
+   Shortcut for :py:class:`Environment` constructor.
 
 
 Environment class

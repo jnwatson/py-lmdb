@@ -599,7 +599,7 @@ class Environment(object):
         return db
 
     def begin(self, **kwargs):
-        """Shortcut for ``lmdb.Transaction(self, **kwargs)``"""
+        """Shortcut for :py:class:`lmdb.Transaction`"""
         return Transaction(self, **kwargs)
 
 
@@ -839,7 +839,7 @@ class Transaction(object):
         return True
 
     def cursor(self, db=None):
-        """Shorthand for ``lmdb.Cursor(db, self)``"""
+        """Shortcut for ``lmdb.Cursor(db, self)``"""
         return Cursor(db or self._db, self)
 
 
