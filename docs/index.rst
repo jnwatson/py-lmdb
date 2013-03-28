@@ -32,6 +32,27 @@ As no packages are available, the MDB library is currently bundled inline with
 the wrapper and built statically.
 
 
+Introduction
+++++++++++++
+
+    MDB is a tiny database with some excellent properties:
+
+    * Ordered-map interface (keys are always sorted)
+    * Reader/writer transactions: readers don't block writers and writers don't
+      block readers. Each environment supports one concurrent write transaction.
+    * Read transactions are extremely cheap: just a few memory allocations.
+    * The database may be opened by multiple processes on the same host, making
+      it ideal for working around Python's GIL.
+    * Multiple sub-databases may be created, with transactions covering all
+      sub-databases.
+    * Completely memory mapped, allowing for zero copy lookup and iteration.
+      This is optionally directly exposed to Python using the :py:func:`buffer`
+      interface.
+    * Maintenance requires no external process or background threads.
+    * No application-level caching is required: MDB relies entirely on the
+      operating system's buffer cache.
+    * Merely 32kb of object code and 6kLOC of C.
+
 
 Installation
 ++++++++++++
@@ -66,27 +87,6 @@ Installation
         >>> import lmdb
 
 
-Introduction
-++++++++++++
-
-    MDB is a tiny database with some excellent properties:
-
-    * Ordered-map interface (keys are always sorted)
-    * Reader/writer transactions, readers don't block writers and writers don't
-      block readers. Each environment supports one concurrent write transaction.
-    * The database may be opened by multiple processes on the same host, making
-      it ideal for working around Python's GIL.
-    * Multiple sub-databases may be created, with transactions covering all
-      sub-databases.
-    * Completely memory mapped, allowing for zero copy lookup and iteration.
-      This is optionally directly exposed to Python using the :py:func:`buffer`
-      interface.
-    * Maintenance requires no external process or background threads.
-    * No application-level caching is required: MDB relies entirely on the
-      operating system's buffer cache.
-    * Merely 32kb of object code and 6kLOC of C.
-
-
 Sub-databases
 +++++++++++++
 
@@ -107,7 +107,7 @@ Sub-databases
     ::
 
         >>> env = lmdb.connect('/tmp/test', max_dbs=2)
-        >>> with env.begin() as txn:
+        >>> with env.begin(write=True) as txn:
         ...     txn.put('somename', 'somedata')
 
         >>> # Error: database cannot share name of existing key!
@@ -205,7 +205,7 @@ Buffers
 
     ::
 
-        >>> txn = env.begin(buffers=True)
+        >>> txn = env.begin(write=True, buffers=True)
         >>> txn.put('key1', 'value1')
         >>> txn.put('key2', 'value2')
 
