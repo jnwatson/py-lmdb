@@ -1453,7 +1453,7 @@ initcpython(void)
     if(add_type(mod, &PyEnvironment_Type)) {
         return;
     }
-    if(PyObject_SetAttrString(mod, "connect", (PyObject *)&PyEnvironment_Type)) {
+    if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
         return;
     }
     if(add_type(mod, &PyCursor_Type)) {

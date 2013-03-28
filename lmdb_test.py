@@ -6,6 +6,7 @@ import unittest
 
 import lmdb
 
+
 DB_PATH = '/ram/dbtest'
 
 
@@ -32,15 +33,31 @@ def assertCrash(fn, *args, **kwargs):
     assert 0, '%r(%r, %r) did not crash as expected' % (fn, args, kwargs)
 
 
+def rmenv():
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+
+def openenv():
+    return lmdb.open(DB_PATH, max_dbs=10)
+
+
 class EnvMixin:
     def setUp(self):
-        if os.path.exists(DB_PATH):
-            shutil.rmtree(DB_PATH)
-        self.env = lmdb.connect(DB_PATH, max_dbs=10)
+        rmenv()
+        self.env = openenv()
 
     def tearDown(self):
         self.env.close()
         shutil.rmtree(DB_PATH)
+
+
+class DupOpenTest(unittest.TestCase):
+    def testDupOpen(self):
+        # Caused CPython SEGV at some point.
+        rmenv()
+        env = openenv()
+        assertCrash(lambda: openenv())
+        rmenv()
 
 
 class CrashTest(EnvMixin, unittest.TestCase):
@@ -62,9 +79,9 @@ class CrashTest(EnvMixin, unittest.TestCase):
         self.env.close()
 
     def testDbDoubleClose(self):
-        db = self.env.open(name='dave3')
-        db.close()
-        db.close()
+        db = self.env.open_db(name='dave3')
+        #db.close()
+        #db.close()
 
     def testTxnCloseActiveIter(self):
         with self.env.begin() as txn:
@@ -72,7 +89,7 @@ class CrashTest(EnvMixin, unittest.TestCase):
         assertCrash(lambda: list(it))
 
     def testDbCloseActiveIter(self):
-        db = self.env.open(name='dave3')
+        db = self.env.open_db(name='dave3')
         with self.env.begin(write=True) as txn:
             txn.put('a', 'b', db=db)
             it = txn.cursor(db=db).forward()

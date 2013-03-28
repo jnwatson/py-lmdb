@@ -28,14 +28,14 @@ print 'permutate %d words avglen %d took %.2fsec' % (len(words), avglen, now()-t
 
 getword = iter(words).next
 
-env = lmdb.connect(dbpath, map_size=1048576 * 1024)
+env = lmdb.open(dbpath, map_size=1048576 * 1024)
 print 'stat:', env.stat()
 
 run = True
 t0 = now()
 last = t0
 while run:
-    with env.begin() as txn:
+    with env.begin(write=True) as txn:
         try:
             for _ in xrange(50000):
                 word = getword()

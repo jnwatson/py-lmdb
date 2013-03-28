@@ -51,7 +51,7 @@ MDB is a tiny database with some excellent properties:
 * Maintenance requires no external process or background threads.
 * No application-level caching is required: MDB relies entirely on the
   operating system's buffer cache.
-* Merely 32kb of object code and 6kLOC of C.
+* 32kb of object code and 6kLOC of C.
 
 
 Installation
@@ -90,7 +90,7 @@ module import with an existing installation:
 Sub-databases
 +++++++++++++
 
-To use the sub-database feature you must call :py:func:`lmdb.connect` or
+To use the sub-database feature you must call :py:func:`lmdb.open` or
 :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
 sub-databases required. This must be done by the first process or thread
 opening the environment as it is used to allocate resources kept in shared
@@ -106,12 +106,12 @@ contents of your main database to another sub-database.
 
     ::
 
-        >>> env = lmdb.connect('/tmp/test', max_dbs=2)
+        >>> env = lmdb.open('/tmp/test', max_dbs=2)
         >>> with env.begin(write=True) as txn
         ...     txn.put('somename', 'somedata')
 
         >>> # Error: database cannot share name of existing key!
-        >>> subdb = env.open('somename')
+        >>> subdb = env.open_db('somename')
 
 **Caution:** when a sub-database has been opened with
 :py:meth:`Environment.open_db` the resulting handle is shared with all
@@ -165,11 +165,11 @@ adjusted by rebuilding the library.
 Buffers
 +++++++
 
-Since MDB is exclusively memory mapped it is possible to access record data
-without keys or values ever being copied by the kernel, database library, or
-application. To exploit this the library can be instructed to return
-:py:func:`buffer` objects instead of strings by passing `buffers=True` to
-:py:meth:`Environment.begin` or :py:class:`Transaction`.
+Since MDB is memory mapped it is possible to access record data without keys or
+values ever being copied by the kernel, database library, or application. To
+exploit this the library can be instructed to return :py:func:`buffer` objects
+instead of strings by passing `buffers=True` to :py:meth:`Environment.begin` or
+:py:class:`Transaction`.
 
 In Python :py:func:`buffer` objects can be used in many places where strings
 are expected. In every way they act like a regular sequence: they support
@@ -246,11 +246,9 @@ the database in the same transaction!*
 Interface
 +++++++++
 
-It is recommended that you also refer to the
-`excellent Doxygen comments in the MDB source code <http://www.openldap.org/devel/gitweb.cgi?p=openldap.git;a=blob;f=libraries/liblmdb/lmdb.h>`_,
-particularly with regard to thread safety.
-
-.. autofunction:: lmdb.connect
+.. function:: lmdb.open(path, \**kwargs)
+   
+   Shorthand for :py:class:`Environment` constructor.
 
 
 Environment class

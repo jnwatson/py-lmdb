@@ -34,8 +34,7 @@ import weakref
 
 import cffi
 
-__all__ = ['Environment', 'Database', 'Cursor', 'Transaction', 'connect',
-           'Error']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error']
 
 _ffi = cffi.FFI()
 _ffi.cdef('''
@@ -123,7 +122,6 @@ _ffi.cdef('''
     int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags,
                      MDB_dbi *dbi);
     int mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
-    void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
     int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del_);
     int mdb_get(MDB_txn *txn, MDB_dbi dbi, MDB_val *key, MDB_val *data);
     int mdb_cursor_open(MDB_txn *txn, MDB_dbi dbi, MDB_cursor **cursor);
@@ -302,10 +300,6 @@ def _mvstr(mv):
     """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
-def connect(path, **kwargs):
-    """Shorthand for ``lmdb.Environment(path, **kwargs)``"""
-    return Environment(path, **kwargs)
-
 
 class Environment(object):
     """
@@ -377,21 +371,21 @@ class Environment(object):
 
         rc = mdb_env_create(envpp)
         if rc:
-            raise Error("Creating environment", rc)
+            raise Error("mdb_env_create", rc)
         self._env = envpp[0]
         self._deps = {}
 
         rc = mdb_env_set_mapsize(self._env, map_size)
         if rc:
-            raise Error("Setting map size", rc)
+            raise Error("mdb_env_set_mapsize", rc)
 
         rc = mdb_env_set_maxreaders(self._env, max_readers)
         if rc:
-            raise Error("Setting max readers", rc)
+            raise Error("mdb_env_set_maxreaders", rc)
 
         rc = mdb_env_set_maxdbs(self._env, max_dbs)
         if rc:
-            raise Error("Setting max DBs", rc)
+            raise Error("mdb_env_set_maxdbs", rc)
 
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
@@ -411,13 +405,13 @@ class Environment(object):
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
             raise Error(path, rc)
-        with self.begin() as txn:
-            self._db = Database(self, txn)
+        with self.begin(db=object(), write=True) as txn:
+            self._db = _Database(self, txn, None, False, False, True)
+        self._dbs = {None: weakref.ref(self._db)}
 
     def close(self):
-        """Close the environment, invalidating any open iterators, cursors,
-        transactions, and database handles. Note that open database handles are
-        preserved if at least one other process has the environment open.
+        """Close the environment, invalidating any open iterators, cursors, and
+        transactions.
 
         Equivalent to `mdb_env_close()
         <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
@@ -440,7 +434,7 @@ class Environment(object):
         path = _ffi.new('char **')
         rc = mdb_env_get_path(self._env, path)
         if rc:
-            raise Error('Getting path', rc)
+            raise Error("mdb_env_get_path", rc)
         return _ffi.string(path[0])
 
     def copy(self, path):
@@ -452,7 +446,7 @@ class Environment(object):
         """
         rc = mdb_env_copy(self._env, path)
         if rc:
-            raise Error("Copying environment", rc)
+            raise Error("mdb_env_copy", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
@@ -472,7 +466,7 @@ class Environment(object):
         """
         rc = mdb_env_sync(self._env, force)
         if rc:
-            raise Error("Flushing", rc)
+            raise Error("mdb_env_sync", rc)
 
     def stat(self):
         """stat()
@@ -499,7 +493,7 @@ class Environment(object):
         st = _ffi.new('MDB_stat *')
         rc = mdb_env_stat(self._env, st)
         if rc:
-            raise Error("Getting environment statistics", rc)
+            raise Error("mdb_env_stat", rc)
         return {
             "psize": st.ms_psize,
             "depth": st.ms_depth,
@@ -532,7 +526,7 @@ class Environment(object):
         info = _ffi.new('MDB_envinfo *')
         rc = mdb_env_info(self._env, info)
         if rc:
-            raise Error('Getting environment info', rc)
+            raise Error("mdb_env_info", rc)
         return {
             "map_size": info.me_mapsize,
             "last_pgno": info.me_last_pgno,
@@ -541,80 +535,77 @@ class Environment(object):
             "num_readers": info.me_numreaders
         }
 
-    def open(self, **kwargs):
-        """Create or open a database *inside a write transaction*. This cannot
-        be called from within an existing write transaction. Parameters are as
-        for :py:class:`Database` constructor.
-
-        Repeated calls to :py:meth:`open` for the same name will return the
-        same database handle.
-
-        As a special case, the main database is always open.
+    def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
+            create=True):
+        """
+        Open a database, returning an opaque handle. Repeat :py:meth:`open_db`
+        calls for the same name will return the same handle. As a special case,
+        the main database is always open.
 
         Equivalent to `mdb_dbi_open()
         <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
-        inside a write transaction.
+
+        A newly created database will not exist if the transaction that created
+        it aborted, nor if another process deleted it. The handle resides in
+        the shared environment, it is not owned by the current transaction or
+        process. Only one thread should call this function; it is not
+        mutex-protected in a read-only transaction.
+
+        Preexisting transactions, other than the current transaction and any
+        parents, must not use the new handle, nor must their children.
+
+            `name`:
+                Database name. If ``None``, indicates the main database should
+                be returned, otherwise indicates a sub-database should be
+                created inside the main database. In other words, **a key
+                representing the database will be visible in the main database,
+                and the database name cannot conflict with any existing key**
+
+            `txn`:
+                Transaction used to create the database if it does not exist.
+                If unspecified, a temporarily write transaction is used. Do not
+                call :py:meth:`open_db` from inside an existing transaction
+                without supplying it here. Note the passed transaction must
+                have `write=True`.
+
+            `reverse_key`:
+                If ``True``, keys are compared from right to left (e.g. DNS
+                names).
+
+            `dupsort`:
+                Duplicate keys may be used in the database. (Or, from another
+                perspective, keys may have multiple data items, stored in
+                sorted order.) By default keys must be unique and may have only
+                a single data item.
+
+                *dupsort* is not yet fully supported.
+
+            `create`:
+                If ``True``, create the database if it doesn't exist, otherwise
+                raise an exception.
         """
-        if not kwargs.get('name'):
-            return self._db
-        with self.begin(write=True) as txn:
-            return Database(self, txn, **kwargs)
+        ref = self._dbs.get(name)
+        if ref:
+            db = ref()
+            if db:
+                return db
+
+        if txn:
+            db = _Database(self, txn, name, reverse_key, dupsort, create)
+        else:
+            with self.begin(write=True) as txn:
+                db = _Database(self, txn, name, reverse_key, dupsort, create)
+        self._dbs[name] = weakref.ref(db)
+        return db
 
     def begin(self, **kwargs):
         """Shortcut for ``lmdb.Transaction(self, **kwargs)``"""
         return Transaction(self, **kwargs)
 
 
-class Database(object):
-    """
-    Get a reference to or create a database within an environment.
-
-    Equivalent to `mdb_dbi_open()
-    <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
-
-    The database handle may be discarded by calling :py:meth:`close`. A newly
-    created database will not exist if the transaction that created it aborted,
-    nor if another process deleted it. **The handle resides in the shared
-    environment, it is not owned by the current transaction or process**. Only
-    one thread should call this function; it is not mutex-protected in a
-    read-only transaction.
-
-    Preexisting transactions, other than the current transaction and any
-    parents, must not use the new handle. Nor must their children.
-
-    Repeated constructions of :py:class:`Database` for the same name will
-    return the same database handle.
-
-        `env`:
-            :py:class:`Environment` the database will be opened or created in.
-
-        `name`:
-            Database name. If ``None``, indicates the main database should be
-            opened, otherwise indicates a sub-database should be created
-            **inside the main database**. In other words, **a key representing
-            the database will be visible in the main database, and the database
-            name cannot conflict with any existing key**
-
-        `txn`:
-            Transaction used to create the database if it does not exist.
-
-        `reverse_key`:
-            If ``True``, keys are compared from right to left (e.g. DNS names).
-
-        `dupsort`:
-            Duplicate keys may be used in the database. (Or, from another
-            perspective, keys may have multiple data items, stored in sorted
-            order.) By default keys must be unique and may have only a single
-            data item.
-
-            **py-lmdb** does not yet fully support dupsort.
-
-        `create`:
-            If ``True``, create the database if it doesn't exist, otherwise
-            raise an exception.
-    """
-    def __init__(self, env, txn, name=None, reverse_key=False,
-                 dupsort=False, create=True):
+class _Database(object):
+    """Internal database handle."""
+    def __init__(self, env, txn, name, reverse_key, dupsort, create):
         _depend(env, self)
         self.env = env
         self._deps = {}
@@ -630,7 +621,7 @@ class Database(object):
         self._dbi = None
         rc = mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
         if rc:
-            raise Error("Opening database %r" % name, rc)
+            raise Error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
 
     def _invalidate(self):
@@ -639,24 +630,7 @@ class Database(object):
     def __del__(self):
         _undepend(self.env, self)
 
-    def close(self):
-        """Close the database handle.
-
-        Equivalent to `mdb_dbi_close()
-        <http://symas.com/mdb/doc/group__mdb.html#ga52dd98d0c542378370cd6b712ff961b5>`_
-
-        **Warning**: closing the handle closes it for all processes and threads
-        with the database open.
-
-        This call is not mutex protected. Handles should only be closed by a
-        single thread, and only if no other threads are going to reference the
-        database handle or one of its cursors any further. Do not close a
-        handle if an existing transaction has modified its database.
-        """
-        if self._dbi:
-            _kill_dependents(self)
-            mdb_dbi_close(self.env._env, self._dbi)
-            self._dbi = _invalid
+open = Environment
 
 
 class Transaction(object):
@@ -678,6 +652,11 @@ class Transaction(object):
         `env`:
             Environment the transaction should be on.
 
+        `db`:
+            Default sub-database to operate on. If unspecified, defaults to the
+            environment's main database. Can be overridden on a per-call basis
+            below.
+
         `parent`:
             ``None``, or a parent transaction (see lmdb.h).
 
@@ -696,9 +675,10 @@ class Transaction(object):
             returned buffer objects. The benefit of this facility is diminished
             when using small keys and values.
     """
-    def __init__(self, env, parent=None, write=False, buffers=False):
+    def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         _depend(env, self)
         self.env = env # hold ref
+        self._db = db or env._db
         self._env = env._env
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
@@ -716,8 +696,7 @@ class Transaction(object):
             parent_txn = _ffi.NULL
         rc = mdb_txn_begin(self._env, parent_txn, flags, txnpp)
         if rc:
-            rdonly = 'read-only' if readonly else 'write'
-            raise Error('Beginning %s transaction' % rdonly, rc)
+            raise Error("mdb_txn_begin", rc)
         self._txn = txnpp[0]
 
     def _invalidate(self):
@@ -748,7 +727,7 @@ class Transaction(object):
         _kill_dependents(db)
         rc = mdb_drop(self._txn, db._dbi, delete)
         if rc:
-            raise Error('Dropping database', rc)
+            raise Error("mdb_drop", rc)
 
     def commit(self):
         """Commit the pending transaction.
@@ -761,7 +740,7 @@ class Transaction(object):
             rc = mdb_txn_commit(self._txn)
             self._txn = _invalid
             if rc:
-                raise Error("Committing transaction", rc)
+                raise Error("mdb_txn_commit", rc)
 
     def abort(self):
         """Abort the pending transaction.
@@ -774,7 +753,7 @@ class Transaction(object):
             rc = mdb_txn_abort(self._txn)
             self._txn = _invalid
             if rc:
-                raise Error("Aborting transaction", rc)
+                raise Error("mdb_txn_abort", rc)
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, otherwise return `default`. A
@@ -784,12 +763,12 @@ class Transaction(object):
         Equivalent to `mdb_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
         """
-        rc = pymdb_get(self._txn, (db or self.env._db)._dbi,
+        rc = pymdb_get(self._txn, (db or self._db)._dbi,
                        key, len(key), self._val)
         if rc:
             if rc == MDB_NOTFOUND:
                 return default
-            raise Error(repr(key), rc)
+            raise Error("mdb_cursor_get", rc)
         return self._to_py(self._val)
 
     def put(self, key, value, dupdata=False, overwrite=True, append=False,
@@ -827,12 +806,12 @@ class Transaction(object):
         if append:
             flags |= MDB_APPEND
 
-        rc = pymdb_put(self._txn, (db or self.env._db)._dbi,
+        rc = pymdb_put(self._txn, (db or self._db)._dbi,
                        key, len(key), value, len(value), flags)
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
-            raise Error("Setting key", rc)
+            raise Error("mdb_put", rc)
         return True
 
     def delete(self, key, value='', db=None):
@@ -851,17 +830,17 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
-        rc = pymdb_del(self._txn, (db or self.env._db)._dbi,
+        rc = pymdb_del(self._txn, (db or self._db)._dbi,
                        key, len(key), value, len(value))
         if rc:
             if rc == MDB_NOTFOUND:
                 return False
-            raise Error("Deleting key", rc)
+            raise Error("mdb_del", rc)
         return True
 
-    def cursor(self, db=None, **kwargs):
-        """Shorthand for ``lmdb.Cursor(self, **kwargs)``"""
-        return Cursor(db or self.env._db, self, **kwargs)
+    def cursor(self, db=None):
+        """Shorthand for ``lmdb.Cursor(db, self)``"""
+        return Cursor(db or self._db, self)
 
 
 class Cursor(object):
@@ -882,8 +861,8 @@ class Cursor(object):
 
         ::
 
-            >>> env = lmdb.connect()
-            >>> child_db = lmdb.open(name='child_db')
+            >>> env = lmdb.open('/tmp/foo')
+            >>> child_db = env.open_db('child_db')
             >>> with env.begin() as txn:
             ...     cursor = txn.cursor()           # Cursor on main database.
             ...     cursor2 = txn.cursor(child_db)  # Cursor on child database.
@@ -948,7 +927,7 @@ class Cursor(object):
         self._cur = None
         rc = mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
-            raise Error("Creating cursor", rc)
+            raise Error("mdb_cursor_open", rc)
         self._cur = curpp[0]
 
     def _invalidate(self):
@@ -992,7 +971,7 @@ class Cursor(object):
             rc = mdb_cursor_get(cur, key, val, op)
             self._valid = not rc
             if rc and rc != MDB_NOTFOUND:
-                raise Error('during iteration', rc)
+                raise Error("mdb_cursor_get", rc)
 
     def forward(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
@@ -1026,7 +1005,7 @@ class Cursor(object):
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
-                    raise Error("Advancing cursor", rc)
+                    raise Error("mdb_cursor_get", rc)
         self._valid = v
         return v
 
@@ -1038,7 +1017,7 @@ class Cursor(object):
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
-                    raise Error("Advancing cursor", rc)
+                    raise Error("mdb_cursor_get", rc)
         self._valid = v
         return v
 
@@ -1128,7 +1107,7 @@ class Cursor(object):
         if v:
             rc = mdb_cursor_del(self._cur, 0)
             if rc:
-                raise Error("Deleting current key", rc)
+                raise Error("mdb_cursor_del", rc)
             self._cursor_get(MDB_GET_CURRENT)
             v = rc == 0
         return v
@@ -1143,7 +1122,7 @@ class Cursor(object):
         countp = _ffi.new('size_t *')
         rc = mdb_cursor_count(self._cur, countp)
         if rc:
-            raise Error("Getting duplicate count", rc)
+            raise Error("mdb_cursor_count", rc)
         return countp[0]
 
     def put(self, key, val, dupdata=False, overwrite=True, append=False):
@@ -1185,6 +1164,6 @@ class Cursor(object):
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
-            raise Error("Setting key", rc)
+            raise Error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
         return True
