@@ -105,12 +105,9 @@ typedef struct {
     EnvObject *env;
     DbObject *db;
     CursorObject *curs;
+    int started;
     int op;
     PyObject *(*val_func)(CursorObject *);
-
-    PyObject *ptype;
-    PyObject *pvalue;
-    PyObject *ptraceback;
 } IterObject;
 
 
@@ -465,13 +462,12 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_close(EnvObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
+    if(self->valid) {
+        self->valid = 0;
+        DEBUG("Closing env")
+        mdb_env_close(self->env);
+        self->env = NULL;
     }
-    self->valid = 0;
-    DEBUG("Closing env")
-    mdb_env_close(self->env);
-    self->env = NULL;
     Py_RETURN_NONE;
 }
 
@@ -656,9 +652,7 @@ make_iterator(CursorObject *curs, enum MDB_cursor_op op,
     }
 
     self->valid = 1;
-    self->ptype = NULL;
-    self->pvalue = NULL;
-    self->ptraceback = NULL;
+    self->started = 0;
     self->curs = curs;
     Py_INCREF(curs);
     self->env = curs->env;
@@ -1069,18 +1063,17 @@ iter_next(IterObject *self)
     if(! cursor_valid(self->curs)) {
         return err_invalid();
     }
-    if(self->ptype) {
-        PyErr_Restore(self->ptype, self->pvalue, self->ptraceback);
-        self->ptype = self->pvalue = self->ptraceback = NULL;
-        return NULL;
+    if(self->started) {
+        PyObject *ret = _cursor_get(self->curs, self->op);
+        if(! ret) {
+            return NULL;
+        }
+        Py_DECREF(ret);
     }
     PyObject *val = self->val_func(self->curs);
+    self->started = 1;
     if(! val) {
         return NULL;
-    }
-    _cursor_get(self->curs, self->op);
-    if(PyErr_Occurred()) {
-        PyErr_Fetch(&(self->ptype), &(self->pvalue), &(self->ptraceback));
     }
     return val;
 }
