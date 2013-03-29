@@ -11,8 +11,9 @@ lmdb
                 font-size: larger">
         <strong style="color: #7f0000">WORK IN PROGRESS</strong><br>
         <br>
-        This wrapper is not yet thoroughly documented or heavily tested but it
-        already works well.
+        This is not yet thoroughly documented or heavily tested but the cffi
+        version already works well. Ensure you install with LMDB_FORCE_CFFI=1
+        in your environment.
     </div>
 
 .. currentmodule:: lmdb
