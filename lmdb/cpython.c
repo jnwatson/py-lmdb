@@ -34,8 +34,8 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-//#undef DEBUG
-//#define DEBUG(s, ...)
+#undef DEBUG
+#define DEBUG(s, ...)
 
 
 static PyObject *Error;
@@ -62,7 +62,6 @@ typedef struct {
 
 typedef struct {
     PyObject_HEAD
-    int valid;
     MDB_dbi dbi;
 } DbObject;
 
@@ -231,7 +230,6 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
 
     DbObject *dbo = PyObject_New(DbObject, &PyDatabase_Type);
     dbo->dbi = dbi;
-    dbo->valid = 1;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
     return dbo;
 }
@@ -337,29 +335,31 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
     int rc;
     if((rc = mdb_env_create(&(self->env)))) {
-        err_set("Creating environment", rc);
+        err_set("mdb_env_create", rc);
         goto fail;
     }
 
     if((rc = mdb_env_set_mapsize(self->env, map_size))) {
-        err_set("Setting map size", rc);
+        err_set("mdb_env_set_mapsize", rc);
         goto fail;
     }
 
     if((rc = mdb_env_set_maxreaders(self->env, max_readers))) {
-        err_set("Setting max readers", rc);
+        err_set("mdb_env_set_maxreaders", rc);
         goto fail;
     }
 
     if((rc = mdb_env_set_maxdbs(self->env, max_dbs))) {
-        err_set("Setting max DBs", rc);
+        err_set("mdb_env_set_maxdbs", rc);
         goto fail;
     }
 
     if(create && subdir) {
         struct stat st;
+        errno = 0;
         stat(path, &st);
         if(errno == ENOENT) {
+            DEBUG("oh hai mkdir time babez")
             if(mkdir(path, 0700)) {
                 PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
                 goto fail;
@@ -706,7 +706,7 @@ make_cursor(DbObject *db, TransObject *trans)
         db = trans->env->main_db;
     }
 
-    if(3 != (db->valid + trans->valid + trans->env->valid)) {
+    if(2 != (trans->valid + trans->env->valid)) {
         return err_invalid();
     }
 
@@ -749,8 +749,7 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
 static int cursor_valid(CursorObject *self)
 {
-    return 4 == (self->valid + self->env->valid +
-                 self->trans->valid + self->db->valid);
+    return 3 == (self->valid + self->env->valid + self->trans->valid);
 }
 
 static PyObject *
@@ -1192,7 +1191,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     if(! db) {
         db = self->env->main_db;
     }
-    if(! (trans_valid(self) && db->valid)) {
+    if(! trans_valid(self)) {
         return err_invalid();
     }
     return make_cursor(db, self);
@@ -1215,7 +1214,7 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     if(! db) {
         db = self->env->main_db;
     }
-    if(! (trans_valid(self) && db->valid)) {
+    if(! trans_valid(self)) {
         return err_invalid();
     }
     MDB_val *val_ptr = val.mv_size ? &val : NULL;
@@ -1260,7 +1259,7 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     if(! db) {
         db = self->env->main_db;
     }
-    if(! (trans_valid(self) && db->valid)) {
+    if(! trans_valid(self)) {
         return err_invalid();
     }
 
@@ -1302,7 +1301,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     if(! db) {
         db = self->env->main_db;
     }
-    if(3 != (self->valid + self->env->valid + db->valid)) {
+    if(2 != (self->valid + self->env->valid)) {
         return err_invalid();
     }
 
