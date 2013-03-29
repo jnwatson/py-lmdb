@@ -34,8 +34,8 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#undef DEBUG
-#define DEBUG(s, ...)
+//#undef DEBUG
+//#define DEBUG(s, ...)
 
 
 static PyObject *Error;
@@ -678,9 +678,7 @@ make_iterator(CursorObject *curs, enum MDB_cursor_op op,
 static void
 cursor_dealloc(CursorObject *self)
 {
-    Py_DECREF(self->trans);
-    Py_DECREF(self->db);
-    Py_DECREF(self->env);
+    DEBUG("dealloc start")
     if(self->key_buf) {
         self->key_buf->b_size = 0;
         Py_DECREF(self->key_buf);
@@ -692,10 +690,13 @@ cursor_dealloc(CursorObject *self)
     if(self->item_tup) {
         Py_DECREF(self->item_tup);
     }
-    if(self->valid) {
+    if(self->valid && self->trans->valid && self->env->valid) {
         DEBUG("destroying cursor")
         mdb_cursor_close(self->curs);
     }
+    Py_DECREF(self->trans);
+    Py_DECREF(self->db);
+    Py_DECREF(self->env);
     PyObject_Del(self);
 }
 
