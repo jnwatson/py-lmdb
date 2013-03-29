@@ -25,7 +25,6 @@ import platform
 from setuptools import setup, Extension
 
 
-use_cpython = False
 use_cpython = platform.python_implementation() == 'CPython'
 if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False

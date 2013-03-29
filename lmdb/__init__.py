@@ -18,15 +18,21 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+"""
+cffi wrapper for OpenLDAP's "Lightning" MDB database.
+
+Please see http://lmdb.readthedocs.org/
+"""
+
 import os
 
 try:
     if os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
-    from lmdb._lmdb import *
+    from lmdb.cpython import *
 except ImportError:
     from lmdb.cffi import *
-    from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
 del os
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error']
