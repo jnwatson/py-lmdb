@@ -189,6 +189,20 @@ string_from_val(MDB_val *val)
 }
 
 
+static int
+val_from_buffer(MDB_val *val, PyObject *buf)
+{
+    if(PyString_CheckExact(buf)) {
+        val->mv_data = PyString_AS_STRING(buf);
+        val->mv_size = Py_SIZE(buf);
+        return 0;
+    }
+    return PyObject_AsReadBuffer(buf,
+        (const void **) &val->mv_data,
+        (Py_ssize_t *) &val->mv_size);
+}
+
+
 // ------------------------
 // Exceptions.
 // ------------------------
@@ -901,23 +915,30 @@ cursor_put(PyObject *self, PyObject *args)
 }
 
 static PyObject *
-cursor_set_key(PyObject *self, PyObject *args)
+cursor_set_key(CursorObject *self, PyObject *arg)
 {
-        PyObject *key;
-        if (!PyArg_ParseTuple(args, "O:set_key",
-                              &key))
-                return NULL;
-    return NULL;
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(val_from_buffer(&self->key, arg)) {
+        return NULL;
+    }
+    return _cursor_get(self, MDB_SET_KEY);
 }
 
 static PyObject *
-cursor_set_range(PyObject *self, PyObject *args)
+cursor_set_range(CursorObject *self, PyObject *arg)
 {
-        PyObject *key;
-        if (!PyArg_ParseTuple(args, "O:set_range",
-                              &key))
-                return NULL;
-    return NULL;
+    if(! cursor_valid(self)) {
+        return err_invalid();
+    }
+    if(val_from_buffer(&self->key, arg)) {
+        return NULL;
+    }
+    if(self->key.mv_size) {
+        return _cursor_get(self, MDB_SET_RANGE);
+    }
+    return _cursor_get(self, MDB_FIRST);
 }
 
 static PyObject *
@@ -1012,8 +1033,8 @@ static struct PyMethodDef cursor_methods[] = {
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS},
     {"reverse", (PyCFunction)cursor_reverse, METH_VARARGS|METH_KEYWORDS},
-    {"set_key", (PyCFunction)cursor_set_key, METH_VARARGS},
-    {"set_range", (PyCFunction)cursor_set_range, METH_VARARGS},
+    {"set_key", (PyCFunction)cursor_set_key, METH_O},
+    {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
     {NULL, NULL}
 };
