@@ -790,7 +790,9 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
             }
         }
     }
-    return PyBool_FromLong(self->positioned);
+    PyObject *res = self->positioned ? Py_True : Py_False;
+    Py_INCREF(res);
+    return res;
 }
 
 
@@ -879,7 +881,13 @@ cursor_last(CursorObject *self)
     if(! cursor_valid(self)) {
         return err_invalid();
     }
-    return _cursor_get(self, MDB_LAST);
+    PyObject *ret = _cursor_get(self, MDB_LAST);
+    // TODO should not be necessary.
+    if(ret == Py_False) {
+        return ret;
+    }
+    Py_DECREF(ret);
+    return _cursor_get(self, MDB_PREV);
 }
 
 static PyObject *
@@ -978,7 +986,19 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         if(! ret) {
             return NULL;
         }
+        int was_true = ret == Py_True;
         Py_DECREF(ret);
+
+        // TODO should not be necessary.
+        // Calling MDB_PREV after a failed MDB_LAST results in NULL pointer
+        // dereference.
+        if(was_true && pos_op == MDB_LAST) {
+            ret = _cursor_get(self, MDB_PREV);
+            if(! ret) {
+                return NULL;
+            }
+            Py_DECREF(ret);
+        }
     }
 
     PyObject *(*val_func)(CursorObject *);
@@ -1089,13 +1109,14 @@ iter_next(IterObject *self)
         if(! ret) {
             return NULL;
         }
+        int eof = ret == Py_False;
         Py_DECREF(ret);
+        if(eof) {
+            return NULL;
+        }
     }
     PyObject *val = self->val_func(self->curs);
     self->started = 1;
-    if(! val) {
-        return NULL;
-    }
     return val;
 }
 
