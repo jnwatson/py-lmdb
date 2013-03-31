@@ -89,17 +89,20 @@ struct lmdb_object {
 /*
  * Invalidation works by keeping a list of transactions attached to the
  * environment, which in turn have a list of cursors attached to the
- * transaction. The list pointers are in the same offset so a generic function
- * can be used.
+ * transaction. The pointers are at the same offset so a generic function is
+ * used.
  *
  * To save effort, tp_clear is overloaded to be the object's invalidation
- * function, instead of carrying a separate pointer around somewhere. Objects
- * are added to their parent's list during construction and removed only during
- * finalization.
+ * function, instead of carrying a separate pointer around. Objects are added
+ * to their parent's list during construction and removed only during
+ * deallocation.
  *
- * When the environment is closed, it walks its list calling the transaction
- * invalidation function, which in turn walks its own list and calls the cursor
- * invalidation function.
+ * When the environment is closed, it walks its list calling tp_clear on each
+ * child, which in turn what their own lists.
+ *
+ * Child transactions are added to their parent transaction's list.
+ *
+ * Iterators keep no significant state, so they are not tracked.
  */
 
 static void link_child(struct lmdb_object *parent, struct lmdb_object *child)
@@ -188,10 +191,10 @@ typedef struct {
 } CursorObject;
 
 
-// Stupid Python. Iterator protocol requires 'next' public method, which we
-// want to use for MDB. So iterator needs to be a separate object to implement
-// the protocol correctly (option #2 was setting .tp_next but exposing MDB
-// next(), which is even worse).
+// Iterator protocol requires 'next' public method, which we want to use for
+// MDB. So iterator needs to be a separate object to implement the protocol
+// correctly (option #2 was setting .tp_next but exposing MDB next(), which is
+// even worse).
 typedef struct {
     PyObject_HEAD
     CursorObject *curs;
@@ -215,6 +218,11 @@ struct dict_field {
     int offset;
 };
 
+
+/*
+ * Convert the structure `o` described by `fields` to a dict and return the new
+ * dict.
+ */
 static PyObject *
 dict_from_fields(void *o, const struct dict_field *fields)
 {
@@ -1186,7 +1194,7 @@ PyTypeObject PyCursor_Type = {
 // -------------
 
 static void
-iter_dealloc(CursorObject *self)
+iter_dealloc(IterObject *self)
 {
     DEBUG("destroying iterator")
     Py_CLEAR(self->curs);
@@ -1527,10 +1535,6 @@ PyTypeObject PyTransaction_Type = {
     .tp_new = trans_new,
 };
 
-static struct PyMethodDef module_methods[] = {
-    {NULL, NULL}
-};
-
 
 static int add_type(PyObject *mod, PyTypeObject *type)
 {
@@ -1543,9 +1547,24 @@ static int add_type(PyObject *mod, PyTypeObject *type)
 PyMODINIT_FUNC
 initcpython(void)
 {
-    PyObject *mod = Py_InitModule3("cpython", module_methods, "");
+    PyObject *mod = Py_InitModule3("cpython", NULL, "");
     if(! mod) {
         return;
+    }
+
+    static PyTypeObject *types[] = {
+        &PyEnvironment_Type,
+        &PyCursor_Type,
+        &PyTransaction_Type,
+        &PyIterator_Type,
+        &PyDatabase_Type,
+        NULL
+    };
+    int i;
+    for(i = 0; types[i]; i++) {
+        if(add_type(mod, types[i])) {
+            return;
+        }
     }
 
     keys_interned = PyString_InternFromString("keys");
@@ -1560,20 +1579,5 @@ initcpython(void)
     }
     if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
         return;
-    }
-
-    static const PyTypeObject *types[] = {
-        &PyEnvironment_Type,
-        &PyCursor_Type,
-        &PyTransaction_Type,
-        &PyIterator_Type,
-        &PyDatabase_Type,
-        NULL
-    };
-    int i;
-    for(i = 0; types[i]; i++) {
-        if(add_type(mod, types[i])) {
-            return;
-        }
     }
 }
