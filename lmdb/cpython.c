@@ -47,7 +47,7 @@ extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
 extern PyTypeObject PyTransaction_Type;
 extern PyTypeObject PyCursor_Type;
-extern PyTypeObject PyIter_Type;
+extern PyTypeObject PyIterator_Type;
 
 struct EnvObject;
 
@@ -336,6 +336,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
 
     OBJECT_INIT(dbo)
     LINK_CHILD(env, dbo)
+    dbo->env = env; // no refcount
     dbo->dbi = dbi;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
     return dbo;
@@ -1110,7 +1111,7 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         }
     }
 
-    IterObject *iter = PyObject_New(IterObject, &PyIter_Type);
+    IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
     if(! iter) {
         return NULL;
     }
@@ -1230,7 +1231,7 @@ static struct PyMethodDef iter_methods[] = {
     {NULL, NULL}
 };
 
-PyTypeObject PyIter_Type = {
+PyTypeObject PyIterator_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
     .tp_dealloc = (destructor) iter_dealloc,
@@ -1565,7 +1566,7 @@ initcpython(void)
         &PyEnvironment_Type,
         &PyCursor_Type,
         &PyTransaction_Type,
-        &PyIter_Type,
+        &PyIterator_Type,
         &PyDatabase_Type,
         NULL
     };
