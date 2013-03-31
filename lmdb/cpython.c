@@ -366,11 +366,6 @@ txn_db_from_name(EnvObject *env, const char *name,
     return dbo;
 }
 
-static struct PyMethodDef db_methods[] = {
-    {NULL, NULL}
-};
-
-
 static int
 db_clear(DbObject *self)
 {
@@ -395,7 +390,6 @@ PyTypeObject PyDatabase_Type = {
     .tp_dealloc = (destructor) db_dealloc,
     .tp_clear = (inquiry) db_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = db_methods,
     .tp_name = "_Database"
 };
 
@@ -1231,10 +1225,6 @@ iter_next(IterObject *self)
     return val;
 }
 
-static struct PyMethodDef iter_methods[] = {
-    {NULL, NULL}
-};
-
 PyTypeObject PyIter_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
@@ -1242,8 +1232,7 @@ PyTypeObject PyIter_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
     .tp_iter = (getiterfunc)iter_iter,
     .tp_iternext = (iternextfunc)iter_next,
-    //.tp_methods = iter_methods,
-    .tp_name = "Iter"
+    .tp_name = "Iterator"
 };
 
 
@@ -1562,17 +1551,22 @@ initcpython(void)
     if(PyObject_SetAttrString(mod, "Error", Error)) {
         return;
     }
-
-    if(add_type(mod, &PyEnvironment_Type)) {
-        return;
-    }
     if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
         return;
     }
-    if(add_type(mod, &PyCursor_Type)) {
-        return;
-    }
-    if(add_type(mod, &PyTransaction_Type)) {
-        return;
+
+    static const PyTypeObject *types[] = {
+        &PyEnvironment_Type,
+        &PyCursor_Type,
+        &PyTransaction_Type,
+        &PyIter_Type,
+        &PyDatabase_Type,
+        NULL
+    };
+    int i;
+    for(i = 0; types[i]; i++) {
+        if(add_type(mod, types[i])) {
+            return;
+        }
     }
 }
