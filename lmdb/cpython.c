@@ -1110,7 +1110,7 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         // TODO should not be necessary.
         // Calling MDB_PREV after a failed MDB_LAST results in NULL pointer
         // dereference.
-        if(0 && was_true && pos_op == MDB_LAST) {
+        if(was_true && pos_op == MDB_LAST) {
             ret = _cursor_get(self, MDB_PREV);
             if(! ret) {
                 return NULL;
