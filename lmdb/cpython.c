@@ -19,6 +19,7 @@
  * Additional information about OpenLDAP can be obtained at
  * <http://www.openldap.org/>.
  */
+
 #include <sys/stat.h>
 #include <stdbool.h>
 #include <string.h>
@@ -39,11 +40,14 @@
 
 
 static PyObject *Error;
+static PyObject *keys_interned;
+static PyObject *values_interned;
+
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
 extern PyTypeObject PyTransaction_Type;
 extern PyTypeObject PyCursor_Type;
-extern PyTypeObject PyIterator_Type;
+extern PyTypeObject PyIter_Type;
 
 struct EnvObject;
 
@@ -59,22 +63,108 @@ typedef struct {
     long b_hash;
 } PyBufferObject;
 
+struct list_head {
+    struct lmdb_object *prev;
+    struct lmdb_object *next;
+};
+
+#define LmdbObject_HEAD \
+    PyObject_HEAD \
+    struct list_head siblings; \
+    struct list_head children; \
+    int valid;
+
+struct lmdb_object {
+    LmdbObject_HEAD
+};
+
+#define OBJECT_INIT(o) \
+    ((struct lmdb_object *)o)->siblings.prev = NULL; \
+    ((struct lmdb_object *)o)->siblings.next = NULL; \
+    ((struct lmdb_object *)o)->children.prev = NULL; \
+    ((struct lmdb_object *)o)->children.next = NULL; \
+    ((struct lmdb_object *)o)->valid = 1;
+
+
+/*
+ * Invalidation works by keeping a list of transactions attached to the
+ * environment, which in turn have a list of cursors attached to the
+ * transaction. The list pointers are in the same offset so a generic function
+ * can be used.
+ *
+ * To save effort, tp_clear is overloaded to be the object's invalidation
+ * function, instead of carrying a separate pointer around somewhere. Objects
+ * are added to their parent's list during construction and removed only during
+ * finalization.
+ *
+ * When the environment is closed, it walks its list calling the transaction
+ * invalidation function, which in turn walks its own list and calls the cursor
+ * invalidation function.
+ */
+
+static void link_child(struct lmdb_object *parent, struct lmdb_object *child)
+{
+    struct lmdb_object *sibling = parent->children.next;
+    if(sibling) {
+        child->siblings.next = sibling;
+        sibling->siblings.prev = child;
+    }
+    parent->children.next = child;
+}
+
+static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
+{
+    if(! parent) {
+        return;
+    }
+
+    struct lmdb_object *prev = child->siblings.prev;
+    struct lmdb_object *next = child->siblings.next;
+    if(prev) {
+        prev->siblings.next = next;
+             // If double unlink_child(), this test my legitimately fail:
+    } else if(parent->children.next == child) {
+        parent->children.next = next;
+    }
+    if(next) {
+        next->siblings.prev = prev;
+    }
+    child->siblings.prev = NULL;
+    child->siblings.next = NULL;
+}
+
+static void invalidate(struct lmdb_object *parent)
+{
+    struct lmdb_object *child = parent->children.next;
+    while(child) {
+        struct lmdb_object *next = child->siblings.next;
+        DEBUG("invalidating parent=%p child %p", parent, child)
+        child->ob_type->tp_clear((PyObject *) child);
+        child = next;
+    }
+}
+
+#define LINK_CHILD(parent, child) link_child((void *)parent, (void *)child);
+#define UNLINK_CHILD(parent, child) unlink_child((void *)parent, (void *)child);
+#define INVALIDATE(parent) invalidate((void *)parent);
+
+
+struct EnvObject;
 
 typedef struct {
-    PyObject_HEAD
+    LmdbObject_HEAD
+    struct EnvObject *env; // Not refcounted.
     MDB_dbi dbi;
 } DbObject;
 
 typedef struct EnvObject {
-    PyObject_HEAD
-    int valid;
+    LmdbObject_HEAD
     MDB_env *env;
     DbObject *main_db;
 } EnvObject;
 
 typedef struct {
-    PyObject_HEAD
-    int valid;
+    LmdbObject_HEAD
     EnvObject *env;
 
     MDB_txn *txn;
@@ -83,8 +173,7 @@ typedef struct {
 } TransObject;
 
 typedef struct {
-    PyObject_HEAD
-    int valid;
+    LmdbObject_HEAD
     EnvObject *env;
     DbObject *db;
     TransObject *trans;
@@ -98,12 +187,13 @@ typedef struct {
     MDB_val val;
 } CursorObject;
 
+
+// Stupid Python. Iterator protocol requires 'next' public method, which we
+// want to use for MDB. So iterator needs to be a separate object to implement
+// the protocol correctly (option #2 was setting .tp_next but exposing MDB
+// next(), which is even worse).
 typedef struct {
     PyObject_HEAD
-    int valid;
-    TransObject *trans;
-    EnvObject *env;
-    DbObject *db;
     CursorObject *curs;
     int started;
     int op;
@@ -117,10 +207,10 @@ typedef struct {
 //
 //
 
-enum { TYPE_EOF, TYPE_UINT, TYPE_SIZE, TYPE_ADDR };
+enum field_type { TYPE_EOF, TYPE_UINT, TYPE_SIZE, TYPE_ADDR };
 
 struct dict_field {
-    int type;
+    enum field_type type;
     const char *name;
     int offset;
 };
@@ -240,6 +330,12 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     }
 
     DbObject *dbo = PyObject_New(DbObject, &PyDatabase_Type);
+    if(! dbo) {
+        return NULL;
+    }
+
+    OBJECT_INIT(dbo)
+    LINK_CHILD(env, dbo)
     dbo->dbi = dbi;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
     return dbo;
@@ -274,9 +370,22 @@ static struct PyMethodDef db_methods[] = {
     {NULL, NULL}
 };
 
+
+static int
+db_clear(DbObject *self)
+{
+    if(self->env) {
+        UNLINK_CHILD(self->env, self)
+        self->env = NULL;
+    }
+    self->valid = 0;
+    return 0;
+}
+
 static void
 db_dealloc(DbObject *self)
 {
+    db_clear(self);
     PyObject_Del(self);
 }
 
@@ -284,6 +393,7 @@ PyTypeObject PyDatabase_Type = {
     PyObject_HEAD_INIT(NULL)
     .tp_basicsize = sizeof(DbObject),
     .tp_dealloc = (destructor) db_dealloc,
+    .tp_clear = (inquiry) db_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = db_methods,
     .tp_name = "_Database"
@@ -294,17 +404,26 @@ PyTypeObject PyDatabase_Type = {
 // Environment.
 // -------------------------
 
-static void
-env_dealloc(EnvObject *self)
+static int
+env_clear(EnvObject *self)
 {
     DEBUG("kiling env..")
+    if(self->env) {
+        INVALIDATE(self)
+        DEBUG("Closing env")
+        mdb_env_close(self->env);
+        self->env = NULL;
+    }
     if(self->main_db) {
         Py_CLEAR(self->main_db);
     }
-    if(self->env) {
-        DEBUG("Closing env")
-        mdb_env_close(self->env);
-    }
+    return 0;
+}
+
+static void
+env_dealloc(EnvObject *self)
+{
+    env_clear(self);
     PyObject_Del(self);
 }
 
@@ -340,7 +459,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    self->valid = 0;
+    OBJECT_INIT(self)
     self->main_db = NULL;
     self->env = NULL;
 
@@ -370,7 +489,6 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         errno = 0;
         stat(path, &st);
         if(errno == ENOENT) {
-            DEBUG("oh hai mkdir time babez")
             if(mkdir(path, 0700)) {
                 PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
                 goto fail;
@@ -444,7 +562,8 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
         return err_set("mdb_txn_begin", rc);
     }
 
-    self->valid = 1;
+    OBJECT_INIT(self)
+    LINK_CHILD(env, self)
     self->env = env;
     Py_INCREF(env);
     self->buffers = buffers;
@@ -477,6 +596,7 @@ static PyObject *
 env_close(EnvObject *self)
 {
     if(self->valid) {
+        INVALIDATE(self)
         self->valid = 0;
         DEBUG("Closing env")
         mdb_env_close(self->env);
@@ -644,6 +764,7 @@ PyTypeObject PyEnvironment_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(EnvObject),
     .tp_dealloc = (destructor) env_dealloc,
+    .tp_clear = (inquiry) env_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = env_methods,
     .tp_name = "Environment",
@@ -652,71 +773,51 @@ PyTypeObject PyEnvironment_Type = {
 
 
 // ==================================
-// Iterators factory
+/// cursors
 // ==================================
 
-
-static PyObject *
-make_iterator(CursorObject *curs, enum MDB_cursor_op op,
-              PyObject *(*val_func)(CursorObject *))
+static int
+cursor_clear(CursorObject *self)
 {
-    IterObject *self = PyObject_New(IterObject, &PyIterator_Type);
-    if(! self) {
-        return NULL;
+    if(self->valid) {
+        INVALIDATE(self)
+        UNLINK_CHILD(self->env, self)
+        mdb_cursor_close(self->curs);
+        self->valid = 0;
     }
-
-    self->valid = 1;
-    self->started = 0;
-    self->curs = curs;
-    Py_INCREF(curs);
-    self->env = curs->env;
-    self->db = curs->db;
-    self->trans = curs->trans;
-    self->op = op;
-    self->val_func = val_func;
-    return (PyObject *)self;
+    if(self->key_buf) {
+        self->key_buf->b_size = 0;
+        Py_CLEAR(self->key_buf);
+    }
+    if(self->val_buf) {
+        self->val_buf->b_size = 0;
+        Py_CLEAR(self->val_buf);
+    }
+    if(self->item_tup) {
+        Py_CLEAR(self->item_tup);
+    }
+    Py_CLEAR(self->trans);
+    Py_CLEAR(self->db);
+    Py_CLEAR(self->env);
+    return 0;
 }
-
-
-/// cursors
-//
-//
-//
 
 static void
 cursor_dealloc(CursorObject *self)
 {
-    DEBUG("dealloc start")
-    if(self->key_buf) {
-        self->key_buf->b_size = 0;
-        Py_DECREF(self->key_buf);
-    }
-    if(self->val_buf) {
-        self->val_buf->b_size = 0;
-        Py_DECREF(self->val_buf);
-    }
-    if(self->item_tup) {
-        Py_DECREF(self->item_tup);
-    }
-    if(self->valid && self->trans->valid && self->env->valid) {
-        DEBUG("destroying cursor")
-        mdb_cursor_close(self->curs);
-    }
-    Py_DECREF(self->trans);
-    Py_DECREF(self->db);
-    Py_DECREF(self->env);
+    DEBUG("destroying cursor")
+    cursor_clear(self);
     PyObject_Del(self);
 }
 
 static PyObject *
 make_cursor(DbObject *db, TransObject *trans)
 {
+    if(! trans->valid) {
+        return err_invalid();
+    }
     if(! db) {
         db = trans->env->main_db;
-    }
-
-    if(2 != (trans->valid + trans->env->valid)) {
-        return err_invalid();
     }
 
     CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
@@ -726,8 +827,9 @@ make_cursor(DbObject *db, TransObject *trans)
         return err_set("mdb_cursor_open", rc);
     }
 
+    OBJECT_INIT(self)
+    LINK_CHILD(trans, self)
     self->positioned = 0;
-    self->valid = 1;
     self->env = trans->env;
     self->key_buf = NULL;
     self->val_buf = NULL;
@@ -756,15 +858,10 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return make_cursor(db, trans);
 }
 
-static int cursor_valid(CursorObject *self)
-{
-    return 3 == (self->valid + self->env->valid + self->trans->valid);
-}
-
 static PyObject *
 cursor_count(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
@@ -799,10 +896,11 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 static PyObject *
 cursor_delete(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->positioned) {
+        DEBUG("deleting key '%*s'", (int)self->key.mv_size, (char*)self->key.mv_data)
         int rc = mdb_cursor_del(self->curs, 0);
         if(rc) {
             return err_set("mdb_cursor_del", rc);
@@ -815,7 +913,7 @@ cursor_delete(CursorObject *self)
 static PyObject *
 cursor_first(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_FIRST);
@@ -824,7 +922,7 @@ cursor_first(CursorObject *self)
 static PyObject *
 cursor_item(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->buffers) {
@@ -862,7 +960,7 @@ cursor_item(CursorObject *self)
 static PyObject *
 cursor_key(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->buffers) {
@@ -878,7 +976,7 @@ cursor_key(CursorObject *self)
 static PyObject *
 cursor_last(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     PyObject *ret = _cursor_get(self, MDB_LAST);
@@ -893,7 +991,7 @@ cursor_last(CursorObject *self)
 static PyObject *
 cursor_next(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_NEXT);
@@ -902,7 +1000,7 @@ cursor_next(CursorObject *self)
 static PyObject *
 cursor_prev(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_PREV);
@@ -925,7 +1023,7 @@ cursor_put(PyObject *self, PyObject *args)
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(val_from_buffer(&self->key, arg)) {
@@ -937,7 +1035,7 @@ cursor_set_key(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_set_range(CursorObject *self, PyObject *arg)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(val_from_buffer(&self->key, arg)) {
@@ -952,7 +1050,7 @@ cursor_set_range(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_value(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->buffers) {
@@ -965,20 +1063,37 @@ cursor_value(CursorObject *self)
     return string_from_val(&self->val);
 }
 
+// ==================================
+// Cursor iteration
+// ==================================
+
 static PyObject *
 iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
                    enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
 {
-    if(! cursor_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     int keys = 1;
     int values = 1;
-    static char *kwlist[] = {"keys", "values", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "|ii", kwlist, &keys,
-            &values)) {
-        return NULL;
+    PyObject *val;
+
+    if(args) {
+        if(PyTuple_GET_SIZE(args) > 0) {
+            keys = PyTuple_GET_ITEM(args, 0) == Py_True;
+        }
+        if(PyTuple_GET_SIZE(args) > 1) {
+            keys = PyTuple_GET_ITEM(args, 1) == Py_True;
+        }
+    }
+    if(kwds) {
+        if((val = PyDict_GetItem(kwds, keys_interned))) {
+            keys = val == Py_True;
+        }
+        if((val = PyDict_GetItem(kwds, values_interned))) {
+            values = val == Py_True;
+        }
     }
 
     if(! self->positioned) {
@@ -992,7 +1107,7 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         // TODO should not be necessary.
         // Calling MDB_PREV after a failed MDB_LAST results in NULL pointer
         // dereference.
-        if(was_true && pos_op == MDB_LAST) {
+        if(0 && was_true && pos_op == MDB_LAST) {
             ret = _cursor_get(self, MDB_PREV);
             if(! ret) {
                 return NULL;
@@ -1001,32 +1116,30 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         }
     }
 
-    PyObject *(*val_func)(CursorObject *);
-    if(! values) {
-        val_func = (void *)cursor_key;
-    } else if(! keys) {
-        val_func = (void *)cursor_value;
-    } else {
-        val_func = (void *)cursor_item;
+    IterObject *iter = PyObject_New(IterObject, &PyIter_Type);
+    if(! iter) {
+        return NULL;
     }
-    return make_iterator(self, op, val_func);
+
+    if(! values) {
+        iter->val_func = (void *)cursor_key;
+    } else if(! keys) {
+        iter->val_func = (void *)cursor_value;
+    } else {
+        iter->val_func = (void *)cursor_item;
+    }
+
+    iter->curs = self;
+    Py_INCREF(self);
+    iter->started = 0;
+    iter->op = op;
+    return (PyObject *) iter;
 }
 
 static PyObject *
 cursor_iter(CursorObject *self)
 {
-    if(! cursor_valid(self)) {
-        return err_invalid();
-    }
-
-    if(! self->positioned) {
-        PyObject *ret = _cursor_get(self, MDB_FIRST);
-        if(! ret) {
-            return NULL;
-        }
-        Py_DECREF(ret);
-    }
-    return make_iterator(self, MDB_NEXT, (void *)cursor_item);
+    return iterator_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT);
 }
 
 static PyObject *
@@ -1063,6 +1176,7 @@ PyTypeObject PyCursor_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(CursorObject),
     .tp_dealloc = (destructor) cursor_dealloc,
+    .tp_clear = (inquiry) cursor_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
     .tp_iter = (getiterfunc)cursor_iter,
     .tp_methods = cursor_methods,
@@ -1071,38 +1185,35 @@ PyTypeObject PyCursor_Type = {
 };
 
 
-// ==================================
-// Iterators
-// ==================================
 
-static struct PyMethodDef iter_methods[] = {
-        //{"dummy", (PyCFunction)iter_dummy, METH_NOARGS},
-        {NULL, NULL}
-};
+/// ------------------------
+// iterator
+// -------------
 
 static void
-iter_dealloc(IterObject *self)
+iter_dealloc(CursorObject *self)
 {
-    Py_DECREF(self->curs);
+    DEBUG("destroying iterator")
+    Py_CLEAR(self->curs);
+    PyObject_Del(self);
 }
 
 
 static PyObject *
-iter_iter(PyObject *self)
+iter_iter(IterObject *self)
 {
     Py_INCREF(self);
-    return self;
+    return (PyObject *)self;
 }
-
 
 static PyObject *
 iter_next(IterObject *self)
 {
+    if(! self->curs->valid) {
+        return err_invalid();
+    }
     if(! self->curs->positioned) {
         return NULL;
-    }
-    if(! cursor_valid(self->curs)) {
-        return err_invalid();
     }
     if(self->started) {
         PyObject *ret = _cursor_get(self->curs, self->op);
@@ -1120,18 +1231,20 @@ iter_next(IterObject *self)
     return val;
 }
 
+static struct PyMethodDef iter_methods[] = {
+    {NULL, NULL}
+};
 
-PyTypeObject PyIterator_Type = {
+PyTypeObject PyIter_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
     .tp_dealloc = (destructor) iter_dealloc,
-    .tp_iter = (getiterfunc) iter_iter,
-    .tp_iternext = (iternextfunc)iter_next,
     .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
-    .tp_methods = iter_methods,
-    .tp_name = "Iterator"
+    .tp_iter = (getiterfunc)iter_iter,
+    .tp_iternext = (iternextfunc)iter_next,
+    //.tp_methods = iter_methods,
+    .tp_name = "Iter"
 };
-
 
 
 /// ------------------------
@@ -1141,23 +1254,30 @@ PyTypeObject PyIterator_Type = {
 //
 //
 
+static int
+trans_clear(TransObject *self)
+{
+    if(self->valid) {
+        INVALIDATE(self)
+        if(self->txn) {
+            DEBUG("aborting")
+            mdb_txn_abort(self->txn);
+            self->txn = NULL;
+        }
+        self->valid = 0;
+    }
+    UNLINK_CHILD(self->env, self)
+    Py_CLEAR(self->env);
+    return 0;
+}
+
+
 static void
 trans_dealloc(TransObject *self)
 {
     DEBUG("deleting trans")
-    if(self->txn && self->env->valid) {
-        DEBUG("aborting")
-        mdb_txn_abort(self->txn);
-        self->txn = NULL;
-    }
-    Py_DECREF(self->env);
+    trans_clear(self);
     PyObject_Del(self);
-}
-
-static int
-trans_valid(TransObject *self)
-{
-    return 2 == (self->valid + self->env->valid);
 }
 
 
@@ -1183,10 +1303,11 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_abort(TransObject *self)
 {
-    if(! trans_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     DEBUG("aborting")
+    INVALIDATE(self)
     mdb_txn_abort(self->txn);
     self->txn = NULL;
     self->valid = 0;
@@ -1196,10 +1317,11 @@ trans_abort(TransObject *self)
 static PyObject *
 trans_commit(TransObject *self)
 {
-    if(! trans_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     DEBUG("committing")
+    INVALIDATE(self)
     int rc = mdb_txn_commit(self->txn);
     self->txn = NULL;
     self->valid = 0;
@@ -1213,11 +1335,11 @@ trans_commit(TransObject *self)
 static PyObject *
 trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! trans_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
-
     DbObject *db = NULL;
+
     static char *kwlist[] = {"db", NULL};
     if(! PyArg_ParseTupleAndKeywords(args, kwds, "|O!", kwlist,
             &PyDatabase_Type, &db)) {
@@ -1227,9 +1349,6 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     if(! db) {
         db = self->env->main_db;
     }
-    if(! trans_valid(self)) {
-        return err_invalid();
-    }
     return make_cursor(db, self);
 }
 
@@ -1237,6 +1356,9 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 {
+    if(! self->valid) {
+        return err_invalid();
+    }
     MDB_val key = {0, 0};
     MDB_val val = {0, 0};
     DbObject *db = NULL;
@@ -1249,9 +1371,6 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     }
     if(! db) {
         db = self->env->main_db;
-    }
-    if(! trans_valid(self)) {
-        return err_invalid();
     }
     MDB_val *val_ptr = val.mv_size ? &val : NULL;
     int rc = mdb_del(self->txn, db->dbi, &key, val_ptr);
@@ -1268,6 +1387,10 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_drop(TransObject *self, PyObject *arg)
 {
+    if(! self->valid) {
+        return err_invalid();
+    }
+
     int delete = arg == NULL;
     if(arg) {
         delete = PyObject_IsTrue(arg);
@@ -1283,6 +1406,10 @@ trans_drop(TransObject *self, PyObject *arg)
 static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
+    if(! self->valid) {
+        return err_invalid();
+    }
+
     MDB_val key = {0, 0};
     PyObject *default_ = NULL;
     DbObject *db = NULL;
@@ -1294,9 +1421,6 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     }
     if(! db) {
         db = self->env->main_db;
-    }
-    if(! trans_valid(self)) {
-        return err_invalid();
     }
 
     MDB_val val;
@@ -1320,6 +1444,9 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 {
+    if(! self->valid) {
+        return err_invalid();
+    }
     MDB_val key = {0, 0};
     MDB_val val = {0, 0};
     int dupdata = 0;
@@ -1336,9 +1463,6 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     }
     if(! db) {
         db = self->env->main_db;
-    }
-    if(2 != (self->valid + self->env->valid)) {
-        return err_invalid();
     }
 
     int flags = 0;
@@ -1364,7 +1488,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 
 static PyObject *trans_enter(TransObject *self)
 {
-    if(! trans_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     Py_INCREF(self);
@@ -1373,7 +1497,7 @@ static PyObject *trans_enter(TransObject *self)
 
 static PyObject *trans_exit(TransObject *self, PyObject *args)
 {
-    if(! trans_valid(self)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(PyTuple_GET_ITEM(args, 0) == Py_None) {
@@ -1400,6 +1524,7 @@ PyTypeObject PyTransaction_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(TransObject),
     .tp_dealloc = (destructor) trans_dealloc,
+    .tp_clear = (inquiry) trans_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = trans_methods,
     .tp_name = "Transaction",
@@ -1426,6 +1551,9 @@ initcpython(void)
     if(! mod) {
         return;
     }
+
+    keys_interned = PyString_InternFromString("keys");
+    values_interned = PyString_InternFromString("values");
 
     Error = PyErr_NewException("lmdb.Error", NULL, NULL);
     if(! Error) {
