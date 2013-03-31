@@ -1225,6 +1225,11 @@ iter_next(IterObject *self)
     return val;
 }
 
+static struct PyMethodDef iter_methods[] = {
+    {"next", (PyCFunction)cursor_next, METH_NOARGS},
+    {NULL, NULL}
+};
+
 PyTypeObject PyIter_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
@@ -1232,6 +1237,7 @@ PyTypeObject PyIter_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
     .tp_iter = (getiterfunc)iter_iter,
     .tp_iternext = (iternextfunc)iter_next,
+    .tp_methods = iter_methods,
     .tp_name = "Iterator"
 };
 
