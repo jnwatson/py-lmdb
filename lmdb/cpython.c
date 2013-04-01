@@ -35,20 +35,24 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-//#undef DEBUG
-//#define DEBUG(s, ...)
+#undef DEBUG
+#define DEBUG(s, ...)
 
 
 static PyObject *Error;
-static PyObject *keys_interned;
-static PyObject *values_interned;
-static PyObject *parent_interned;
-static PyObject *write_interned;
+static PyObject *append_interned;
 static PyObject *buffers_interned;
 static PyObject *db_interned;
-static PyObject *txn_interned;
-static PyObject *key_interned;
 static PyObject *default_interned;
+static PyObject *dupdata_interned;
+static PyObject *key_interned;
+static PyObject *keys_interned;
+static PyObject *overwrite_interned;
+static PyObject *parent_interned;
+static PyObject *txn_interned;
+static PyObject *value_interned;
+static PyObject *values_interned;
+static PyObject *write_interned;
 
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
@@ -1559,21 +1563,75 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         return err_invalid();
     }
     MDB_val key = {0, 0};
-    MDB_val val = {0, 0};
+    MDB_val value = {0, 0};
     int dupdata = 0;
     int overwrite = 1;
     int append = 0;
-    DbObject *db = NULL;
+    PyObject *db = NULL;
 
-    static char *kwlist[] = {"key", "value", "dupdata", "overwrite", "append",
-                             "db", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "s#s#|iiiO!", kwlist,
-            &key.mv_data, &key.mv_size, &val.mv_data, &val.mv_size,
-            &dupdata, &overwrite, &append, &PyDatabase_Type, &db)) {
-        return NULL;
+    switch(PyTuple_GET_SIZE(args)) {
+        default:
+            return type_error("too many positional arguments.");
+        case 6:
+            db = PyTuple_GET_ITEM(args, 5);
+        case 5:
+            append = PyTuple_GET_ITEM(args, 4) == Py_True;
+        case 4:
+            overwrite = PyTuple_GET_ITEM(args, 3) == Py_True;
+        case 3:
+            dupdata = PyTuple_GET_ITEM(args, 2) == Py_True;
+        case 2:
+            if(val_from_buffer(&value, PyTuple_GET_ITEM(args, 1))) {
+                return NULL;
+            }
+        case 1:
+            if(val_from_buffer(&key, PyTuple_GET_ITEM(args, 0))) {
+                return NULL;
+            }
+        case 0:
+            break;
     }
+
+    if(kwds) {
+        PyObject *val;
+        int c = 0;
+        if((val = PyDict_GetItem(kwds, key_interned))) {
+            if(val_from_buffer(&key, val)) {
+                return NULL;
+            }
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, value_interned))) {
+            if(val_from_buffer(&value, val)) {
+                return NULL;
+            }
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, dupdata_interned))) {
+            dupdata = val == Py_True;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, overwrite_interned))) {
+            overwrite = val == Py_True;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, append_interned))) {
+            append = val == Py_True;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, db_interned))) {
+            db = val;
+            c++;
+        }
+        if(c != PyDict_Size(kwds)) {
+            return type_error("incorrect keyword arguments.");
+        }
+    }
+
     if(! db) {
-        db = self->env->main_db;
+        db = (PyObject *)self->env->main_db;
+    } else if(Py_TYPE(db) != &PyDatabase_Type) {
+        return type_error("db must be a _Database instance.");
     }
 
     int flags = 0;
@@ -1587,7 +1645,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_APPEND;
     }
 
-    int rc = mdb_put(self->txn, db->dbi, &key, &val, flags);
+    int rc = mdb_put(self->txn, ((DbObject *)db)->dbi, &key, &value, flags);
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -1676,15 +1734,19 @@ initcpython(void)
     }
 
     static struct { PyObject **obj; const char *s; } strs[] = {
-        {&keys_interned, "keys"},
-        {&values_interned, "values"},
-        {&parent_interned, "parent"},
-        {&write_interned, "write"},
+        {&append_interned, "append"},
         {&buffers_interned, "buffers"},
         {&db_interned, "db"},
-        {&txn_interned, "txn"},
-        {&key_interned, "key"},
         {&default_interned, "default"},
+        {&dupdata_interned, "dupdata"},
+        {&key_interned, "key"},
+        {&keys_interned, "keys"},
+        {&overwrite_interned, "overwrite"},
+        {&parent_interned, "parent"},
+        {&txn_interned, "txn"},
+        {&value_interned, "value"},
+        {&values_interned, "values"},
+        {&write_interned, "write"},
         {NULL, NULL}
     };
     for(i = 0; strs[i].obj; i++) {
