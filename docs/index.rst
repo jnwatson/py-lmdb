@@ -4,18 +4,6 @@ lmdb
 
 `http://github.com/dw/py-lmdb <http://github.com/dw/py-lmdb>`_
 
-.. raw:: html
-
-    <div style="border: 2px solid red; background: #ffefef; color: black;
-                padding: 1ex; text-align: center; width: 66%; margin: auto;
-                font-size: larger">
-        <strong style="color: #7f0000">WORK IN PROGRESS</strong><br>
-        <br>
-        This is not yet thoroughly documented or heavily tested but the cffi
-        version already works well. Ensure you install with LMDB_FORCE_CFFI=1
-        in your environment.
-    </div>
-
 .. currentmodule:: lmdb
 
 .. toctree::
