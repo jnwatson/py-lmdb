@@ -35,7 +35,7 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-//#define NODEBUG
+#define NODEBUG
 
 #ifdef NODEBUG
 #undef DEBUG
@@ -1514,7 +1514,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
     struct trans_cursor {
         DbObject *db;
-    } arg = { self->env->main_db };
+    } arg = { 0 };
 
     static const struct argspec argspec[] = {
         {ARG_OBJ, OFFSET(trans_cursor, db), &db_s, &PyDatabase_Type},
@@ -1524,6 +1524,9 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     if(parse_args(self->valid, argspec, args, kwds, &arg)) {
         return NULL;
     }
+    if(! arg.db) {
+        arg.db = self->env->main_db;
+    }
     return make_cursor(arg.db, self);
 }
 
@@ -1531,14 +1534,11 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     struct trans_delete {
         MDB_val key;
         MDB_val val;
         DbObject *db;
-    } arg = {{0, 0}, {0, 0}, self->env->main_db};
+    } arg = {{0, 0}, {0, 0}, NULL};
 
     static const struct argspec argspec[] = {
         {ARG_BUF, OFFSET(trans_delete, key), &key_s, NULL},
@@ -1549,6 +1549,9 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 
     if(parse_args(self->valid, argspec, args, kwds, &arg)) {
         return NULL;
+    }
+    if(! arg.db) {
+        arg.db = self->env->main_db;
     }
     MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
     int rc = mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr);
