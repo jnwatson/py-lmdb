@@ -35,8 +35,8 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#undef DEBUG
-#define DEBUG(s, ...)
+//#undef DEBUG
+//#define DEBUG(s, ...)
 
 
 static PyObject *Error;
@@ -184,7 +184,6 @@ typedef struct {
 
 typedef struct {
     LmdbObject_HEAD
-    EnvObject *env;
     DbObject *db;
     TransObject *trans;
 
@@ -831,7 +830,7 @@ cursor_clear(CursorObject *self)
 {
     if(self->valid) {
         INVALIDATE(self)
-        UNLINK_CHILD(self->env, self)
+        UNLINK_CHILD(self->trans, self)
         mdb_cursor_close(self->curs);
         self->valid = 0;
     }
@@ -848,7 +847,6 @@ cursor_clear(CursorObject *self)
     }
     Py_CLEAR(self->trans);
     Py_CLEAR(self->db);
-    Py_CLEAR(self->env);
     return 0;
 }
 
@@ -877,16 +875,15 @@ make_cursor(DbObject *db, TransObject *trans)
         return err_set("mdb_cursor_open", rc);
     }
 
+    DEBUG("sizeof cursor = %d", (int) sizeof *self)
     OBJECT_INIT(self)
     LINK_CHILD(trans, self)
     self->positioned = 0;
-    self->env = trans->env;
     self->key_buf = NULL;
     self->val_buf = NULL;
     self->key.mv_size = 0;
     self->val.mv_size = 0;
     self->item_tup = NULL;
-    Py_INCREF(self->env);
     self->db = db;
     Py_INCREF(self->db);
     self->trans = trans;
