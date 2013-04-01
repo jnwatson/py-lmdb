@@ -35,13 +35,20 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-//#undef DEBUG
-//#define DEBUG(s, ...)
+#undef DEBUG
+#define DEBUG(s, ...)
 
 
 static PyObject *Error;
 static PyObject *keys_interned;
 static PyObject *values_interned;
+static PyObject *parent_interned;
+static PyObject *write_interned;
+static PyObject *buffers_interned;
+static PyObject *db_interned;
+static PyObject *txn_interned;
+static PyObject *key_interned;
+static PyObject *default_interned;
 
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
@@ -98,7 +105,7 @@ struct lmdb_object {
  * deallocation.
  *
  * When the environment is closed, it walks its list calling tp_clear on each
- * child, which in turn what their own lists.
+ * child, which in turn walk their own lists.
  *
  * Child transactions are added to their parent transaction's list.
  *
@@ -319,6 +326,13 @@ err_invalid(void)
     return NULL;
 }
 
+static void *
+type_error(const char *what)
+{
+    PyErr_Format(PyExc_TypeError, "%s", what);
+    return NULL;
+}
+
 
 // ----------------------------
 // Database
@@ -499,7 +513,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         }
     }
 
-    int flags = 0;
+    int flags = 0; //MDB_WRITEMAP;
     if(! subdir) {
         flags |= MDB_NOSUBDIR;
     }
@@ -581,18 +595,50 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
         return err_invalid();
     }
 
-    TransObject *parent = NULL;
+    PyObject *parent = NULL;
     int write = 0;
     int buffers = 0;
 
-    static char *kwlist[] = {
-        "parent", "write", "buffers", NULL
-    };
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "|O!ii", kwlist,
-            &PyTransaction_Type, &parent, &write, &buffers)) {
-        return NULL;
+    switch(PyTuple_GET_SIZE(args)) {
+        default:
+            return type_error("too many positional arguments.");
+        case 3:
+            buffers = PyTuple_GET_ITEM(args, 2) == Py_True;
+        case 2:
+            write = PyTuple_GET_ITEM(args, 1) == Py_True;
+        case 1:
+            parent = PyTuple_GET_ITEM(args, 0);
+        case 0:
+            break;
     }
-    return (PyObject *) make_trans(self, parent, write, buffers);
+    if(kwds) {
+        int c = 0;
+        PyObject *val;
+        if((val = PyDict_GetItem(kwds, parent_interned))) {
+            parent = val;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, write_interned))) {
+            write = val == Py_True;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, buffers_interned))) {
+            buffers = val == Py_True;
+            c++;
+        }
+        if(c != PyDict_Size(kwds)) {
+            return type_error("incorrect keyword arguments.");
+        }
+    }
+
+    if(parent) {
+        if(parent == Py_None) {
+            parent = NULL;
+        } else if(Py_TYPE(parent) != &PyTransaction_Type) {
+            return type_error("parent must be Transaction instance.");
+        }
+    }
+    return (PyObject *) make_trans(self, (TransObject *)parent, write, buffers);
 }
 
 static PyObject *
@@ -850,15 +896,43 @@ make_cursor(DbObject *db, TransObject *trans)
 static PyObject *
 cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    DbObject *db;
-    TransObject *trans;
+    PyObject *db = NULL;
+    PyObject *trans = NULL;
 
-    static char *kwlist[] = {"db", "txn", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "O!O!", kwlist,
-            &PyDatabase_Type, &db, &PyTransaction_Type, &trans)) {
-        return NULL;
+    switch(PyTuple_GET_SIZE(args)) {
+        default:
+            return type_error("too many positional arguments.");
+        case 2:
+            db = PyTuple_GET_ITEM(args, 1);
+        case 1:
+            trans = PyTuple_GET_ITEM(args, 2);
+        case 0:
+            break;
     }
-    return make_cursor(db, trans);
+    if(kwds) {
+        PyObject *val;
+        int c = 0;
+        if((val = PyDict_GetItem(kwds, db_interned))) {
+            db = val;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, txn_interned))) {
+            trans = val;
+            c++;
+        }
+        if(c != PyDict_Size(kwds)) {
+            return type_error("incorrect keyword arguments.");
+        }
+    }
+
+    if(! (db && trans)) {
+        return type_error("db and transaction parameters required.");
+    }
+    if(! (Py_TYPE(trans) == &PyTransaction_Type
+          && Py_TYPE(db) == &PyDatabase_Type)) {
+        return type_error("argument type incorrect.");
+    }
+    return make_cursor((DbObject *)db, (TransObject *)trans);
 }
 
 static PyObject *
@@ -1415,27 +1489,62 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_val key = {0, 0};
-    PyObject *default_ = NULL;
-    DbObject *db = NULL;
+    PyObject *default_ = Py_None;
+    PyObject *db = NULL;
 
-    static char *kwlist[] = {"key", "default", "db", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "s#|OO!", kwlist,
-            &key.mv_data, &key.mv_size, &default_, &PyDatabase_Type, &db)) {
-        return NULL;
+    switch(PyTuple_GET_SIZE(args)) {
+        default:
+            return type_error("too many positional arguments.");
+        case 3:
+            db = PyTuple_GET_ITEM(args, 2);
+        case 2:
+            default_ = PyTuple_GET_ITEM(args, 1);
+        case 1:
+            if(val_from_buffer(&key, PyTuple_GET_ITEM(args, 0))) {
+                return NULL;
+            }
+        case 0:
+            break;
     }
+
+    if(kwds) {
+        PyObject *val;
+        int c = 0;
+        if((val = PyDict_GetItem(kwds, key_interned))) {
+            if(val_from_buffer(&key, val)) {
+                return NULL;
+            }
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, default_interned))) {
+            default_ = val;
+            c++;
+        }
+        if((val = PyDict_GetItem(kwds, db_interned))) {
+            db = val;
+            c++;
+        }
+        if(c != PyDict_Size(kwds)) {
+            return type_error("incorrect keyword arguments.");
+        }
+    }
+
+    if(! key.mv_data) {
+        return type_error("key must be given.");
+    }
+
     if(! db) {
-        db = self->env->main_db;
+        db = (PyObject *) self->env->main_db;
+    } else if(Py_TYPE(db) != &PyDatabase_Type) {
+        return type_error("db must be a _Database instance.");
     }
 
     MDB_val val;
-    int rc = mdb_get(self->txn, db->dbi, &key, &val);
+    int rc = mdb_get(self->txn, ((DbObject *)db)->dbi, &key, &val);
     if(rc) {
         if(rc == MDB_NOTFOUND) {
-            if(default_) {
-                Py_INCREF(default_);
-                return default_;
-            }
-            Py_RETURN_NONE;
+            Py_INCREF(default_);
+            return default_;
         }
         return err_set("mdb_get", rc);
     }
@@ -1567,8 +1676,24 @@ initcpython(void)
         }
     }
 
-    keys_interned = PyString_InternFromString("keys");
-    values_interned = PyString_InternFromString("values");
+    static struct { PyObject **obj; const char *s; } strs[] = {
+        {&keys_interned, "keys"},
+        {&values_interned, "values"},
+        {&parent_interned, "parent"},
+        {&write_interned, "write"},
+        {&buffers_interned, "buffers"},
+        {&db_interned, "db"},
+        {&txn_interned, "txn"},
+        {&key_interned, "key"},
+        {&default_interned, "default"},
+        {NULL, NULL}
+    };
+    for(i = 0; strs[i].obj; i++) {
+        *strs[i].obj = PyString_InternFromString(strs[i].s);
+        if(! *strs[i].obj) {
+            return;
+        }
+    }
 
     Error = PyErr_NewException("lmdb.Error", NULL, NULL);
     if(! Error) {
