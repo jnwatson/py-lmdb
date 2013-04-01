@@ -25,9 +25,12 @@ Please see http://lmdb.readthedocs.org/
 """
 
 import os
+import sys
 
 try:
-    if os.getenv('LMDB_FORCE_CFFI') is not None:
+# Hack: disable speedups while testing or reading docstrings.
+    if any(k in sys.modules for k in ('sphinx', 'pydoc')) or \
+            os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
     from lmdb.cpython import *
 except ImportError:
