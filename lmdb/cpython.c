@@ -35,7 +35,7 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-//#define NODEBUG
+#define NODEBUG
 
 #ifdef NODEBUG
 #undef DEBUG
