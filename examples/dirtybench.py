@@ -62,9 +62,15 @@ print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
 
 with env.begin() as txn:
     t0 = now()
-    lst = sum(1 for _ in txn.cursor().forward())
+    lst = sum(1 for _ in txn.cursor())
     t1 = now()
     print 'enum %d (key, value) pairs took %.2f sec' % ((lst), t1-t0)
+
+with env.begin() as txn:
+    t0 = now()
+    lst = sum(1 for _ in txn.cursor().iterprev())
+    t1 = now()
+    print 'reverse enum %d (key, value) pairs took %.2f sec' % ((lst), t1-t0)
 
 with env.begin() as txn:
     t0 = now()
@@ -82,7 +88,7 @@ with env.begin(buffers=True) as txn:
 
 with env.begin(buffers=True) as txn:
     t0 = now()
-    lst = sum(1 for _ in txn.cursor().forward())
+    lst = sum(1 for _ in txn.cursor())
     t1 = now()
     print 'enum %d (key, value) buffers took %.2f sec' % ((lst), t1-t0)
 
@@ -95,7 +101,7 @@ print
 env.close()
 if os.path.exists(dbpath):
     shutil.rmtree(dbpath)
-env = lmdb.connect(dbpath, map_size=1048576 * 1024)
+env = lmdb.open(dbpath, map_size=1048576 * 1024)
 
 
 getword = iter(sorted(words)).next
@@ -103,7 +109,7 @@ run = True
 t0 = now()
 last = t0
 while run:
-    with env.begin() as txn:
+    with env.begin(write=True) as txn:
         try:
             for _ in xrange(50000):
                 word = getword()

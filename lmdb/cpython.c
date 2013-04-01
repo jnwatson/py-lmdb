@@ -481,7 +481,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->env = NULL;
 
     int rc;
-    if((rc = mdb_env_create(&(self->env)))) {
+    if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
         goto fail;
     }
@@ -573,7 +573,7 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     }
 
     int flags = write ? 0 : MDB_RDONLY;
-    int rc = mdb_txn_begin(env->env, parent_txn, flags, &(self->txn));
+    int rc = mdb_txn_begin(env->env, parent_txn, flags, &self->txn);
     if(rc) {
         PyObject_Del(self);
         return err_set("mdb_txn_begin", rc);
@@ -587,6 +587,7 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     self->key_buf = NULL;
     return self;
 }
+
 
 static PyObject *
 env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
@@ -870,7 +871,7 @@ make_cursor(DbObject *db, TransObject *trans)
     }
 
     CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
-    int rc = mdb_cursor_open(trans->txn, db->dbi, &(self->curs));
+    int rc = mdb_cursor_open(trans->txn, db->dbi, &self->curs);
     if(rc) {
         PyObject_Del(self);
         return err_set("mdb_cursor_open", rc);
@@ -953,7 +954,7 @@ cursor_count(CursorObject *self)
 static PyObject *
 _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 {
-    int rc = mdb_cursor_get(self->curs, &(self->key), &(self->val), op);
+    int rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
     self->positioned = rc == 0;
     if(rc) {
         self->key.mv_size = 0;
@@ -1003,10 +1004,10 @@ cursor_item(CursorObject *self)
         return err_invalid();
     }
     if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
+        if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
-        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
+        if(! buffer_from_val(&self->val_buf, &self->val)) {
             return NULL;
         }
         if(! self->item_tup) {
@@ -1016,11 +1017,11 @@ cursor_item(CursorObject *self)
         return self->item_tup;
     }
 
-    PyObject *key = string_from_val(&(self->key));
+    PyObject *key = string_from_val(&self->key);
     if(! key) {
         return NULL;
     }
-    PyObject *val = string_from_val(&(self->val));
+    PyObject *val = string_from_val(&self->val);
     if(! val) {
         Py_DECREF(key);
         return NULL;
@@ -1041,13 +1042,13 @@ cursor_key(CursorObject *self)
         return err_invalid();
     }
     if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->key_buf), &(self->key))) {
+        if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
         Py_INCREF(self->key_buf);
         return (PyObject *) self->key_buf;
     }
-    return string_from_val(&(self->key));
+    return string_from_val(&self->key);
 }
 
 static PyObject *
@@ -1131,7 +1132,7 @@ cursor_value(CursorObject *self)
         return err_invalid();
     }
     if(self->trans->buffers) {
-        if(! buffer_from_val(&(self->val_buf), &(self->val))) {
+        if(! buffer_from_val(&self->val_buf, &self->val)) {
             return NULL;
         }
         Py_INCREF(self->val_buf);
@@ -1220,13 +1221,13 @@ cursor_iter(CursorObject *self)
 }
 
 static PyObject *
-cursor_forward(CursorObject *self, PyObject *args, PyObject *kwargs)
+cursor_iternext(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
     return iterator_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
 }
 
 static PyObject *
-cursor_reverse(CursorObject *self, PyObject *args, PyObject *kwargs)
+cursor_iterprev(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
     return iterator_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
 }
@@ -1235,14 +1236,14 @@ static struct PyMethodDef cursor_methods[] = {
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
     {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
     {"first", (PyCFunction)cursor_first, METH_NOARGS},
-    {"forward", (PyCFunction)cursor_forward, METH_VARARGS|METH_KEYWORDS},
     {"item", (PyCFunction)cursor_item, METH_NOARGS},
+    {"iternext", (PyCFunction)cursor_iternext, METH_VARARGS|METH_KEYWORDS},
+    {"iterprev", (PyCFunction)cursor_iterprev, METH_VARARGS|METH_KEYWORDS},
     {"key", (PyCFunction)cursor_key, METH_NOARGS},
     {"last", (PyCFunction)cursor_last, METH_NOARGS},
     {"next", (PyCFunction)cursor_next, METH_NOARGS},
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS},
-    {"reverse", (PyCFunction)cursor_reverse, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
@@ -1549,9 +1550,9 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_get", rc);
     }
     if(self->buffers) {
-        return buffer_from_val(&(self->key_buf), &val);
+        return buffer_from_val(&self->key_buf, &val);
     }
-    return PyString_FromStringAndSize(val.mv_data, val.mv_size);
+    return string_from_val(&val);
 }
 
 static PyObject *
@@ -1628,6 +1629,7 @@ static struct PyMethodDef trans_methods[] = {
     {"commit", (PyCFunction)trans_commit, METH_NOARGS},
     {"cursor", (PyCFunction)trans_cursor, METH_VARARGS|METH_KEYWORDS},
     {"delete", (PyCFunction)trans_delete, METH_VARARGS|METH_KEYWORDS},
+    {"drop", (PyCFunction)trans_drop, METH_VARARGS|METH_KEYWORDS},
     {"get", (PyCFunction)trans_get, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)trans_put, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}

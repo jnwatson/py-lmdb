@@ -867,16 +867,16 @@ class Cursor(object):
             ...     cursor = txn.cursor()           # Cursor on main database.
             ...     cursor2 = txn.cursor(child_db)  # Cursor on child database.
 
-    Cursors start in an unpositioned state: if :py:meth:`forward` or
-    :py:meth:`reverse` are used to create an iterator in this state, iteration
-    proceeds from the first or last key respectively. Iterators directly track
-    position using the cursor, meaning strange behavior will result when
-    multiple iterators exist on the same cursor.
+    Cursors start in an unpositioned state: if :py:meth:`iternext` or
+    :py:meth:`iterprev` are used in this state, iteration proceeds from the
+    start or end respectively. Iterators directly position using the cursor,
+    meaning strange behavior results when multiple iterators exist on the same
+    cursor.
 
         ::
 
             >>> with env.begin() as txn:
-            ...     for i, (key, value) in enumerate(txn.cursor().reverse()):
+            ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
             ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
 
     Both :py:meth:`forward` and :py:meth:`reverse` accept `keys` and `values`
@@ -973,7 +973,7 @@ class Cursor(object):
             if rc and rc != MDB_NOTFOUND:
                 raise Error("mdb_cursor_get", rc)
 
-    def forward(self, keys=True, values=True):
+    def iternext(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
         calling :py:meth:`next`, repeating until the end of the database is
         reached. As a convenience, :py:class:`Cursor` implements the iterator
@@ -983,16 +983,24 @@ class Cursor(object):
 
                 >>> # Equivalent:
                 >>> it = iter(cursor)
-                >>> it = cursor.forward(keys=True, values=True)
+                >>> it = cursor.iternext(keys=True, values=True)
+
+        If the cursor was not yet positioned, it is moved to the first record
+        in the database, otherwise iteration proceeds from the current
+        position.
         """
         if not self._valid:
             self.first()
         return self._iter(MDB_NEXT, keys, values)
-    __iter__ = forward
+    __iter__ = iternext
 
-    def reverse(self, keys=True, values=True):
+    def iterprev(self, keys=True, values=True):
         """Return a reverse iterator that yields the current element before
-        calling :py:meth:`prev`, until the start of the database is reached."""
+        calling :py:meth:`prev`, until the start of the database is reached.
+
+        If the cursor was not yet positioned, it is moved to the last record in
+        the database, otherwise iteration proceeds from the current position.
+        """
         if not self._valid:
             self.last()
         return self._iter(MDB_PREV, keys, values)
