@@ -37,8 +37,8 @@ def rmenv():
     if os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH)
 
-def openenv():
-    return lmdb.open(DB_PATH, max_dbs=10)
+def openenv(**kwargs):
+    return lmdb.open(DB_PATH, max_dbs=10, **kwargs)
 
 
 class EnvMixin:
@@ -48,16 +48,8 @@ class EnvMixin:
 
     def tearDown(self):
         self.env.close()
+        del self.env
         shutil.rmtree(DB_PATH)
-
-
-class DupOpenTest(unittest.TestCase):
-    def testDupOpen(self):
-        # Caused CPython SEGV at some point.
-        rmenv()
-        env = openenv()
-        assertCrash(lambda: openenv())
-        rmenv()
 
 
 class CrashTest(EnvMixin, unittest.TestCase):
@@ -80,19 +72,20 @@ class CrashTest(EnvMixin, unittest.TestCase):
 
     def testDbDoubleClose(self):
         db = self.env.open_db(name='dave3')
+        print 'we have db', db
         #db.close()
         #db.close()
 
     def testTxnCloseActiveIter(self):
         with self.env.begin() as txn:
-            it = txn.cursor().forward()
+            it = txn.cursor().iternext()
         assertCrash(lambda: list(it))
 
     def testDbCloseActiveIter(self):
         db = self.env.open_db(name='dave3')
         with self.env.begin(write=True) as txn:
             txn.put('a', 'b', db=db)
-            it = txn.cursor(db=db).forward()
+            it = txn.cursor(db=db).iternext()
         assertCrash(lambda: list(it))
 
 
@@ -109,7 +102,10 @@ VALUES = ['' for k in KEYS]
 
 def putData(t, db=None):
     for k, v in ITEMS:
-        t.put(k, v, db=db)
+        if db:
+            t.put(k, v, db=db)
+        else:
+            t.put(k, v)
 
 
 class CursorTest(EnvMixin, unittest.TestCase):
@@ -201,14 +197,15 @@ class IteratorTest(EnvMixin, unittest.TestCase):
 
     def testEmpty(self):
         eq([], list(self.c))
-        eq([], list(self.c.forward()))
-        eq([], list(self.c.reverse()))
+        eq([], list(self.c.iternext()))
+        eq([], list(self.c.iterprev()))
 
     def testFilled(self):
         putData(self.txn)
         eq(ITEMS, list(self.c))
-        eq(ITEMS, list(self.c.forward()))
-        eq(ITEMS[::-1], list(self.c.reverse()))
+        eq(ITEMS, list(self.c))
+        eq(ITEMS, list(self.c.iternext()))
+        eq(ITEMS[::-1], list(self.c.iterprev()))
 
     def testFilledSkipForward(self):
         putData(self.txn)
@@ -218,12 +215,12 @@ class IteratorTest(EnvMixin, unittest.TestCase):
     def testFilledSkipReverse(self):
         putData(self.txn)
         self.c.set_range('b')
-        eq(REV_ITEMS[-2:], list(self.c.reverse()))
+        eq(REV_ITEMS[-2:], list(self.c.iterprev()))
 
     def testFilledSkipEof(self):
         putData(self.txn)
         eq(False, self.c.set_range('z'))
-        eq(REV_ITEMS, list(self.c.reverse()))
+        eq(REV_ITEMS, list(self.c.iterprev()))
 
 
 

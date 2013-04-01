@@ -238,7 +238,7 @@ dict_from_fields(void *o, const struct dict_field *fields)
 
     while(fields->type != TYPE_EOF) {
         uint8_t *p = ((uint8_t *) o) + fields->offset;
-        unsigned PY_LONG_LONG l;
+        unsigned PY_LONG_LONG l = 0;
         if(fields->type == TYPE_UINT) {
             l = *(unsigned int *)p;
         } else if(fields->type == TYPE_SIZE) {
@@ -370,7 +370,7 @@ txn_db_from_name(EnvObject *env, const char *name,
     int rc;
     MDB_txn *txn;
     if((rc = mdb_txn_begin(env->env, NULL, 0, &txn))) {
-        err_set("Write transaction to open database", rc);
+        err_set("mdb_txn_begin", rc);
         return NULL;
     }
 
@@ -687,7 +687,7 @@ env_info(EnvObject *self)
     MDB_envinfo info;
     int rc = mdb_env_info(self->env, &info);
     if(rc) {
-        err_set("Getting environment info", rc);
+        err_set("mdb_env_info", rc);
         return NULL;
     }
     return dict_from_fields(&info, fields);
@@ -741,7 +741,7 @@ env_path(EnvObject *self)
     const char *path;
     int rc;
     if((rc = mdb_env_get_path(self->env, &path))) {
-        return err_set("Getting path", rc);
+        return err_set("mdb_env_get_path", rc);
     }
     return PyString_FromString(path);
 }
@@ -767,7 +767,7 @@ env_stat(EnvObject *self)
     MDB_stat st;
     int rc = mdb_env_stat(self->env, &st);
     if(rc) {
-        err_set("Getting environment statistics", rc);
+        err_set("mdb_env_stat", rc);
         return NULL;
     }
     return dict_from_fields(&st, fields);
@@ -790,7 +790,7 @@ env_sync(EnvObject *self, PyObject *arg)
 
     int rc = mdb_env_sync(self->env, force);
     if(rc) {
-        return err_set("Flushing", rc);
+        return err_set("mdb_env_sync", rc);
     }
     Py_RETURN_NONE;
 }
@@ -899,7 +899,7 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         case 2:
             db = PyTuple_GET_ITEM(args, 1);
         case 1:
-            trans = PyTuple_GET_ITEM(args, 2);
+            trans = PyTuple_GET_ITEM(args, 0);
         case 0:
             break;
     }
@@ -944,8 +944,9 @@ cursor_count(CursorObject *self)
     return PyLong_FromUnsignedLongLong(count);
 }
 
-static PyObject *
-_cursor_get(CursorObject *self, enum MDB_cursor_op op)
+
+static int
+_cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 {
     int rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
     self->positioned = rc == 0;
@@ -954,9 +955,25 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
         self->val.mv_size = 0;
         if(rc != MDB_NOTFOUND) {
             if(! (rc == EINVAL && op == MDB_GET_CURRENT)) {
-                return err_set("mdb_cursor_get", rc);
+                err_set("mdb_cursor_get", rc);
+                return -1;
             }
         }
+    }
+    if(op == MDB_LAST && !rc) {
+        // TODO should not be necessary. Calling MDB_PREV after a failed
+        // MDB_LAST results in NULL pointer dereference.
+        return _cursor_get_c(self, MDB_PREV);
+    }
+    return 0;
+}
+
+
+static PyObject *
+_cursor_get(CursorObject *self, enum MDB_cursor_op op)
+{
+    if(_cursor_get_c(self, op)) {
+        return NULL;
     }
     PyObject *res = self->positioned ? Py_True : Py_False;
     Py_INCREF(res);
@@ -1050,13 +1067,7 @@ cursor_last(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    PyObject *ret = _cursor_get(self, MDB_LAST);
-    // TODO should not be necessary.
-    if(ret == Py_False) {
-        return ret;
-    }
-    Py_DECREF(ret);
-    return _cursor_get(self, MDB_PREV);
+    return _cursor_get(self, MDB_LAST);
 }
 
 static PyObject *
@@ -1148,42 +1159,38 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
 
     int keys = 1;
     int values = 1;
-    PyObject *val;
 
     if(args) {
-        if(PyTuple_GET_SIZE(args) > 0) {
-            keys = PyTuple_GET_ITEM(args, 0) == Py_True;
-        }
-        if(PyTuple_GET_SIZE(args) > 1) {
-            keys = PyTuple_GET_ITEM(args, 1) == Py_True;
+        switch(PyTuple_GET_SIZE(args)) {
+            default:
+                return type_error("too many positional arguments.");
+            case 2:
+                values = PyTuple_GET_ITEM(args, 1) == Py_True;
+            case 1:
+                keys = PyTuple_GET_ITEM(args, 0) == Py_True;
+            case 0:
+                break;
         }
     }
     if(kwds) {
+        PyObject *val;
+        int c = 0;
         if((val = PyDict_GetItem(kwds, keys_interned))) {
             keys = val == Py_True;
+            c++;
         }
         if((val = PyDict_GetItem(kwds, values_interned))) {
             values = val == Py_True;
+            c++;
+        }
+        if(c != PyDict_Size(kwds)) {
+            return type_error("incorrect keyword arguments.");
         }
     }
 
     if(! self->positioned) {
-        PyObject *ret = _cursor_get(self, pos_op);
-        if(! ret) {
+        if(_cursor_get_c(self, pos_op)) {
             return NULL;
-        }
-        int was_true = ret == Py_True;
-        Py_DECREF(ret);
-
-        // TODO should not be necessary.
-        // Calling MDB_PREV after a failed MDB_LAST results in NULL pointer
-        // dereference.
-        if(was_true && pos_op == MDB_LAST) {
-            ret = _cursor_get(self, MDB_PREV);
-            if(! ret) {
-                return NULL;
-            }
-            Py_DECREF(ret);
         }
     }
 
@@ -1287,13 +1294,10 @@ iter_next(IterObject *self)
         return NULL;
     }
     if(self->started) {
-        PyObject *ret = _cursor_get(self->curs, self->op);
-        if(! ret) {
+        if(_cursor_get_c(self->curs, self->op)) {
             return NULL;
         }
-        int eof = ret == Py_False;
-        Py_DECREF(ret);
-        if(eof) {
+        if(! self->curs->positioned) {
             return NULL;
         }
     }
