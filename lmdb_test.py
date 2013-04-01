@@ -61,6 +61,10 @@ class CrashTest(EnvMixin, unittest.TestCase):
             txn.put('dave', '')
             txn.put('dave2', '')
 
+    def testOldCrash(self):
+        txn = self.env.begin()
+        dir(iter(txn.cursor()))
+
     def testCloseWithTxn(self):
         txn = self.env.begin(write=True)
         self.env.close()
