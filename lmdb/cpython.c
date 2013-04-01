@@ -35,7 +35,7 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#define NODEBUG
+//#define NODEBUG
 
 #ifdef NODEBUG
 #undef DEBUG
@@ -1099,16 +1099,22 @@ cursor_delete(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
+    PyObject *ret = Py_False;
     if(self->positioned) {
-        DEBUG("deleting key '%*s'", (int)self->key.mv_size, (char*)self->key.mv_data)
+        DEBUG("deleting key '%.*s'",
+              (int) self->key.mv_size,
+              (char*) self->key.mv_data)
         int rc = mdb_cursor_del(self->curs, 0);
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
-        return _cursor_get(self, MDB_GET_CURRENT);
+        ret = Py_True;
+        _cursor_get_c(self, MDB_GET_CURRENT);
     }
-    Py_RETURN_FALSE;
+    Py_INCREF(ret);
+    return ret;
 }
+
 
 static PyObject *
 cursor_first(CursorObject *self)
@@ -1659,6 +1665,12 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     if(arg.append) {
         flags |= MDB_APPEND;
     }
+
+    DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
+        (int)arg.key.mv_size, (char *)arg.key.mv_data,
+        (int)arg.key.mv_size,
+        (int)arg.value.mv_size, (char *)arg.value.mv_data,
+        (int)arg.value.mv_size)
 
     int rc = mdb_put(self->txn, (arg.db)->dbi, &arg.key, &arg.value, flags);
     if(rc) {
