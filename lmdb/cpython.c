@@ -184,7 +184,6 @@ typedef struct {
 
 typedef struct {
     LmdbObject_HEAD
-    DbObject *db;
     TransObject *trans;
 
     int positioned;
@@ -846,7 +845,6 @@ cursor_clear(CursorObject *self)
         Py_CLEAR(self->item_tup);
     }
     Py_CLEAR(self->trans);
-    Py_CLEAR(self->db);
     return 0;
 }
 
@@ -884,8 +882,6 @@ make_cursor(DbObject *db, TransObject *trans)
     self->key.mv_size = 0;
     self->val.mv_size = 0;
     self->item_tup = NULL;
-    self->db = db;
-    Py_INCREF(self->db);
     self->trans = trans;
     Py_INCREF(self->trans);
     return (PyObject *) self;
