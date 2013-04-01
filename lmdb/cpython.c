@@ -35,24 +35,43 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
+#define NODEBUG
+
+#ifdef NODEBUG
 #undef DEBUG
 #define DEBUG(s, ...)
+#endif
 
+#define NOINLINE __attribute__((noinline))
 
 static PyObject *Error;
-static PyObject *append_interned;
-static PyObject *buffers_interned;
-static PyObject *db_interned;
-static PyObject *default_interned;
-static PyObject *dupdata_interned;
-static PyObject *key_interned;
-static PyObject *keys_interned;
-static PyObject *overwrite_interned;
-static PyObject *parent_interned;
-static PyObject *txn_interned;
-static PyObject *value_interned;
-static PyObject *values_interned;
-static PyObject *write_interned;
+static PyObject *append_s;
+static PyObject *buffers_s;
+static PyObject *create_s;
+static PyObject *db_s;
+static PyObject *default_s;
+static PyObject *dupdata_s;
+static PyObject *dupsort_s;
+static PyObject *key_s;
+static PyObject *keys_s;
+static PyObject *map_async_s;
+static PyObject *map_size_s;
+static PyObject *max_dbs_s;
+static PyObject *max_readers_s;
+static PyObject *metasync_s;
+static PyObject *mode_s;
+static PyObject *name_s;
+static PyObject *overwrite_s;
+static PyObject *parent_s;
+static PyObject *path_s;
+static PyObject *readonly_s;
+static PyObject *reverse_key_s;
+static PyObject *subdir_s;
+static PyObject *sync_s;
+static PyObject *txn_s;
+static PyObject *value_s;
+static PyObject *values_s;
+static PyObject *write_s;
 
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
@@ -214,6 +233,7 @@ typedef struct {
 
 
 
+
 // ----------- helpers
 //
 //
@@ -269,7 +289,7 @@ dict_from_fields(void *o, const struct dict_field *fields)
 }
 
 
-static PyObject *
+static PyObject * NOINLINE
 buffer_from_val(PyBufferObject **bufp, MDB_val *val)
 {
     PyBufferObject *buf = *bufp;
@@ -296,7 +316,7 @@ string_from_val(MDB_val *val)
 }
 
 
-static int
+static int NOINLINE
 val_from_buffer(MDB_val *val, PyObject *buf)
 {
     if(PyString_CheckExact(buf)) {
@@ -310,25 +330,26 @@ val_from_buffer(MDB_val *val, PyObject *buf)
 }
 
 
+
 // ------------------------
 // Exceptions.
 // ------------------------
 
-static void *
+static void * NOINLINE
 err_set(const char *what, int rc)
 {
     PyErr_Format(Error, "%s: %s", what, mdb_strerror(rc));
     return NULL;
 }
 
-static void *
+static void * NOINLINE
 err_invalid(void)
 {
     PyErr_Format(Error, "Attempt to operate on closed/deleted/dropped object.");
     return NULL;
 }
 
-static void *
+static void * NOINLINE
 type_error(const char *what)
 {
     PyErr_Format(PyExc_TypeError, "%s", what);
@@ -336,10 +357,132 @@ type_error(const char *what)
 }
 
 
+/// ------------------------------
+// argument parsing
+//-------------------------------
+
+#define OFFSET(k, y) offsetof(struct k, y)
+enum arg_type {ARG_EOF, ARG_BOOL, ARG_OBJ, ARG_BUF, ARG_STR, ARG_INT};
+struct argspec {
+    unsigned short type;
+    unsigned short offset;
+    PyObject **name;
+    PyTypeObject *objtype;
+};
+
+
+static int
+parse_arg(const struct argspec *spec, PyObject *val, void *out)
+{
+    void *dst = ((uint8_t *)out) + spec->offset;
+
+    switch(spec->type) {
+    case ARG_EOF:
+    case ARG_BOOL:
+        *((int *)dst) = val == Py_True;
+        break;
+    case ARG_OBJ:
+        if(val != Py_None) {
+            if(spec->objtype) {
+                if(val->ob_type != spec->objtype) {
+                    type_error("invalid type");
+                    return -1;
+                }
+            }
+            *((PyObject **) dst) = val;
+        }
+        break;
+    case ARG_BUF:
+        if(val != Py_None && val_from_buffer((MDB_val *)dst, val)) {
+            return -1;
+        }
+        break;
+    case ARG_STR:
+        if(val != Py_None) {
+            MDB_val mv;
+            if(val_from_buffer(&mv, val)) {
+                return -1;
+            }
+            *((char **) dst) = mv.mv_data;
+        }
+        break;
+    case ARG_INT:
+        if(val != Py_None) {
+            *((int *) dst) = PyLong_AsUnsignedLong(val);
+            if(PyErr_Occurred()) {
+                return -1;
+            }
+        }
+        break;
+    }
+    return 0;
+}
+
+
+/**
+ * Like PyArg_ParseTupleAndKeywords except types are specialized for this
+ * module, keyword strings aren't dup'd every call and the code is >3x smaller.
+ */
+static int NOINLINE
+parse_args(int valid, const struct argspec *argspec,
+           PyObject *args, PyObject *kwds, void *out)
+{
+    if(! valid) {
+        err_invalid();
+        return -1;
+    }
+
+    unsigned set = 0;
+    const struct argspec *spec = argspec;
+    unsigned i;
+    if(args) {
+        int pargsize = PyTuple_GET_SIZE(args);
+        i = 0;
+        while(i < pargsize && spec->type != ARG_EOF) {
+            if(parse_arg(spec, PyTuple_GET_ITEM(args, i), out)) {
+                return -1;
+            }
+            set |= (1 << i++);
+            spec++;
+        }
+
+        if(i >= pargsize && spec->type == ARG_EOF) {
+            type_error("too many positional arguments.");
+            return -1;
+        }
+    }
+
+    if(kwds) {
+        i = 0;
+        int c = 0;
+        for(spec = argspec; spec->type != ARG_EOF; spec++) {
+            unsigned bit = 1 << i++;
+            PyObject *val = PyDict_GetItem(kwds, *spec->name);
+            if(val) {
+                if(set & bit) {
+                    PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
+                                 PyString_AS_STRING(*spec->name));
+                    return -1;
+                }
+                if(parse_arg(spec, val, out)) {
+                    return -1;
+                }
+                c++;
+            }
+        }
+
+        if(c != PyDict_Size(kwds)) {
+            type_error("unrecognized keyword argument");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
 // ----------------------------
 // Database
 // ----------------------------
-
 
 static DbObject *
 db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
@@ -449,28 +592,41 @@ env_dealloc(EnvObject *self)
 static PyObject *
 env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    char *path = NULL;
-    int map_size = 10485760;
-    int subdir = 1;
-    int readonly = 0;
-    int metasync = 1;
-    int sync = 1;
-    int map_async = 0;
-    int mode = 0644;
-    int create = 1;
-    int max_readers = 126;
-    int max_dbs = 0;
+    struct env_new {
+        char *path;
+        int map_size;
+        int subdir;
+        int readonly;
+        int metasync;
+        int sync;
+        int map_async;
+        int mode;
+        int create;
+        int max_readers;
+        int max_dbs;
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 126, 0};
 
-    static char *kwlist[] = {
-        "path", "map_size", "subdir", "readonly", "metasync", "sync",
-        "map_async", "mode", "create", "max_readers", "max_dbs", NULL
+    static const struct argspec argspec[] = {
+        {ARG_STR, OFFSET(env_new, path), &path_s, NULL},
+        {ARG_INT, OFFSET(env_new, map_size), &map_size_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, subdir), &subdir_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, readonly), &readonly_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, metasync), &metasync_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, sync), &sync_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, map_async), &map_async_s, NULL},
+        {ARG_INT, OFFSET(env_new, mode), &mode_s, NULL},
+        {ARG_BOOL, OFFSET(env_new, create), &create_s, NULL},
+        {ARG_INT, OFFSET(env_new, max_readers), &max_readers_s, NULL},
+        {ARG_INT, OFFSET(env_new, max_dbs), &max_dbs_s, NULL},
+        {0, 0, 0, 0}
     };
 
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|iiiiiiiiii", kwlist,
-        &path, &map_size, &subdir, &readonly, &metasync, &sync, &map_async,
-        &mode, &create, &max_readers, &max_dbs))
-    {
+    if(parse_args(1, argspec, args, kwds, &arg)) {
         return NULL;
+    }
+
+    if(! arg.path) {
+        return type_error("'path' argument required");
     }
 
     EnvObject *self = PyObject_New(EnvObject, type);
@@ -488,53 +644,53 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         goto fail;
     }
 
-    if((rc = mdb_env_set_mapsize(self->env, map_size))) {
+    if((rc = mdb_env_set_mapsize(self->env, arg.map_size))) {
         err_set("mdb_env_set_mapsize", rc);
         goto fail;
     }
 
-    if((rc = mdb_env_set_maxreaders(self->env, max_readers))) {
+    if((rc = mdb_env_set_maxreaders(self->env, arg.max_readers))) {
         err_set("mdb_env_set_maxreaders", rc);
         goto fail;
     }
 
-    if((rc = mdb_env_set_maxdbs(self->env, max_dbs))) {
+    if((rc = mdb_env_set_maxdbs(self->env, arg.max_dbs))) {
         err_set("mdb_env_set_maxdbs", rc);
         goto fail;
     }
 
-    if(create && subdir) {
+    if(arg.create && arg.subdir) {
         struct stat st;
         errno = 0;
-        stat(path, &st);
+        stat(arg.path, &st);
         if(errno == ENOENT) {
-            if(mkdir(path, 0700)) {
-                PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
+            if(mkdir(arg.path, 0700)) {
+                PyErr_SetFromErrnoWithFilename(PyExc_OSError, arg.path);
                 goto fail;
             }
         }
     }
 
     int flags = 0; //MDB_WRITEMAP;
-    if(! subdir) {
+    if(! arg.subdir) {
         flags |= MDB_NOSUBDIR;
     }
-    if(readonly) {
+    if(arg.readonly) {
         flags |= MDB_RDONLY;
     }
-    if(! metasync) {
+    if(! arg.metasync) {
         flags |= MDB_NOMETASYNC;
     }
-    if(! sync) {
+    if(! arg.sync) {
         flags |= MDB_NOSYNC;
     }
-    if(map_async) {
+    if(arg.map_async) {
         flags |= MDB_MAPASYNC;
     }
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, path, flags, mode)
-    if((rc = mdb_env_open(self->env, path, flags, mode))) {
-        err_set(path, rc);
+    if((rc = mdb_env_open(self->env, arg.path, flags, arg.mode))) {
+        err_set(arg.path, rc);
         goto fail;
     }
 
@@ -554,9 +710,11 @@ fail:
 }
 
 
-static TransObject *
+static PyObject *
 make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
 {
+    DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
+        env, parent, write, buffers)
     if(! env->valid) {
         return err_invalid();
     }
@@ -587,61 +745,30 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     Py_INCREF(env);
     self->buffers = buffers;
     self->key_buf = NULL;
-    return self;
+    return (PyObject *)self;
 }
 
 
 static PyObject *
 env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
+    struct env_begin {
+        int buffers;
+        int write;
+        TransObject *parent;
+    } arg = {0, 0, NULL};
 
-    PyObject *parent = NULL;
-    int write = 0;
-    int buffers = 0;
+    static const struct argspec argspec[] = {
+        {ARG_BOOL, OFFSET(env_begin, buffers), &buffers_s, NULL},
+        {ARG_BOOL, OFFSET(env_begin, write), &write_s, NULL},
+        {ARG_OBJ, OFFSET(env_begin, parent), &parent_s, &PyTransaction_Type},
+        {0, 0, 0, 0}
+    };
 
-    switch(PyTuple_GET_SIZE(args)) {
-        default:
-            return type_error("too many positional arguments.");
-        case 3:
-            buffers = PyTuple_GET_ITEM(args, 2) == Py_True;
-        case 2:
-            write = PyTuple_GET_ITEM(args, 1) == Py_True;
-        case 1:
-            parent = PyTuple_GET_ITEM(args, 0);
-        case 0:
-            break;
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
+        return NULL;
     }
-    if(kwds) {
-        int c = 0;
-        PyObject *val;
-        if((val = PyDict_GetItem(kwds, parent_interned))) {
-            parent = val;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, write_interned))) {
-            write = val == Py_True;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, buffers_interned))) {
-            buffers = val == Py_True;
-            c++;
-        }
-        if(c != PyDict_Size(kwds)) {
-            return type_error("incorrect keyword arguments.");
-        }
-    }
-
-    if(parent) {
-        if(parent == Py_None) {
-            parent = NULL;
-        } else if(Py_TYPE(parent) != &PyTransaction_Type) {
-            return type_error("parent must be Transaction instance.");
-        }
-    }
-    return (PyObject *) make_trans(self, (TransObject *)parent, write, buffers);
+    return make_trans(self, arg.parent, arg.write, arg.buffers);
 }
 
 static PyObject *
@@ -701,36 +828,42 @@ env_info(EnvObject *self)
 static PyObject *
 env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {
-        "name", "txn", "reverse_key", "dupsort", "create", NULL
-    };
-    const char *name = NULL;
-    TransObject *txn = NULL;
-    int reverse_key = 0;
-    int dupsort = 0;
-    int create = 1;
+    struct env_open_db {
+        const char *name;
+        TransObject *txn;
+        int reverse_key;
+        int dupsort;
+        int create;
+    } arg = {NULL, NULL, 0, 0, 1};
 
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "|zO!iii", kwlist,
-            &name, &PyTransaction_Type, &txn, &reverse_key, &dupsort,
-            &create)) {
+    static const struct argspec argspec[] = {
+        {ARG_STR, OFFSET(env_open_db, name), &name_s, NULL},
+        {ARG_OBJ, OFFSET(env_open_db, txn), &txn_s, &PyTransaction_Type},
+        {ARG_BOOL, OFFSET(env_open_db, reverse_key), &reverse_key_s, NULL},
+        {ARG_BOOL, OFFSET(env_open_db, dupsort), &dupsort_s, NULL},
+        {ARG_BOOL, OFFSET(env_open_db, create), &create_s, NULL},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(1, argspec, args, kwds, &arg)) {
         return NULL;
     }
 
     int flags = 0;
-    if(reverse_key) {
+    if(arg.reverse_key) {
         flags |= MDB_REVERSEKEY;
     }
-    if(dupsort) {
+    if(arg.dupsort) {
         flags |= MDB_DUPSORT;
     }
-    if(create) {
+    if(arg.create) {
         flags |= MDB_CREATE;
     }
 
-    if(txn) {
-        return (PyObject *) db_from_name(self, txn->txn, name, flags);
+    if(arg.txn) {
+        return (PyObject *) db_from_name(self, arg.txn->txn, arg.name, flags);
     } else {
-        return (PyObject *) txn_db_from_name(self, name, flags);
+        return (PyObject *) txn_db_from_name(self, arg.name, flags);
     }
 }
 
@@ -894,43 +1027,25 @@ make_cursor(DbObject *db, TransObject *trans)
 static PyObject *
 cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    PyObject *db = NULL;
-    PyObject *trans = NULL;
+    struct cursor_new {
+        DbObject *db;
+        TransObject *trans;
+    } arg = {NULL, NULL};
 
-    switch(PyTuple_GET_SIZE(args)) {
-        default:
-            return type_error("too many positional arguments.");
-        case 2:
-            db = PyTuple_GET_ITEM(args, 1);
-        case 1:
-            trans = PyTuple_GET_ITEM(args, 0);
-        case 0:
-            break;
-    }
-    if(kwds) {
-        PyObject *val;
-        int c = 0;
-        if((val = PyDict_GetItem(kwds, db_interned))) {
-            db = val;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, txn_interned))) {
-            trans = val;
-            c++;
-        }
-        if(c != PyDict_Size(kwds)) {
-            return type_error("incorrect keyword arguments.");
-        }
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, OFFSET(cursor_new, db), &db_s, &PyDatabase_Type},
+        {ARG_OBJ, OFFSET(cursor_new, trans), &txn_s, &PyTransaction_Type},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(1, argspec, args, kwds, &arg)) {
+        return NULL;
     }
 
-    if(! (db && trans)) {
+    if(! (arg.db && arg.trans)) {
         return type_error("db and transaction parameters required.");
     }
-    if(! (Py_TYPE(trans) == &PyTransaction_Type
-          && Py_TYPE(db) == &PyDatabase_Type)) {
-        return type_error("argument type incorrect.");
-    }
-    return make_cursor((DbObject *)db, (TransObject *)trans);
+    return make_cursor(arg.db, arg.trans);
 }
 
 static PyObject *
@@ -1154,42 +1269,22 @@ cursor_value(CursorObject *self)
 // ==================================
 
 static PyObject *
-iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
+iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
                    enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
+    struct iter_from_args {
+        int keys;
+        int values;
+    } arg = {1, 1};
 
-    int keys = 1;
-    int values = 1;
+    static const struct argspec argspec[] = {
+        {ARG_BOOL, OFFSET(iter_from_args, keys), &keys_s, NULL},
+        {ARG_BOOL, OFFSET(iter_from_args, values), &values_s, NULL},
+        {0, 0, 0, 0}
+    };
 
-    if(args) {
-        switch(PyTuple_GET_SIZE(args)) {
-            default:
-                return type_error("too many positional arguments.");
-            case 2:
-                values = PyTuple_GET_ITEM(args, 1) == Py_True;
-            case 1:
-                keys = PyTuple_GET_ITEM(args, 0) == Py_True;
-            case 0:
-                break;
-        }
-    }
-    if(kwds) {
-        PyObject *val;
-        int c = 0;
-        if((val = PyDict_GetItem(kwds, keys_interned))) {
-            keys = val == Py_True;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, values_interned))) {
-            values = val == Py_True;
-            c++;
-        }
-        if(c != PyDict_Size(kwds)) {
-            return type_error("incorrect keyword arguments.");
-        }
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
+        return NULL;
     }
 
     if(! self->positioned) {
@@ -1203,9 +1298,9 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         return NULL;
     }
 
-    if(! values) {
+    if(! arg.values) {
         iter->val_func = (void *)cursor_key;
-    } else if(! keys) {
+    } else if(! arg.keys) {
         iter->val_func = (void *)cursor_value;
     } else {
         iter->val_func = (void *)cursor_item;
@@ -1221,19 +1316,19 @@ iterator_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
 static PyObject *
 cursor_iter(CursorObject *self)
 {
-    return iterator_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT);
+    return iter_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT);
 }
 
 static PyObject *
 cursor_iternext(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
-    return iterator_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
+    return iter_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
 }
 
 static PyObject *
 cursor_iterprev(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
-    return iterator_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
+    return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
 }
 
 static struct PyMethodDef cursor_methods[] = {
@@ -1364,21 +1459,30 @@ trans_dealloc(TransObject *self)
 static PyObject *
 trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    EnvObject *env = NULL;
-    TransObject *parent = NULL;
-    int write = 0;
-    int buffers = 0;
+    struct trans_new {
+        EnvObject *env;
+        TransObject *parent;
+        int write;
+        int buffers;
+    } arg = {NULL, NULL, 0, 0};
 
-    static char *kwlist[] = {
-        "env", "parent", "write", "buffers", NULL
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, OFFSET(trans_new, env), &txn_s, &PyTransaction_Type},
+        {ARG_OBJ, OFFSET(trans_new, parent), &parent_s, &PyTransaction_Type},
+        {ARG_BOOL, OFFSET(trans_new, write), &write_s, NULL},
+        {ARG_BOOL, OFFSET(trans_new, buffers), &buffers_s, NULL},
+        {0, 0, 0, 0}
     };
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "O!|O!ii", kwlist,
-            &PyEnvironment_Type, &env,
-            &PyTransaction_Type, &parent, &write, &buffers)) {
+
+    if(! arg.env) {
+        return type_error("'env' argument required");
+    }
+    if(parse_args(1, argspec, args, kwds, &arg)) {
         return NULL;
     }
-    return (PyObject *) make_trans(env, parent, write, buffers);
+    return make_trans(arg.env, arg.parent, arg.write, arg.buffers);
 }
+
 
 static PyObject *
 trans_abort(TransObject *self)
@@ -1415,21 +1519,19 @@ trans_commit(TransObject *self)
 static PyObject *
 trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
-    DbObject *db = NULL;
+    struct trans_cursor {
+        DbObject *db;
+    } arg = { self->env->main_db };
 
-    static char *kwlist[] = {"db", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "|O!", kwlist,
-            &PyDatabase_Type, &db)) {
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, OFFSET(trans_cursor, db), &db_s, &PyDatabase_Type},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
         return NULL;
     }
-
-    if(! db) {
-        db = self->env->main_db;
-    }
-    return make_cursor(db, self);
+    return make_cursor(arg.db, self);
 }
 
 
@@ -1439,21 +1541,24 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     if(! self->valid) {
         return err_invalid();
     }
-    MDB_val key = {0, 0};
-    MDB_val val = {0, 0};
-    DbObject *db = NULL;
+    struct trans_delete {
+        MDB_val key;
+        MDB_val val;
+        DbObject *db;
+    } arg = {{0, 0}, {0, 0}, self->env->main_db};
 
-    static char *kwlist[] = {"key", "value", "db", NULL};
-    if(! PyArg_ParseTupleAndKeywords(args, kwds, "s#|s#O!", kwlist,
-            &key.mv_data, &key.mv_size, &val.mv_data, &val.mv_size,
-            &PyDatabase_Type, &db)) {
+    static const struct argspec argspec[] = {
+        {ARG_BUF, OFFSET(trans_delete, key), &key_s, NULL},
+        {ARG_BUF, OFFSET(trans_delete, val), &value_s, NULL},
+        {ARG_OBJ, OFFSET(trans_delete, db), &db_s, NULL},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
         return NULL;
     }
-    if(! db) {
-        db = self->env->main_db;
-    }
-    MDB_val *val_ptr = val.mv_size ? &val : NULL;
-    int rc = mdb_del(self->txn, db->dbi, &key, val_ptr);
+    MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
+    int rc = mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr);
     if(rc) {
         if(rc == MDB_NOTFOUND) {
              Py_RETURN_FALSE;
@@ -1486,67 +1591,33 @@ trans_drop(TransObject *self, PyObject *arg)
 static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    struct trans_get {
+        MDB_val key;
+        PyObject *default_;
+        DbObject *db;
+    } arg = {{0, 0}, Py_None, self->env->main_db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, OFFSET(trans_get, key), &key_s, NULL},
+        {ARG_OBJ, OFFSET(trans_get, default_), &default_s, NULL},
+        {ARG_OBJ, OFFSET(trans_get, db), &db_s, &PyDatabase_Type},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
+        return NULL;
     }
 
-    MDB_val key = {0, 0};
-    PyObject *default_ = Py_None;
-    PyObject *db = NULL;
-
-    switch(PyTuple_GET_SIZE(args)) {
-        default:
-            return type_error("too many positional arguments.");
-        case 3:
-            db = PyTuple_GET_ITEM(args, 2);
-        case 2:
-            default_ = PyTuple_GET_ITEM(args, 1);
-        case 1:
-            if(val_from_buffer(&key, PyTuple_GET_ITEM(args, 0))) {
-                return NULL;
-            }
-        case 0:
-            break;
-    }
-
-    if(kwds) {
-        PyObject *val;
-        int c = 0;
-        if((val = PyDict_GetItem(kwds, key_interned))) {
-            if(val_from_buffer(&key, val)) {
-                return NULL;
-            }
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, default_interned))) {
-            default_ = val;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, db_interned))) {
-            db = val;
-            c++;
-        }
-        if(c != PyDict_Size(kwds)) {
-            return type_error("incorrect keyword arguments.");
-        }
-    }
-
-    if(! key.mv_data) {
+    if(! arg.key.mv_data) {
         return type_error("key must be given.");
     }
 
-    if(! db) {
-        db = (PyObject *) self->env->main_db;
-    } else if(Py_TYPE(db) != &PyDatabase_Type) {
-        return type_error("db must be a _Database instance.");
-    }
-
     MDB_val val;
-    int rc = mdb_get(self->txn, ((DbObject *)db)->dbi, &key, &val);
+    int rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
     if(rc) {
         if(rc == MDB_NOTFOUND) {
-            Py_INCREF(default_);
-            return default_;
+            Py_INCREF(arg.default_);
+            return arg.default_;
         }
         return err_set("mdb_get", rc);
     }
@@ -1559,93 +1630,41 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
-    MDB_val key = {0, 0};
-    MDB_val value = {0, 0};
-    int dupdata = 0;
-    int overwrite = 1;
-    int append = 0;
-    PyObject *db = NULL;
+    struct trans_put {
+        MDB_val key;
+        MDB_val value;
+        int dupdata;
+        int overwrite;
+        int append;
+        DbObject *db;
+    } arg = {{0, 0}, {0, 0}, 0, 1, 0, self->env->main_db};
 
-    switch(PyTuple_GET_SIZE(args)) {
-        default:
-            return type_error("too many positional arguments.");
-        case 6:
-            db = PyTuple_GET_ITEM(args, 5);
-        case 5:
-            append = PyTuple_GET_ITEM(args, 4) == Py_True;
-        case 4:
-            overwrite = PyTuple_GET_ITEM(args, 3) == Py_True;
-        case 3:
-            dupdata = PyTuple_GET_ITEM(args, 2) == Py_True;
-        case 2:
-            if(val_from_buffer(&value, PyTuple_GET_ITEM(args, 1))) {
-                return NULL;
-            }
-        case 1:
-            if(val_from_buffer(&key, PyTuple_GET_ITEM(args, 0))) {
-                return NULL;
-            }
-        case 0:
-            break;
-    }
+    static const struct argspec argspec[] = {
+        {ARG_BUF, OFFSET(trans_put, key), &key_s, NULL},
+        {ARG_BUF, OFFSET(trans_put, value), &value_s, NULL},
+        {ARG_BOOL, OFFSET(trans_put, dupdata), &dupdata_s, NULL},
+        {ARG_BOOL, OFFSET(trans_put, overwrite), &overwrite_s, NULL},
+        {ARG_BOOL, OFFSET(trans_put, append), &append_s, NULL},
+        {ARG_OBJ, OFFSET(trans_put, db), &db_s, &PyDatabase_Type},
+        {0, 0, 0, 0}
+    };
 
-    if(kwds) {
-        PyObject *val;
-        int c = 0;
-        if((val = PyDict_GetItem(kwds, key_interned))) {
-            if(val_from_buffer(&key, val)) {
-                return NULL;
-            }
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, value_interned))) {
-            if(val_from_buffer(&value, val)) {
-                return NULL;
-            }
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, dupdata_interned))) {
-            dupdata = val == Py_True;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, overwrite_interned))) {
-            overwrite = val == Py_True;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, append_interned))) {
-            append = val == Py_True;
-            c++;
-        }
-        if((val = PyDict_GetItem(kwds, db_interned))) {
-            db = val;
-            c++;
-        }
-        if(c != PyDict_Size(kwds)) {
-            return type_error("incorrect keyword arguments.");
-        }
-    }
-
-    if(! db) {
-        db = (PyObject *)self->env->main_db;
-    } else if(Py_TYPE(db) != &PyDatabase_Type) {
-        return type_error("db must be a _Database instance.");
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
+        return NULL;
     }
 
     int flags = 0;
-    if(! dupdata) {
+    if(! arg.dupdata) {
         flags |= MDB_NODUPDATA;
     }
-    if(! overwrite) {
+    if(! arg.overwrite) {
         flags |= MDB_NOOVERWRITE;
     }
-    if(append) {
+    if(arg.append) {
         flags |= MDB_APPEND;
     }
 
-    int rc = mdb_put(self->txn, ((DbObject *)db)->dbi, &key, &value, flags);
+    int rc = mdb_put(self->txn, (arg.db)->dbi, &arg.key, &arg.value, flags);
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -1734,19 +1753,33 @@ initcpython(void)
     }
 
     static struct { PyObject **obj; const char *s; } strs[] = {
-        {&append_interned, "append"},
-        {&buffers_interned, "buffers"},
-        {&db_interned, "db"},
-        {&default_interned, "default"},
-        {&dupdata_interned, "dupdata"},
-        {&key_interned, "key"},
-        {&keys_interned, "keys"},
-        {&overwrite_interned, "overwrite"},
-        {&parent_interned, "parent"},
-        {&txn_interned, "txn"},
-        {&value_interned, "value"},
-        {&values_interned, "values"},
-        {&write_interned, "write"},
+        {&append_s, "append"},
+        {&buffers_s, "buffers"},
+        {&create_s, "create"},
+        {&db_s, "db"},
+        {&default_s, "default"},
+        {&dupdata_s, "dupdata"},
+        {&dupsort_s, "dupsort"},
+        {&key_s, "key"},
+        {&keys_s, "keys"},
+        {&map_async_s, "map_async"},
+        {&map_size_s, "map_size"},
+        {&max_dbs_s, "max_dbs"},
+        {&max_readers_s, "max_readers"},
+        {&metasync_s, "metasync"},
+        {&mode_s, "mode"},
+        {&name_s, "name"},
+        {&overwrite_s, "overwrite"},
+        {&parent_s, "parent"},
+        {&path_s, "path"},
+        {&readonly_s, "readonly"},
+        {&reverse_key_s, "reverse_key"},
+        {&subdir_s, "subdir"},
+        {&sync_s, "sync"},
+        {&txn_s, "txn"},
+        {&value_s, "value"},
+        {&values_s, "values"},
+        {&write_s, "write"},
         {NULL, NULL}
     };
     for(i = 0; strs[i].obj; i++) {
