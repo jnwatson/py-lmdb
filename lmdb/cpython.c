@@ -375,47 +375,40 @@ static int
 parse_arg(const struct argspec *spec, PyObject *val, void *out)
 {
     void *dst = ((uint8_t *)out) + spec->offset;
+    int ret = 0;
 
-    switch(spec->type) {
-    case ARG_EOF:
-    case ARG_BOOL:
-        *((int *)dst) = val == Py_True;
-        break;
-    case ARG_OBJ:
-        if(val != Py_None) {
-            if(spec->objtype) {
-                if(val->ob_type != spec->objtype) {
-                    type_error("invalid type");
-                    return -1;
-                }
+    if(val != Py_None) {
+        switch(spec->type) {
+        case ARG_EOF:
+        case ARG_BOOL:
+            *((int *)dst) = val == Py_True;
+            break;
+        case ARG_OBJ:
+            if(spec->objtype && val->ob_type != spec->objtype) {
+                type_error("invalid type");
+                return -1;
             }
             *((PyObject **) dst) = val;
-        }
-        break;
-    case ARG_BUF:
-        if(val != Py_None && val_from_buffer((MDB_val *)dst, val)) {
-            return -1;
-        }
-        break;
-    case ARG_STR:
-        if(val != Py_None) {
+            break;
+        case ARG_BUF:
+            ret = val_from_buffer((MDB_val *)dst, val);
+            break;
+        case ARG_STR: {
             MDB_val mv;
-            if(val_from_buffer(&mv, val)) {
-                return -1;
+            if(! (ret = val_from_buffer(&mv, val))) {
+                *((char **) dst) = mv.mv_data;
             }
-            *((char **) dst) = mv.mv_data;
+            break;
         }
-        break;
-    case ARG_INT:
-        if(val != Py_None) {
+        case ARG_INT:
             *((int *) dst) = PyLong_AsUnsignedLong(val);
             if(PyErr_Occurred()) {
-                return -1;
+                ret = -1;
             }
+            break;
         }
-        break;
     }
-    return 0;
+    return ret;
 }
 
 
