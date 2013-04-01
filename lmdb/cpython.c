@@ -35,7 +35,7 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#define NODEBUG
+//#define NODEBUG
 
 #ifdef NODEBUG
 #undef DEBUG
@@ -681,7 +681,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         flags |= MDB_MAPASYNC;
     }
 
-    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, path, flags, mode)
+    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, arg.mode)
     if((rc = mdb_env_open(self->env, arg.path, flags, arg.mode))) {
         err_set(arg.path, rc);
         goto fail;
@@ -690,7 +690,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = txn_db_from_name(self, NULL, 0);
     if(self->main_db) {
         self->valid = 1;
-        DEBUG("EnvObject '%s' opened at %p", path, self)
+        DEBUG("EnvObject '%s' opened at %p", arg.path, self)
         return (PyObject *) self;
     }
 
