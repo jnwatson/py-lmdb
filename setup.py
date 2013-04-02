@@ -34,7 +34,7 @@ if use_cpython:
     print 'Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.'
     install_requires = []
     ext_modules = [Extension(
-        name='lmdb.cpython',
+        name='cpython',
         sources=['lmdb/cpython.c', 'lib/mdb.c', 'lib/midl.c'],
         extra_compile_args=['-Wno-shorten-64-to-32'],
         include_dirs=['lib']
