@@ -50,6 +50,7 @@ static PyObject *buffers_s;
 static PyObject *create_s;
 static PyObject *db_s;
 static PyObject *default_s;
+static PyObject *delete_s;
 static PyObject *dupdata_s;
 static PyObject *dupsort_s;
 static PyObject *key_s;
@@ -1581,7 +1582,7 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     static const struct argspec argspec[] = {
         {ARG_BUF, OFFSET(trans_delete, key), &key_s, NULL},
         {ARG_BUF, OFFSET(trans_delete, val), &value_s, NULL},
-        {ARG_OBJ, OFFSET(trans_delete, db), &db_s, NULL},
+        {ARG_OBJ, OFFSET(trans_delete, db), &db_s, &PyDatabase_Type},
         {0, 0, 0, 0}
     };
 
@@ -1604,22 +1605,31 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 
 
 static PyObject *
-trans_drop(TransObject *self, PyObject *arg)
+trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    struct trans_drop {
+        DbObject *db;
+        int delete;
+    } arg = { NULL, 1 };
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, OFFSET(trans_drop, db), &db_s, &PyDatabase_Type},
+        {ARG_BOOL, OFFSET(trans_drop, delete), &delete_s, NULL},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! arg.db) {
+        return type_error("'db' argument required.");
     }
 
-    int delete = arg == NULL;
-    if(arg) {
-        delete = PyObject_IsTrue(arg);
-        if(delete == -1) {
-            return NULL;
-        }
+    int rc = mdb_drop(self->txn, arg.db->dbi, arg.delete);
+    if(rc) {
+        return err_set("mdb_drop", rc);
     }
-
-    //int rc = mdb_drop();
-    return NULL;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
