@@ -1073,11 +1073,6 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
             }
         }
     }
-    if(op == MDB_LAST && !rc) {
-        // TODO should not be necessary. Calling MDB_PREV after a failed
-        // MDB_LAST results in NULL pointer dereference.
-        return _cursor_get_c(self, MDB_PREV);
-    }
     return 0;
 }
 

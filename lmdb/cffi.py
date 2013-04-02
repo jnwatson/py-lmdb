@@ -1049,10 +1049,7 @@ class Cursor(object):
         with `MDB_LAST
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        v = self._cursor_get(MDB_LAST)
-        if v: # TODO: why is this necessary?
-            return self._cursor_get(MDB_PREV)
-        return v
+        return self._cursor_get(MDB_LAST)
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or

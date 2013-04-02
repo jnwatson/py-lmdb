@@ -230,3 +230,8 @@ class IteratorTest(EnvMixin, unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# what happens when empty keys/ values passed to various funcs
+# incorrect types
+# try to break cpython arg parsing - too many/few/incorrect args
