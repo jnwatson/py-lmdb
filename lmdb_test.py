@@ -211,6 +211,7 @@ class IteratorTest(EnvMixin, unittest.TestCase):
         eq(ITEMS, list(self.c.iternext()))
         eq(ITEMS[::-1], list(self.txn.cursor().iterprev()))
         eq(ITEMS[::-1], list(self.c.iterprev()))
+        eq(ITEMS, list(self.c))
 
     def testFilledSkipForward(self):
         putData(self.txn)
