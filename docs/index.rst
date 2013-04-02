@@ -81,17 +81,16 @@ Sub-databases
 
 To use the sub-database feature you must call :py:func:`lmdb.open` or
 :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
-sub-databases required. This must be done by the first process or thread
-opening the environment as it is used to allocate resources kept in shared
-memory.
+databases required. This must be done by the first process or thread opening
+the environment as it is used to allocate resources kept in shared memory.
 
 **Caution:** MDB implements sub-databases by *storing a special descriptor key
 in the main database*. All databases in an environment *share the same file*.
-Because a sub-database is just a key in the main database, attempts to create a
-sub-database will fail if this key already exists. Furthermore *the key is
-visible to lookups and enumerations*. If your main database keyspace conflicts
-with the names you are using for sub-databases then consider moving the
-contents of your main database to another sub-database.
+Because a sub-database is just a key in the main database, attempts to create
+one will fail if this key already exists. Furthermore *the key is visible to
+lookups and enumerations*. If your main database keyspace conflicts with the
+names you are using for sub-databases then consider moving the contents of your
+main database to another sub-database.
 
     ::
 
