@@ -286,6 +286,8 @@ typedef MDB_ID	txnid_t;
 #endif
 
 #if !(__STDC_VERSION__ >= 199901L || defined(__GNUC__))
+# undef  MDB_DEBUG
+# define MDB_DEBUG	0
 # define DPRINTF	(void)	/* Vararg macros may be unsupported */
 #elif MDB_DEBUG
 static int mdb_debug;
@@ -3378,7 +3380,7 @@ fail:
 #define	CHANGELESS	(MDB_FIXEDMAP|MDB_NOSUBDIR|MDB_RDONLY|MDB_WRITEMAP)
 
 int
-mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode)
+mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode)
 {
 	int		oflags, rc, len, excl;
 	char *lpath, *dpath;
@@ -3705,9 +3707,13 @@ void
 mdb_env_close(MDB_env *env)
 {
 	MDB_page *dp;
+	int i;
 
 	if (env == NULL)
 		return;
+
+	for (i = env->me_numdbs; --i > MAIN_DBI; )
+		free(env->me_dbxs[i].md_name.mv_data);
 
 	VGMEMP_DESTROY(env);
 	while ((dp = env->me_dpages) != NULL) {
@@ -4267,6 +4273,8 @@ mdb_cursor_sibling(MDB_cursor *mc, int move_right)
 		return rc;
 
 	mdb_cursor_push(mc, mp);
+	if (!move_right)
+		mc->mc_ki[mc->mc_top] = NUMKEYS(mp)-1;
 
 	return MDB_SUCCESS;
 }
@@ -4791,7 +4799,7 @@ fetchm:
 	case MDB_PREV:
 	case MDB_PREV_DUP:
 	case MDB_PREV_NODUP:
-		if (!(mc->mc_flags & C_INITIALIZED) || (mc->mc_flags & C_EOF)) {
+		if (!(mc->mc_flags & C_INITIALIZED)) {
 			rc = mdb_cursor_last(mc, key, data);
 			mc->mc_flags |= C_INITIALIZED;
 			mc->mc_ki[mc->mc_top]++;
@@ -6252,8 +6260,8 @@ static int
 mdb_rebalance(MDB_cursor *mc)
 {
 	MDB_node	*node;
-	int rc, minkeys;
-	unsigned int ptop;
+	int rc;
+	unsigned int ptop, minkeys;
 	MDB_cursor	mn;
 
 #if MDB_DEBUG

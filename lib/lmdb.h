@@ -137,6 +137,12 @@
 extern "C" {
 #endif
 
+#ifdef _MSC_VER
+typedef	int	mdb_mode_t;
+#else
+typedef	mode_t	mdb_mode_t;
+#endif
+
 /** @defgroup mdb MDB API
  *	@{
  *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
@@ -498,7 +504,7 @@ int  mdb_env_create(MDB_env **env);
 	 *	<li>EAGAIN - the environment was locked by another process.
 	 * </ul>
 	 */
-int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mode_t mode);
+int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode);
 
 	/** @brief Copy an MDB environment to the specified path.
 	 *
