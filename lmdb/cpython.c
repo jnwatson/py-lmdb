@@ -1207,18 +1207,50 @@ cursor_prev(CursorObject *self)
 }
 
 static PyObject *
-cursor_put(PyObject *self, PyObject *args)
+cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 {
-        PyObject *key;
-        PyObject *value;
-        PyObject *dupdata = false;
-        PyObject *overwrite;
-        PyObject *append;
-        if (!PyArg_ParseTuple(args, ":put",
-                              &key, &value, &dupdata, &overwrite, &append))
-                return NULL;
+    struct cursor_put {
+        MDB_val key;
+        MDB_val val;
+        int dupdata;
+        int overwrite;
+        int append;
+    } arg = {{0, 0}, {0, 0}, 0, 1, 0};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, OFFSET(cursor_put, key), &key_s, NULL},
+        {ARG_BUF, OFFSET(cursor_put, val), &value_s, NULL},
+        {ARG_BOOL, OFFSET(cursor_put, dupdata), &dupdata_s, NULL},
+        {ARG_BOOL, OFFSET(cursor_put, overwrite), &overwrite_s, NULL},
+        {ARG_BOOL, OFFSET(cursor_put, append), &append_s, NULL},
+        {0, 0, 0, 0}
+    };
+
+    if(parse_args(self->valid, argspec, args, kwds, &arg)) {
         return NULL;
+    }
+
+    int flags = 0;
+    if(! arg.dupdata) {
+        flags |= MDB_NODUPDATA;
+    }
+    if(! arg.overwrite) {
+        flags |= MDB_NOOVERWRITE;
+    }
+    if(! arg.append) {
+        flags |= MDB_APPEND;
+    }
+
+    int rc = mdb_cursor_put(self->curs, &arg.key, &arg.val, flags);
+    if(rc) {
+        if(rc == MDB_KEYEXIST) {
+            Py_RETURN_FALSE;
+        }
+        return err_set("mdb_put", rc);
+    }
+    Py_RETURN_TRUE;
 }
+
 
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
@@ -1341,7 +1373,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"last", (PyCFunction)cursor_last, METH_NOARGS},
     {"next", (PyCFunction)cursor_next, METH_NOARGS},
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
-    {"put", (PyCFunction)cursor_put, METH_VARARGS},
+    {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
