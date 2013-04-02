@@ -44,7 +44,7 @@ def openenv(**kwargs):
 class EnvMixin:
     def setUp(self):
         rmenv()
-        self.env = openenv()
+        self.env = openenv(map_size=1048576*1024)
 
     def tearDown(self):
         self.env.close()
@@ -227,6 +227,17 @@ class IteratorTest(EnvMixin, unittest.TestCase):
         putData(self.txn)
         eq(False, self.c.set_range('z'))
         eq(REV_ITEMS, list(self.c.iterprev()))
+
+
+
+class BigReverseTest(EnvMixin, unittest.TestCase):
+    # Test for issue with MDB_LAST+MDB_PREV skipping chunks of database.
+    def test_big_reverse(self):
+        txn = self.env.begin(write=True)
+        keys = ['%05d' % i for i in xrange(0xffff)]
+        for k in keys:
+            txn.put(k, k, append=True)
+        assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
 
 
 
