@@ -232,6 +232,17 @@ the database in the same transaction!*
 
 
 
+``writemap`` mode
++++++++++++++++++
+
+When :py:class:`Environment` or :py:func:`open` is invoked with
+``writemap=True``, the library will use a writeable memory mapping to directly
+write to storage. This option requires a filesystem that supports sparse files
+by way of the `ftruncate` function, and is incompatible with nested transactions.
+
+*Note:* OS X HFS+ does not support sparse files.
+
+
 Interface
 +++++++++
 
