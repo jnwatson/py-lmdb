@@ -46,6 +46,15 @@ MDB is a tiny database with some excellent properties:
 Installation
 ++++++++++++
 
+*Note:* on PyPy the wrapper depends on cffi which in turn depends on
+``libffi``, so you may need to install the development package for it. The
+CPython wrapper additionally depends on the Python development headers.
+On Debian/Ubuntu:
+
+    ::
+
+        apt-get install libffi-dev python-dev build-essential
+
 To install the Python module, ensure a C compiler and `pip` or `easy_install`
 are available and type:
 
@@ -54,14 +63,6 @@ are available and type:
         pip install lmdb
         # or
         easy_install lmdb
-
-*Note:* on PyPy the wrapper depends on cffi which in turn depends on
-``libffi``, so you may need to install the development package for it. On
-Debian/Ubuntu:
-
-    ::
-
-        apt-get install libffi-dev
 
 You may also use the cffi version on CPython. This is accomplished by setting
 the ``LMDB_FORCE_CFFI`` environment variable before installation or before
