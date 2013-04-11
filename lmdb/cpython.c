@@ -112,6 +112,9 @@ static const char *strings = (
     "write\0"
 );
 static PyObject **string_tbl;
+static PyObject *py_zero;
+static PyObject *py_int_max;
+static PyObject *py_size_max;
 
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
@@ -403,7 +406,16 @@ type_error(const char *what)
 
 #define OFFSET(k, y) offsetof(struct k, y)
 #define SPECSIZE() (sizeof(argspec) / sizeof(argspec[0]))
-enum arg_type {ARG_OBJ, ARG_DB, ARG_TRANS, ARG_BOOL, ARG_BUF, ARG_STR, ARG_INT};
+enum arg_type {
+    ARG_OBJ,
+    ARG_DB,
+    ARG_TRANS,
+    ARG_BOOL,
+    ARG_BUF,
+    ARG_STR,
+    ARG_INT,
+    ARG_SIZE
+};
 struct argspec {
     unsigned char type;
     unsigned char string_id;
@@ -417,10 +429,31 @@ static PyTypeObject *type_tbl[] = {
 
 
 static int
+parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
+{
+    int rc = PyObject_RichCompareBool(obj, py_zero, Py_GE);
+    if(rc == -1) {
+        return -1;
+    } else if(! rc) {
+        type_error("Integer argument must be >= 0");
+    }
+    rc = PyObject_RichCompareBool(obj, max, Py_LE);
+    if(rc == -1) {
+        return -1;
+    } else if(! rc) {
+        type_error("Integer argument exceeds limit.");
+    }
+    *l = PyInt_AsUnsignedLongLongMask(obj);
+    return 0;
+}
+
+
+static int
 parse_arg(const struct argspec *spec, PyObject *val, void *out)
 {
     void *dst = ((uint8_t *)out) + spec->offset;
     int ret = 0;
+    uint64_t l;
 
     if(val != Py_None) {
         switch((enum arg_type) spec->type) {
@@ -447,9 +480,17 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
             break;
         }
         case ARG_INT:
-            *((int *) dst) = PyLong_AsUnsignedLong(val);
-            if(PyErr_Occurred()) {
+            if(parse_ulong(val, &l, py_int_max)) {
                 ret = -1;
+            } else {
+                *((int *) dst) = l;
+            }
+            break;
+        case ARG_SIZE:
+            if(parse_ulong(val, &l, py_size_max)) {
+                ret = -1;
+            } else {
+                *((size_t *) dst) = l;
             }
             break;
         }
@@ -627,12 +668,13 @@ env_dealloc(EnvObject *self)
     PyObject_Del(self);
 }
 
+
 static PyObject *
 env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     struct env_new {
         char *path;
-        int map_size;
+        size_t map_size;
         int subdir;
         int readonly;
         int metasync;
@@ -646,7 +688,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
     static const struct argspec argspec[] = {
         {ARG_STR, PATH_S, OFFSET(env_new, path)},
-        {ARG_INT, MAP_SIZE_S, OFFSET(env_new, map_size)},
+        {ARG_SIZE, MAP_SIZE_S, OFFSET(env_new, map_size)},
         {ARG_BOOL, SUBDIR_S, OFFSET(env_new, subdir)},
         {ARG_BOOL, READONLY_S, OFFSET(env_new, readonly)},
         {ARG_BOOL, METASYNC_S, OFFSET(env_new, metasync)},
@@ -1840,6 +1882,16 @@ initcpython(void)
             return;
         }
         cur += strlen(cur) + 1;
+    }
+
+    if(! ((py_zero = PyLong_FromSize_t(0)))) {
+        return;
+    }
+    if(! ((py_int_max = PyLong_FromSize_t(INT_MAX)))) {
+        return;
+    }
+    if(! ((py_size_max = PyLong_FromSize_t(SIZE_MAX)))) {
+        return;
     }
 
     Error = PyErr_NewException("lmdb.Error", NULL, NULL);
