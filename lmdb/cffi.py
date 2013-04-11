@@ -336,7 +336,8 @@ class Environment(object):
 
         `readonly`:
             If ``True``, disallow any write operations. Note the lock file is
-            still modified.
+            still modified. If specified, the ``write`` flag to
+            :py:meth:`begin` or :py:class:`Transaction` is ignored.
 
         `metasync`:
             If ``False``, never explicitly flush metadata pages to disk. OS
@@ -395,6 +396,7 @@ class Environment(object):
             flags |= MDB_NOSUBDIR
         if readonly:
             flags |= MDB_RDONLY
+        self.readonly = readonly
         if not metasync:
             flags |= MDB_NOMETASYNC
         if not sync:
@@ -405,7 +407,7 @@ class Environment(object):
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
             raise Error(path, rc)
-        with self.begin(db=object(), write=True) as txn:
+        with self.begin(db=object(), write=not readonly) as txn:
             self._db = _Database(self, txn, None, False, False, True)
         self._dbs = {None: weakref.ref(self._db)}
 
@@ -662,7 +664,8 @@ class Transaction(object):
 
         `write`:
             Transactions are read-only by default. To modify the database, you
-            must pass `write=True`.
+            must pass `write=True`. This flag is ignored if
+            :py:class:`Environment` was opened with ``readonly=True``.
 
         `buffers`:
             If ``True``, indicates :py:func:`buffer` objects should be yielded

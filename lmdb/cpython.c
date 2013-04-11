@@ -237,6 +237,7 @@ typedef struct EnvObject {
     LmdbObject_HEAD
     MDB_env *env;
     DbObject *main_db;
+    int readonly; // If 1, transactions are always readonly.
 } EnvObject;
 
 typedef struct {
@@ -597,7 +598,8 @@ txn_db_from_name(EnvObject *env, const char *name,
 {
     int rc;
     MDB_txn *txn;
-    if((rc = mdb_txn_begin(env->env, NULL, 0, &txn))) {
+    int begin_flags = env->readonly ? MDB_RDONLY : 0;
+    if((rc = mdb_txn_begin(env->env, NULL, begin_flags, &txn))) {
         err_set("mdb_txn_begin", rc);
         return NULL;
     }
@@ -759,6 +761,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if(arg.readonly) {
         flags |= MDB_RDONLY;
     }
+    self->readonly = arg.readonly;
     if(! arg.metasync) {
         flags |= MDB_NOMETASYNC;
     }
@@ -813,7 +816,7 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
         return NULL;
     }
 
-    int flags = write ? 0 : MDB_RDONLY;
+    int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
     int rc = mdb_txn_begin(env->env, parent_txn, flags, &self->txn);
     if(rc) {
         PyObject_Del(self);
