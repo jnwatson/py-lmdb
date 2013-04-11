@@ -76,6 +76,7 @@ enum string_id {
     VALUE_S,
     VALUES_S,
     WRITE_S,
+    WRITEMAP_S,
 
     // Must be last.
     STRING_ID_COUNT
@@ -110,6 +111,7 @@ static const char *strings = (
     "value\0"
     "values\0"
     "write\0"
+    "writemap\0"
 );
 static PyObject **string_tbl;
 static PyObject *py_zero;
@@ -687,9 +689,10 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int map_async;
         int mode;
         int create;
+        int writemap;
         int max_readers;
         int max_dbs;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 126, 0};
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 0, 126, 0};
 
     static const struct argspec argspec[] = {
         {ARG_STR, PATH_S, OFFSET(env_new, path)},
@@ -701,6 +704,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, MAP_ASYNC_S, OFFSET(env_new, map_async)},
         {ARG_INT, MODE_S, OFFSET(env_new, mode)},
         {ARG_BOOL, CREATE_S, OFFSET(env_new, create)},
+        {ARG_BOOL, WRITEMAP_S, OFFSET(env_new, writemap)},
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
     };
@@ -755,7 +759,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         }
     }
 
-    int flags = 0; //MDB_WRITEMAP;
+    int flags = 0;
     if(! arg.subdir) {
         flags |= MDB_NOSUBDIR;
     }
@@ -771,6 +775,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
     if(arg.map_async) {
         flags |= MDB_MAPASYNC;
+    }
+    if(arg.writemap) {
+        flags |= MDB_WRITEMAP;
     }
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, arg.mode)

@@ -148,6 +148,7 @@ _ffi.cdef('''
     #define MDB_READERS_FULL ...
     #define MDB_REVERSEKEY ...
     #define MDB_TXN_FULL ...
+    #define MDB_WRITEMAP ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
@@ -356,6 +357,13 @@ class Environment(object):
         `create`:
             If ``False``, do not create the directory `path` if it is missing.
 
+        `writemap`:
+            If ``True`` LMDB will use a writeable memory map to update the
+            database. This improves performance at a cost to safety: it is
+            possible (though fairly unlikely) for buggy C code in the Python
+            process to accidentally write over the map, resulting in database
+            corruption.
+
         `max_readers`:
             Slots to allocate in lock file for read threads; attempts to open
             the environment by more than this many clients simultaneously will
@@ -367,7 +375,8 @@ class Environment(object):
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
-            mode=0644, create=True, max_readers=126, max_dbs=0):
+            mode=0644, create=True, writemap=False, max_readers=126,
+            max_dbs=0):
         envpp = _ffi.new('MDB_env **')
 
         rc = mdb_env_create(envpp)
@@ -403,6 +412,8 @@ class Environment(object):
             flags |= MDB_NOSYNC
         if map_async:
             flags |= MDB_MAPASYNC
+        if writemap:
+            flags |= MDB_WRITEMAP
 
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
@@ -688,6 +699,8 @@ class Transaction(object):
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
         flags = 0
+        if write and env.readonly:
+            raise Error('Cannot start write transaction with read-only env')
         if not write:
             flags |= MDB_RDONLY
         txnpp = _ffi.new('MDB_txn **')
