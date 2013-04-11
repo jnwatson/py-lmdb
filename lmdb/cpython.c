@@ -812,6 +812,10 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
         parent_txn = parent->txn;
     }
 
+    if(write && env->readonly) {
+        return err_set("Cannot start write transaction with read-only env", 0);
+    }
+
     TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
     if(! self) {
         return NULL;
