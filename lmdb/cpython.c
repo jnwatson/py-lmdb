@@ -436,12 +436,14 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
         return -1;
     } else if(! rc) {
         type_error("Integer argument must be >= 0");
+        return -1;
     }
     rc = PyObject_RichCompareBool(obj, max, Py_LE);
     if(rc == -1) {
         return -1;
     } else if(! rc) {
         type_error("Integer argument exceeds limit.");
+        return -1;
     }
     *l = PyInt_AsUnsignedLongLongMask(obj);
     return 0;
