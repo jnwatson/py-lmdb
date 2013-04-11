@@ -598,7 +598,8 @@ txn_db_from_name(EnvObject *env, const char *name,
 {
     int rc;
     MDB_txn *txn;
-    int begin_flags = env->readonly ? MDB_RDONLY : 0;
+
+    int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
     if((rc = mdb_txn_begin(env->env, NULL, begin_flags, &txn))) {
         err_set("mdb_txn_begin", rc);
         return NULL;
