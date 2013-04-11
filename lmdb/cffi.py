@@ -1102,6 +1102,14 @@ class Cursor(object):
         """
         return self._cursor_get_key(MDB_SET_KEY, key)
 
+    def get(self, key, default=None):
+        """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
+        returned if `key` was found, otherwise `default`.
+        """
+        if self._cursor_get_key(MDB_SET_KEY, key):
+            return self.value()
+        return default
+
     def set_range(self, key):
         """Seek to the first key greater than or equal `key`, returning
         ``True`` on success, or ``False`` to indicate key was past end of

@@ -1220,6 +1220,48 @@ cursor_first(CursorObject *self)
     return _cursor_get(self, MDB_FIRST);
 }
 
+
+static PyObject *
+cursor_value(CursorObject *self);
+
+
+static PyObject *
+cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    struct cursor_get {
+        MDB_val key;
+        PyObject *default_;
+    } arg = {{0, 0}, Py_None};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_get, key)},
+        {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.key.mv_data) {
+        return type_error("key must be given.");
+    }
+
+    self->key = arg.key;
+    if(_cursor_get_c(self, MDB_SET_KEY)) {
+        return NULL;
+    }
+    if(! self->positioned) {
+        Py_INCREF(arg.default_);
+        return arg.default_;
+    }
+    return cursor_value(self);
+}
+
+
 static PyObject *
 cursor_item(CursorObject *self)
 {
@@ -1459,6 +1501,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
     {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
     {"first", (PyCFunction)cursor_first, METH_NOARGS},
+    {"get", (PyCFunction)cursor_get, METH_VARARGS|METH_KEYWORDS},
     {"item", (PyCFunction)cursor_item, METH_NOARGS},
     {"iternext", (PyCFunction)cursor_iternext, METH_VARARGS|METH_KEYWORDS},
     {"iterprev", (PyCFunction)cursor_iterprev, METH_VARARGS|METH_KEYWORDS},
