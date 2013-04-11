@@ -407,7 +407,7 @@ class Environment(object):
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
             raise Error(path, rc)
-        with self.begin(db=object(), write=not readonly) as txn:
+        with self.begin(db=object()) as txn:
             self._db = _Database(self, txn, None, False, False, True)
         self._dbs = {None: weakref.ref(self._db)}
 
