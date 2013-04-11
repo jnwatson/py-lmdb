@@ -28,8 +28,8 @@ import os
 import sys
 
 try:
-# Hack: disable speedups while testing or reading docstrings.
-    if any(k in sys.modules for k in ('sphinx', 'pydoc')) or \
+    # Hack: disable speedups while testing or reading docstrings.
+    if os.path.basename(sys.argv[0]) in ('sphinx-build', 'pydoc') or \
             os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
     from lmdb.cpython import *
