@@ -237,7 +237,7 @@ the database in the same transaction!*
 
 When :py:class:`Environment` or :py:func:`open` is invoked with
 ``writemap=True``, the library will use a writeable memory mapping to directly
-write to storage. This improves performance at a cost to safety: it is possible
+update storage. This improves performance at a cost to safety: it is possible
 (though fairly unlikely) for buggy C code in the Python process to accidentally
 write over the map, resulting in database corruption.
 
