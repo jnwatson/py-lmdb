@@ -249,7 +249,7 @@ X HFS+ does not support sparse files.
 Interface
 +++++++++
 
-.. function:: lmdb.open(path, \**kwargs)
+.. py:function:: lmdb.open(path, **kwargs)
    
    Shortcut for :py:class:`Environment` constructor.
 
