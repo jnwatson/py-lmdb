@@ -17,8 +17,8 @@ t0 = now()
 words = set(file('/usr/share/dict/words').readlines())
 words.update([w.upper() for w in words])
 words.update([w[::-1] for w in words])
-#words.update([w[::-1].upper() for w in words])
-#words.update(['-'.join(w) for w in words])
+words.update([w[::-1].upper() for w in words])
+words.update(['-'.join(w) for w in words])
 #words.update(['+'.join(w) for w in words])
 #words.update(['/'.join(w) for w in words])
 words = list(words)
@@ -78,6 +78,13 @@ with env.begin() as txn:
         txn.get(word)
     t1 = now()
     print 'rand lookup+verify all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
+
+with env.begin() as txn:
+    t0 = now()
+    for word in words:
+        hash(txn.get(word))
+    t1 = now()
+    print 'rand lookup+hash all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
 with env.begin(buffers=True) as txn:
     t0 = now()

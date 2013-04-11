@@ -74,6 +74,20 @@ d = time() - t0
 print 'random lookup %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
 
 
+nextkey = iter(keys).next
+t0 = time()
+
+with env.begin(buffers=True) as txn:
+    try:
+        while 1:
+            hash(txn.get(nextkey()))
+    except StopIteration:
+        pass
+
+d = time() - t0
+print 'random lookup+hash %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
+
+
 
 nextkey = iter(keys).next
 t0 = time()
