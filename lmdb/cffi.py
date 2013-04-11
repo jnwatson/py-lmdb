@@ -359,10 +359,8 @@ class Environment(object):
 
         `writemap`:
             If ``True`` LMDB will use a writeable memory map to update the
-            database. This improves performance at a cost to safety: it is
-            possible (though fairly unlikely) for buggy C code in the Python
-            process to accidentally write over the map, resulting in database
-            corruption.
+            database. Requires operating system support. Please refer to
+            documentation.
 
         `max_readers`:
             Slots to allocate in lock file for read threads; attempts to open
