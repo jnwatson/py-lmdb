@@ -47,9 +47,9 @@ Installation
 ++++++++++++
 
 *Note:* on PyPy the wrapper depends on cffi which in turn depends on
-``libffi``, so you may need to install the development package for it. The
-CPython wrapper additionally depends on the Python development headers.
-On Debian/Ubuntu:
+``libffi``, so you may need to install the development package for it. Both
+wrappers additionally depends on the Python development headers. On
+Debian/Ubuntu:
 
     ::
 
