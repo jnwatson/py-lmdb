@@ -76,7 +76,6 @@ class CrashTest(EnvMixin, unittest.TestCase):
 
     def testDbDoubleClose(self):
         db = self.env.open_db(name='dave3')
-        print 'we have db', db
         #db.close()
         #db.close()
 
