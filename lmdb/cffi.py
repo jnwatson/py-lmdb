@@ -149,6 +149,7 @@ _ffi.cdef('''
     #define MDB_REVERSEKEY ...
     #define MDB_TXN_FULL ...
     #define MDB_WRITEMAP ...
+    #define MDB_NOTLS ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // cffi will use PyString_AS_STRING when passed as an argument.
@@ -398,7 +399,7 @@ class Environment(object):
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
 
-        flags = 0
+        flags = MDB_NOTLS
         if not subdir:
             flags |= MDB_NOSUBDIR
         if readonly:

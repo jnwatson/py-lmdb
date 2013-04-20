@@ -759,7 +759,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         }
     }
 
-    int flags = 0;
+    int flags = MDB_NOTLS;
     if(! arg.subdir) {
         flags |= MDB_NOSUBDIR;
     }
