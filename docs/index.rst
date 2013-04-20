@@ -265,7 +265,7 @@ On CPython the :py:class:`Environment` :py:meth:`get <Environment.get>`,
 :py:meth:`deletes <Environment.deletes>`, and :py:meth:`cursor
 <Environment.cursor>` methods are implemented so that no temporary
 :py:class:`Transaction` is constructed, improving performance in a common case.
-Since the begin/do/commit is implemeted in C, for simple operations they are
+Since the begin/do/commit is implemented in C, for simple operations they are
 faster than equivalent Python code using :py:class:`Transaction` or
 :py:meth:`Environment.begin`, and writes hold an exclusive lock for a shorter
 period. Currently CFFI uses a more obvious implementation of these methods.
