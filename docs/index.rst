@@ -239,11 +239,59 @@ When :py:class:`Environment` or :py:func:`open` is invoked with
 ``writemap=True``, the library will use a writeable memory mapping to directly
 update storage. This improves performance at a cost to safety: it is possible
 (though fairly unlikely) for buggy C code in the Python process to accidentally
-write over the map, resulting in database corruption.
+overwrite the map, resulting in database corruption.
 
 This option also requires a filesystem that supports sparse files by way of the
 `ftruncate` function, and is incompatible with nested transactions. *Note:* OS
 X HFS+ does not support sparse files.
+
+
+
+Transaction management
+++++++++++++++++++++++
+
+``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
+freely migrate across threads and for a single thread to maintain multiple read
+transactions. This enables mostly care-free use of read transactions, for
+example from within a `gevent <http://www.gevent.org/>`_ process.
+
+*Caution*: while any reader exists, writers cannot reuse space in the database
+file that has subsequently become unused. For this reason, continual use of
+long-lived read transactions may cause the database file to grow without bound.
+
+On CPython the :py:meth:`Environment.get`, :py:meth:`Environment.gets`,
+:py:meth:`Environment.put`, :py:meth:`Environment.puts`,
+:py:meth:`Environment.delete`, :py:meth:`Environment.deletes`, and
+:py:meth:`Environment.cursor` methods are implemented so that no temporary
+:py:class:`Transaction` object is constructed, greatly improving performance in
+a common case. Currently the CFFI version uses a more obvious implementation of
+these methods.
+
+Since ``MDB_NOTLS`` is used, there is very little penalty for losing a
+reference to an open read transaction: it will simply be aborted (and its
+associated shared memory reader slot freed) when the :py:class:`Transaction` is
+eventually garbage collected. This should occur immediately on CPython, but may
+be deferred indefinitely on PyPy.
+
+However the same is *not* true for write transactions: losing a reference to a
+write transaction, particularly on PyPy can potentially result in database
+deadlock, since if the same process that lost the :py:class:`Transaction`
+reference immediately starts another write transaction, it will deadlock on its
+own lock. Subsequently the old transaction may never be garbage collected
+(since the process is now blocked on itself), and the database will become
+unusable.
+
+These problems are easily avoided by always wrapping :py:class:`Transaction` in
+a ``with`` statement somewhere on the stack:
+
+.. code-block:: python
+
+    # Even if this code crashes, txn will be cleaned up correctly.
+    with env.begin() as txn:
+        if txn.get('foo'):
+            function_that_stashes_away_txn_ref(txn)
+            function_that_leaks_txn_refs(txn)
+            crash()
 
 
 Interface
