@@ -663,7 +663,7 @@ class Environment(object):
         """Use a temporary write transaction to invoke
         :py:meth:`Transaction.put` as `put(x, y)` for each `(x, y)`
         in `items`. Items must be a dict, or any iterable producing 2-tuples.
-        This function requires 2-tuples, no other sequence type is accepted. .
+        This function requires 2-tuples, no other sequence type is accepted.
         Returns a list of :py:meth:`Transaction.put` return values."""
         if type(items) is dict:
             items = items.iteritems()
