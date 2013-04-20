@@ -1425,7 +1425,75 @@ env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    return NULL;
+    struct env_deletes {
+        PyObject *keys;
+        DbObject *db;
+    } arg = {NULL, self->main_db};
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, KEYS_S, OFFSET(env_deletes, keys)},
+        {ARG_DB, DB_S, OFFSET(env_deletes, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.keys) {
+        return type_error("keys must be given");
+    }
+
+    PyObject *iter = PyObject_GetIter(arg.keys);
+    if(! iter) {
+        return NULL;
+    }
+
+    PyObject *list = PyList_New(0);
+    if(! list) {
+        Py_DECREF(iter);
+        return NULL;
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    if(rc) {
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    PyObject *key_obj;
+    MDB_val key;
+    while((key_obj = PyIter_Next(iter)) != NULL) {
+        if(val_from_buffer(&key, key_obj)) {
+            break;
+        }
+
+        rc = mdb_del(txn, arg.db->dbi, &key, NULL);
+        Py_DECREF(key_obj);
+
+        PyObject *res;
+        if(rc == 0) {
+            res = Py_True;
+        } else if(rc == MDB_NOTFOUND) {
+            res = Py_False;
+        } else {
+            err_set("mdb_del", rc);
+            break;
+        }
+        if(PyList_Append(list, res)) {
+            break;
+        }
+    }
+
+    if(PyErr_Occurred()) {
+        mdb_txn_abort(txn);
+        Py_CLEAR(list);
+    } else {
+        if((rc = mdb_txn_commit(txn))) {
+            Py_CLEAR(list);
+            err_set("mdb_txn_commit", rc);
+        }
+    }
+    return list;
 }
 
 static PyObject *
