@@ -726,21 +726,19 @@ class Transaction(object):
     """
     A transaction object. All operations require a transaction handle,
     transactions may be read-only or read-write. Write transactions may not
-    span threads.
+    span threads. Transaction objects implement the context manager protocol,
+    so that reliable release of the transaction happens even in the face of
+    unhandled exceptions:
 
-    Transaction objects implement the context manager protocol, so that
-    reliable release of the transaction happens even in the face of unhandled
-    exceptions:
+        .. code-block:: python
 
-    .. code-block:: python
+            # Transaction aborts correctly:
+            with env.begin(write=True) as txn:
+                crash()
 
-        # Transaction aborts corectly:
-        with env.begin(write=True) as txn:
-            crash()
-
-        # Transaction commits automatically:
-        with env.begin(write=True) as txn:
-            txn.put('a', 'b')
+            # Transaction commits automatically:
+            with env.begin(write=True) as txn:
+                txn.put('a', 'b')
 
     Equivalent to `mdb_txn_begin()
     <http://symas.com/mdb/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
