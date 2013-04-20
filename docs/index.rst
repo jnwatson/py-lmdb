@@ -259,13 +259,16 @@ example from within a `gevent <http://www.gevent.org/>`_ process.
 file that has subsequently become unused. For this reason, continual use of
 long-lived read transactions may cause the database file to grow without bound.
 
-On CPython the :py:meth:`Environment.get`, :py:meth:`Environment.gets`,
-:py:meth:`Environment.put`, :py:meth:`Environment.puts`,
-:py:meth:`Environment.delete`, :py:meth:`Environment.deletes`, and
-:py:meth:`Environment.cursor` methods are implemented so that no temporary
-:py:class:`Transaction` object is constructed, greatly improving performance in
-a common case. Currently the CFFI version uses a more obvious implementation of
-these methods.
+On CPython the :py:class:`Environment` :py:meth:`get <Environment.get>`,
+:py:meth:`gets <Environment.gets>`, :py:meth:`put <Environment.put>`,
+:py:meth:`puts <Environment.puts>`, :py:meth:`delete <Environment.delete>`,
+:py:meth:`deletes <Environment.deletes>`, and :py:meth:`cursor
+<Environment.cursor>` methods are implemented so that no temporary
+:py:class:`Transaction` is constructed, improving performance in a common case.
+Since the begin/do/commit is implemeted in C, for simple operations they are
+faster than equivalent Python code using :py:class:`Transaction` or
+:py:meth:`Environment.begin`, and writes hold an exclusive lock for a shorter
+period. Currently CFFI uses a more obvious implementation of these methods.
 
 Since ``MDB_NOTLS`` is used, there is very little penalty for losing a
 reference to an open read transaction: it will simply be aborted (and its
