@@ -36,7 +36,7 @@
     fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
             ## __VA_ARGS__);
 
-#define NODEBUG
+//#define NODEBUG
 
 #ifdef NODEBUG
 #undef DEBUG
@@ -56,6 +56,8 @@ enum string_id {
     DELETE_S,
     DUPDATA_S,
     DUPSORT_S,
+    ITEMS_S,
+    ITERITEMS_S,
     KEY_S,
     KEYS_S,
     MAP_ASYNC_S,
@@ -91,6 +93,8 @@ static const char *strings = (
     "delete\0"
     "dupdata\0"
     "dupsort\0"
+    "items\0"
+    "iteritems\0"
     "key\0"
     "keys\0"
     "map_async\0"
@@ -564,6 +568,136 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
 }
 
 
+// --------------------------------------------------------
+// Functionality shared between Transaction and Environment
+// --------------------------------------------------------
+
+
+static PyObject *
+generic_get(int valid, MDB_txn *txn, DbObject *db, int buffers,
+            PyBufferObject **bptr, PyObject *args, PyObject *kwds)
+{
+    struct generic_get {
+        MDB_val key;
+        PyObject *default_;
+        DbObject *db;
+    } arg = {{0, 0}, Py_None, db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(generic_get, key)},
+        {ARG_OBJ, DEFAULT_S, OFFSET(generic_get, default_)},
+        {ARG_DB, DB_S, OFFSET(generic_get, db)}
+    };
+
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.key.mv_data) {
+        return type_error("key must be given.");
+    }
+
+    MDB_val val;
+    int rc = mdb_get(txn, arg.db->dbi, &arg.key, &val);
+    if(rc) {
+        if(rc == MDB_NOTFOUND) {
+            Py_INCREF(arg.default_);
+            return arg.default_;
+        }
+        return err_set("mdb_get", rc);
+    }
+    if(buffers) {
+        return buffer_from_val(bptr, &val);
+    }
+    return string_from_val(&val);
+}
+
+static PyObject *
+generic_put(int valid, MDB_txn *txn, DbObject *db,
+            PyObject *args, PyObject *kwds)
+{
+    struct generic_put {
+        MDB_val key;
+        MDB_val value;
+        int dupdata;
+        int overwrite;
+        int append;
+        DbObject *db;
+    } arg = {{0, 0}, {0, 0}, 0, 1, 0, db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(generic_put, key)},
+        {ARG_BUF, VALUE_S, OFFSET(generic_put, value)},
+        {ARG_BOOL, DUPDATA_S, OFFSET(generic_put, dupdata)},
+        {ARG_BOOL, OVERWRITE_S, OFFSET(generic_put, overwrite)},
+        {ARG_BOOL, APPEND_S, OFFSET(generic_put, append)},
+        {ARG_DB, DB_S, OFFSET(generic_put, db)}
+    };
+
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    int flags = 0;
+    if(! arg.dupdata) {
+        flags |= MDB_NODUPDATA;
+    }
+    if(! arg.overwrite) {
+        flags |= MDB_NOOVERWRITE;
+    }
+    if(arg.append) {
+        flags |= MDB_APPEND;
+    }
+
+    DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
+        (int)arg.key.mv_size, (char *)arg.key.mv_data,
+        (int)arg.key.mv_size,
+        (int)arg.value.mv_size, (char *)arg.value.mv_data,
+        (int)arg.value.mv_size)
+
+    int rc = mdb_put(txn, (arg.db)->dbi, &arg.key, &arg.value, flags);
+    if(rc) {
+        if(rc == MDB_KEYEXIST) {
+            Py_RETURN_FALSE;
+        }
+        return err_set("mdb_put", rc);
+    }
+    Py_RETURN_TRUE;
+}
+
+static PyObject *
+generic_delete(int valid, MDB_txn *txn, DbObject *db,
+               PyObject *args, PyObject *kwds)
+{
+    struct generic_delete {
+        MDB_val key;
+        MDB_val val;
+        DbObject *db;
+    } arg = {{0, 0}, {0, 0}, db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(generic_delete, key)},
+        {ARG_BUF, VALUE_S, OFFSET(generic_delete, val)},
+        {ARG_DB, DB_S, OFFSET(generic_delete, db)}
+    };
+
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
+    int rc = mdb_del(txn, arg.db->dbi, &arg.key, val_ptr);
+    if(rc) {
+        if(rc == MDB_NOTFOUND) {
+             Py_RETURN_FALSE;
+        }
+        return err_set("mdb_del", rc);
+    }
+    Py_RETURN_TRUE;
+}
+
+
+
+
 // ----------------------------
 // Database
 // ----------------------------
@@ -1026,6 +1160,281 @@ env_sync(EnvObject *self, PyObject *arg)
     Py_RETURN_NONE;
 }
 
+static PyObject *
+env_get(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn);
+    if(rc) {
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    PyObject *ret = generic_get(1, txn, self->main_db, 0, NULL, args, kwds);
+    mdb_txn_abort(txn);
+    return ret;
+}
+
+
+static PyObject *
+env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    struct env_gets {
+        PyObject *keys;
+        DbObject *db;
+    } arg = {NULL, self->main_db};
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, KEYS_S, OFFSET(env_gets, keys)},
+        {ARG_DB, DB_S, OFFSET(env_gets, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.keys) {
+        return type_error("keys must be given");
+    }
+
+    PyObject *iter = PyObject_GetIter(arg.keys);
+    if(! iter) {
+        return NULL;
+    }
+
+    PyObject *dict = PyDict_New();
+    if(! dict) {
+        Py_DECREF(iter);
+        return NULL;
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn);
+    if(rc) {
+        Py_DECREF(iter);
+        Py_DECREF(dict);
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    PyObject *key_obj;
+    MDB_val key;
+    MDB_val val;
+
+    while((key_obj = PyIter_Next(iter)) != NULL) {
+        if(val_from_buffer(&key, key_obj)) {
+            break;
+        }
+
+        rc = mdb_get(txn, arg.db->dbi, &key, &val);
+        if(rc == 0) {
+            PyObject *val_obj = string_from_val(&val);
+            if(! val_obj) {
+                break;
+            }
+            rc = PyDict_SetItem(dict, key_obj, val_obj);
+            Py_DECREF(val_obj);
+            if(rc) {
+                break;
+            }
+        } else if(rc != MDB_NOTFOUND) {
+            err_set("mdb_get", rc);
+            break;
+        }
+        Py_DECREF(key_obj);
+    }
+
+    mdb_txn_abort(txn);
+    Py_DECREF(iter);
+    Py_XDECREF(key_obj);
+    if(PyErr_Occurred()) {
+        Py_CLEAR(dict);
+    }
+    return dict;
+}
+
+static PyObject *
+env_put(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    if(rc) {
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    PyObject *ret = generic_put(1, txn, self->main_db, args, kwds);
+    if(ret) {
+        if((rc = mdb_txn_commit(txn))) {
+            Py_DECREF(ret);
+            ret = err_set("mdb_txn_commit", rc);
+        }
+    } else {
+        mdb_txn_abort(txn);
+    }
+    return ret;
+}
+
+static PyObject *
+env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    struct env_puts {
+        PyObject *items;
+        int dupdata;
+        int overwrite;
+        int append;
+        DbObject *db;
+    } arg = {NULL, 0, 1, 0, self->main_db};
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, ITEMS_S, OFFSET(env_puts, items)},
+        {ARG_BOOL, DUPDATA_S, OFFSET(env_puts, dupdata)},
+        {ARG_BOOL, OVERWRITE_S, OFFSET(env_puts, overwrite)},
+        {ARG_BOOL, APPEND_S, OFFSET(env_puts, append)},
+        {ARG_DB, DB_S, OFFSET(env_puts, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.items) {
+        return type_error("items must be given");
+    }
+
+    PyObject *iter;
+    if(Py_TYPE(arg.items) == &PyDict_Type) {
+        iter = PyObject_CallMethodObjArgs(
+            arg.items, string_tbl[ITERITEMS_S], NULL);
+    } else {
+        iter = PyObject_GetIter(arg.items);
+    }
+    if(! iter) {
+        return NULL;
+    }
+
+    PyObject *list = PyList_New(0);
+    if(! list) {
+        Py_DECREF(iter);
+        return NULL;
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    if(rc) {
+        Py_DECREF(iter);
+        Py_DECREF(list);
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    int flags = 0;
+    if(! arg.dupdata) {
+        flags |= MDB_NODUPDATA;
+    }
+    if(! arg.overwrite) {
+        flags |= MDB_NOOVERWRITE;
+    }
+    if(arg.append) {
+        flags |= MDB_APPEND;
+    }
+
+    PyObject *item;
+    MDB_val key;
+    MDB_val val;
+
+    while((item = PyIter_Next(iter)) != NULL) {
+        if(! (PyTuple_Check(item) && PyTuple_GET_SIZE(item) == 2)) {
+            Py_DECREF(item);
+            type_error("puts() element type must be a 2-tuple.");
+            break;
+        }
+
+        if(val_from_buffer(&key, PyTuple_GET_ITEM(item, 0)) ||
+           val_from_buffer(&val, PyTuple_GET_ITEM(item, 1))) {
+            Py_DECREF(item);
+            break;
+        }
+
+        DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
+            (int)key.mv_size, (char *)key.mv_data, (int)key.mv_size,
+            (int)val.mv_size, (char *)val.mv_data, (int)val.mv_size)
+        rc = mdb_put(txn, arg.db->dbi, &key, &val, flags);
+        Py_DECREF(item);
+
+        PyObject *res;
+        if(rc == 0) {
+            res = Py_True;
+        } else if(rc == MDB_KEYEXIST) {
+            res = Py_False;
+        } else {
+            err_set("mdb_put", rc);
+            break;
+        }
+
+        if(PyList_Append(list, res)) {
+            Py_DECREF(res);
+            break;
+        }
+    }
+
+    DEBUG("got this far; list size now %d", (int) PyList_GET_SIZE(list))
+    Py_DECREF(iter);
+    if(PyErr_Occurred()) {
+        DEBUG("abort")
+        mdb_txn_abort(txn);
+        Py_CLEAR(list);
+    } else {
+        DEBUG("commit")
+        if((rc = mdb_txn_commit(txn))) {
+            err_set("mdb_txn_commit", rc);
+            Py_CLEAR(list);
+        }
+    }
+    return list;
+}
+
+static PyObject *
+env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    MDB_txn *txn;
+    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    if(rc) {
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    PyObject *ret = generic_delete(1, txn, self->main_db, args, kwds);
+    if(ret) {
+        if((rc = mdb_txn_commit(txn))) {
+            Py_DECREF(ret);
+            ret = err_set("mdb_txn_commit", rc);
+        }
+    } else {
+        mdb_txn_abort(txn);
+    }
+    return ret;
+}
+
+static PyObject *
+env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    return NULL;
+}
+
+static PyObject *
+env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    return NULL;
+}
+
 static struct PyMethodDef env_methods[] = {
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
@@ -1035,6 +1444,13 @@ static struct PyMethodDef env_methods[] = {
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
     {"sync", (PyCFunction)env_sync, METH_OLDARGS},
+    {"get", (PyCFunction)env_get, METH_VARARGS|METH_KEYWORDS},
+    {"gets", (PyCFunction)env_gets, METH_VARARGS|METH_KEYWORDS},
+    {"put", (PyCFunction)env_put, METH_VARARGS|METH_KEYWORDS},
+    {"puts", (PyCFunction)env_puts, METH_VARARGS|METH_KEYWORDS},
+    {"delete", (PyCFunction)env_delete, METH_VARARGS|METH_KEYWORDS},
+    {"deletes", (PyCFunction)env_deletes, METH_VARARGS|METH_KEYWORDS},
+    {"cursor", (PyCFunction)env_cursor, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
 
@@ -1706,33 +2122,8 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    struct trans_delete {
-        MDB_val key;
-        MDB_val val;
-        DbObject *db;
-    } arg = {{0, 0}, {0, 0}, NULL};
-
-    static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_delete, key)},
-        {ARG_BUF, VALUE_S, OFFSET(trans_delete, val)},
-        {ARG_DB, DB_S, OFFSET(trans_delete, db)}
-    };
-
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
-        return NULL;
-    }
-    if(! arg.db) {
-        arg.db = self->env->main_db;
-    }
-    MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
-    int rc = mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr);
-    if(rc) {
-        if(rc == MDB_NOTFOUND) {
-             Py_RETURN_FALSE;
-        }
-        return err_set("mdb_del", rc);
-    }
-    Py_RETURN_TRUE;
+    return generic_delete(self->valid, self->txn, self->env->main_db,
+                          args, kwds);
 }
 
 
@@ -1766,91 +2157,15 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    struct trans_get {
-        MDB_val key;
-        PyObject *default_;
-        DbObject *db;
-    } arg = {{0, 0}, Py_None, self->env->main_db};
-
-    static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_get, key)},
-        {ARG_OBJ, DEFAULT_S, OFFSET(trans_get, default_)},
-        {ARG_DB, DB_S, OFFSET(trans_get, db)}
-    };
-
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
-        return NULL;
-    }
-
-    if(! arg.key.mv_data) {
-        return type_error("key must be given.");
-    }
-
-    MDB_val val;
-    int rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
-    if(rc) {
-        if(rc == MDB_NOTFOUND) {
-            Py_INCREF(arg.default_);
-            return arg.default_;
-        }
-        return err_set("mdb_get", rc);
-    }
-    if(self->buffers) {
-        return buffer_from_val(&self->key_buf, &val);
-    }
-    return string_from_val(&val);
+    return generic_get(self->valid, self->txn, self->env->main_db,
+                       self->buffers, &self->key_buf, args, kwds);
 }
 
 static PyObject *
 trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    struct trans_put {
-        MDB_val key;
-        MDB_val value;
-        int dupdata;
-        int overwrite;
-        int append;
-        DbObject *db;
-    } arg = {{0, 0}, {0, 0}, 0, 1, 0, self->env->main_db};
-
-    static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_put, key)},
-        {ARG_BUF, VALUE_S, OFFSET(trans_put, value)},
-        {ARG_BOOL, DUPDATA_S, OFFSET(trans_put, dupdata)},
-        {ARG_BOOL, OVERWRITE_S, OFFSET(trans_put, overwrite)},
-        {ARG_BOOL, APPEND_S, OFFSET(trans_put, append)},
-        {ARG_DB, DB_S, OFFSET(trans_put, db)}
-    };
-
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
-        return NULL;
-    }
-
-    int flags = 0;
-    if(! arg.dupdata) {
-        flags |= MDB_NODUPDATA;
-    }
-    if(! arg.overwrite) {
-        flags |= MDB_NOOVERWRITE;
-    }
-    if(arg.append) {
-        flags |= MDB_APPEND;
-    }
-
-    DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
-        (int)arg.key.mv_size, (char *)arg.key.mv_data,
-        (int)arg.key.mv_size,
-        (int)arg.value.mv_size, (char *)arg.value.mv_data,
-        (int)arg.value.mv_size)
-
-    int rc = mdb_put(self->txn, (arg.db)->dbi, &arg.key, &arg.value, flags);
-    if(rc) {
-        if(rc == MDB_KEYEXIST) {
-            Py_RETURN_FALSE;
-        }
-        return err_set("mdb_put", rc);
-    }
-    Py_RETURN_TRUE;
+    return generic_put(self->valid, self->txn, self->env->main_db,
+                       args, kwds);
 }
 
 static PyObject *trans_enter(TransObject *self)
