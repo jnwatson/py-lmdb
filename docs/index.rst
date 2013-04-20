@@ -271,9 +271,9 @@ file that has become unused in later versions. Due to this, continual use of
 long-lived read transactions may cause the database to grow without bound. If
 transactions are exposed to users, some form of deadline timer should be
 employed to prevent this from occurring. A lost reference to a read transaction
-will simply be aborted (and its associated shared memory reader slot freed)
-when the :py:class:`Transaction` is eventually garbage collected. This should
-occur immediately on CPython, but may be deferred indefinitely on PyPy.
+will simply be aborted (and its reader slot freed) when the
+:py:class:`Transaction` is eventually garbage collected. This should occur
+immediately on CPython, but may be deferred indefinitely on PyPy.
 
 However the same is *not* true for write transactions: losing a reference to a
 write transaction can lead to deadlock, particularly on PyPy, since if the same
