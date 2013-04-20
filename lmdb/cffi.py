@@ -1278,3 +1278,17 @@ class Cursor(object):
             raise Error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
         return True
+
+    def _iter_from(self, k, reverse):
+        """Helper for centidb. Please do not rely on this interface, it may be
+        removed in future.
+        """
+        found = self.set_range(k)
+        if reverse:
+            if not found:
+                self.last()
+            return self.iterprev()
+        else:
+            if not found:
+                return ()
+            return self.iternext()

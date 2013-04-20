@@ -71,6 +71,7 @@ enum string_id {
     PARENT_S,
     PATH_S,
     READONLY_S,
+    REVERSE_S,
     REVERSE_KEY_S,
     SUBDIR_S,
     SYNC_S,
@@ -108,6 +109,7 @@ static const char *strings = (
     "parent\0"
     "path\0"
     "readonly\0"
+    "reverse\0"
     "reverse_key\0"
     "subdir\0"
     "sync\0"
@@ -859,7 +861,7 @@ PyTypeObject PyDatabase_Type = {
 static int
 env_clear(EnvObject *self)
 {
-    DEBUG("kiling env..")
+    DEBUG("killing env..")
     if(self->env) {
         INVALIDATE(self)
         DEBUG("Closing env")
@@ -1998,6 +2000,54 @@ cursor_iterprev(CursorObject *self, PyObject *args, PyObject *kwargs)
     return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
 }
 
+static PyObject *
+cursor_iter_from(CursorObject *self, PyObject *args)
+{
+    struct cursor_iter_from {
+        MDB_val key;
+        int reverse;
+    } arg = {{0, 0}, 0};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_iter_from, key)},
+        {ARG_BOOL, REVERSE_S, OFFSET(cursor_iter_from, reverse)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+        return NULL;
+    }
+
+    if(! arg.key.mv_data) {
+        return type_error("key must be specified.");
+    }
+
+    self->key = arg.key;
+    if(_cursor_get_c(self, MDB_SET_RANGE)) {
+        return NULL;
+    }
+
+    enum MDB_cursor_op op = MDB_NEXT;
+    if(arg.reverse) {
+        op = MDB_PREV;
+        if(! self->positioned) {
+            if(_cursor_get_c(self, MDB_LAST)) {
+                return NULL;
+            }
+        }
+    }
+
+    DEBUG("positioned? %d", self->positioned)
+    IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
+    if(iter) {
+        iter->val_func = (void *)cursor_item;
+        iter->curs = self;
+        Py_INCREF(self);
+        iter->started = 0;
+        iter->op = op;
+    }
+    return (PyObject *) iter;
+}
+
 static struct PyMethodDef cursor_methods[] = {
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
     {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
@@ -2014,6 +2064,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
+    {"_iter_from", (PyCFunction)cursor_iter_from, METH_VARARGS},
     {NULL, NULL}
 };
 
