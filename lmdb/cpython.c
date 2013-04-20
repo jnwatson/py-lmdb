@@ -1526,7 +1526,7 @@ static PyObject *
 env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     // TODO: there is no benefit to this implementation. Once reader freelist
-    // support is done, should be possible to do useful things here.
+    // is supported, should be possible to make meaningful optimizaiton here.
     struct env_cursor {
         int buffers;
         DbObject *db;
@@ -1547,9 +1547,7 @@ env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     PyObject *cursor = make_cursor(arg.db, (TransObject *) trans);
-    if(! cursor) {
-        Py_DECREF(trans);
-    }
+    Py_DECREF(trans);
     return cursor;
 }
 
@@ -2032,10 +2030,9 @@ PyTypeObject PyCursor_Type = {
 };
 
 
-
-/// ------------------------
-// iterator
-// -------------
+// ---------
+// Iterators
+// ---------
 
 static void
 iter_dealloc(IterObject *self)
@@ -2092,12 +2089,9 @@ PyTypeObject PyIterator_Type = {
 };
 
 
-/// ------------------------
-//transactions
-//////////////////////
-//
-//
-//
+// ------------
+// Transactions
+// ------------
 
 static int
 trans_clear(TransObject *self)
