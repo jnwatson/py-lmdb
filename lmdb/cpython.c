@@ -1377,7 +1377,6 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         }
 
         if(PyList_Append(list, res)) {
-            Py_DECREF(res);
             break;
         }
     }
