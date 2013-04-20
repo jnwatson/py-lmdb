@@ -364,9 +364,10 @@ class Environment(object):
             documentation.
 
         `max_readers`:
-            Slots to allocate in lock file for read threads; attempts to open
-            the environment by more than this many clients simultaneously will
-            fail. Only meaningful for environments that aren't already open.
+            Maximum number of simultaneous read transactions. Can only be set
+            by the first process to open an environment, as it affects the size
+            of the lock file and shared memory area. Attempts to simultaneously
+            start more than this many *read* transactions will fail.
 
         `max_dbs`:
             Maximum number of databases available. If 0, assume environment
@@ -614,6 +615,61 @@ class Environment(object):
         """Shortcut for :py:class:`lmdb.Transaction`"""
         return Transaction(self, **kwargs)
 
+    def get(self, key, default=None, db=None):
+        """Use a temporary read transaction to invoke
+        :py:meth:`Transaction.get`."""
+        with Transaction(self) as txn:
+            return txn.get(key, default, db)
+
+    def gets(self, keys, db=None):
+        """Use a temporary read transaction to invoke
+        :py:meth:`Transaction.get` for each key in `keys`. The returned value
+        is a dict containing one element for each key that existed."""
+        dct = {}
+        with Transaction(self) as txn:
+            for key in keys:
+                value = txn.get(key, None, db)
+                if value is not None:
+                    dct[key] = value
+        return dct
+
+    def put(self, key, value, dupdata=False, overwrite=True, append=False,
+            db=None):
+        """Use a temporary read transaction to invoke
+        :py:meth:`Transaction.put`."""
+        with Transaction(self, write=True) as txn:
+            txn.put(key, value, dupdata, overwrite, append, db)
+
+    def puts(self, items, dupdata=False, overwrite=True, append=False,
+             db=None):
+        """Use a temporary write transaction to invoke
+        :py:meth:`Transaction.put` as `put(x, y)` for each `(x, y)`
+        in `items`. Returns a list of :py:meth:`Transaction.put` return
+        values."""
+        with Transaction(self, write=True) as txn:
+            return [txn.put(key, value, dupdata, overwrite, append, db)
+                    for key, value in items]
+
+    def delete(self, key, value='', db=None):
+        """Use a temporary write transaction to invoke
+        :py:meth:`Transaction.delete`."""
+        with Transaction(self, write=True) as txn:
+            return txn.delete(key, value, db)
+
+    def deletes(self, keys, db=None):
+        """Use a temporary write transaction to invoke
+        :py:meth:`Transaction.delete` for each key in `keys`. Returns a list of
+        :py:meth:`Transaction.delete` return values."""
+        with Transaction(self, write=True) as txn:
+            return [txn.delete(key, '', db) for key in keys]
+
+    def cursor(self, buffers=False, db=None):
+        """Use a temporary read transaction to return a :py:class:`Cursor`. The
+        transaction will remain alive for as long as the cursor exists.
+        """
+        txn = Transaction(self, db, None, False, buffers)
+        return Cursor(db or self._db, txn)
+
 
 class _Database(object):
     """Internal database handle."""
@@ -697,11 +753,12 @@ class Transaction(object):
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
-        flags = 0
         if write and env.readonly:
             raise Error('Cannot start write transaction with read-only env')
-        if not write:
-            flags |= MDB_RDONLY
+        if write:
+            flags = 0
+        else:
+            flags = MDB_RDONLY
         txnpp = _ffi.new('MDB_txn **')
         if parent:
             self._parent = parent
@@ -771,9 +828,9 @@ class Transaction(object):
                 raise Error("mdb_txn_abort", rc)
 
     def get(self, key, default=None, db=None):
-        """Fetch the first value matching `key`, otherwise return `default`. A
-        cursor must be used to fetch all values for a key in a `dupsort=True`
-        database.
+        """Fetch the first value matching `key`, returning `default` if `key`
+        does not exist. A cursor must be used to fetch all values for a key in
+        a `dupsort=True` database.
 
         Equivalent to `mdb_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
