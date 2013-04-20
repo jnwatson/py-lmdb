@@ -695,8 +695,78 @@ generic_delete(int valid, MDB_txn *txn, DbObject *db,
     Py_RETURN_TRUE;
 }
 
+static PyObject *
+make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
+{
+    DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
+        env, parent, write, buffers)
+    if(! env->valid) {
+        return err_invalid();
+    }
 
+    MDB_txn *parent_txn = NULL;
+    if(parent) {
+        if(! parent->valid) {
+            return err_invalid();
+        }
+        parent_txn = parent->txn;
+    }
 
+    if(write && env->readonly) {
+        return err_set("Cannot start write transaction with read-only env", 0);
+    }
+
+    TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
+    if(! self) {
+        return NULL;
+    }
+
+    int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
+    int rc = mdb_txn_begin(env->env, parent_txn, flags, &self->txn);
+    if(rc) {
+        PyObject_Del(self);
+        return err_set("mdb_txn_begin", rc);
+    }
+
+    OBJECT_INIT(self)
+    LINK_CHILD(env, self)
+    self->env = env;
+    Py_INCREF(env);
+    self->buffers = buffers;
+    self->key_buf = NULL;
+    return (PyObject *)self;
+}
+
+static PyObject *
+make_cursor(DbObject *db, TransObject *trans)
+{
+    if(! trans->valid) {
+        return err_invalid();
+    }
+    if(! db) {
+        db = trans->env->main_db;
+    }
+
+    CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
+    int rc = mdb_cursor_open(trans->txn, db->dbi, &self->curs);
+    if(rc) {
+        PyObject_Del(self);
+        return err_set("mdb_cursor_open", rc);
+    }
+
+    DEBUG("sizeof cursor = %d", (int) sizeof *self)
+    OBJECT_INIT(self)
+    LINK_CHILD(trans, self)
+    self->positioned = 0;
+    self->key_buf = NULL;
+    self->val_buf = NULL;
+    self->key.mv_size = 0;
+    self->val.mv_size = 0;
+    self->item_tup = NULL;
+    self->trans = trans;
+    Py_INCREF(self->trans);
+    return (PyObject *) self;
+}
 
 // ----------------------------
 // Database
@@ -934,50 +1004,6 @@ fail:
     }
     return NULL;
 }
-
-
-static PyObject *
-make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
-{
-    DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
-        env, parent, write, buffers)
-    if(! env->valid) {
-        return err_invalid();
-    }
-
-    MDB_txn *parent_txn = NULL;
-    if(parent) {
-        if(! parent->valid) {
-            return err_invalid();
-        }
-        parent_txn = parent->txn;
-    }
-
-    if(write && env->readonly) {
-        return err_set("Cannot start write transaction with read-only env", 0);
-    }
-
-    TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
-    if(! self) {
-        return NULL;
-    }
-
-    int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
-    int rc = mdb_txn_begin(env->env, parent_txn, flags, &self->txn);
-    if(rc) {
-        PyObject_Del(self);
-        return err_set("mdb_txn_begin", rc);
-    }
-
-    OBJECT_INIT(self)
-    LINK_CHILD(env, self)
-    self->env = env;
-    Py_INCREF(env);
-    self->buffers = buffers;
-    self->key_buf = NULL;
-    return (PyObject *)self;
-}
-
 
 static PyObject *
 env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
@@ -1499,7 +1525,32 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    return NULL;
+    // TODO: there is no benefit to this implementation. Once reader freelist
+    // support is done, should be possible to do useful things here.
+    struct env_cursor {
+        int buffers;
+        DbObject *db;
+    } arg = { 0, self->main_db };
+
+    static const struct argspec argspec[] = {
+        {ARG_BOOL, BUFFERS_S, OFFSET(env_cursor, buffers)},
+        {ARG_DB, DB_S, OFFSET(env_cursor, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    PyObject *trans = make_trans(self, NULL, 0, arg.buffers);
+    if(! trans) {
+        return NULL;
+    }
+
+    PyObject *cursor = make_cursor(arg.db, (TransObject *) trans);
+    if(! cursor) {
+        Py_DECREF(trans);
+    }
+    return cursor;
 }
 
 static struct PyMethodDef env_methods[] = {
@@ -1568,37 +1619,6 @@ cursor_dealloc(CursorObject *self)
     DEBUG("destroying cursor")
     cursor_clear(self);
     PyObject_Del(self);
-}
-
-static PyObject *
-make_cursor(DbObject *db, TransObject *trans)
-{
-    if(! trans->valid) {
-        return err_invalid();
-    }
-    if(! db) {
-        db = trans->env->main_db;
-    }
-
-    CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
-    int rc = mdb_cursor_open(trans->txn, db->dbi, &self->curs);
-    if(rc) {
-        PyObject_Del(self);
-        return err_set("mdb_cursor_open", rc);
-    }
-
-    DEBUG("sizeof cursor = %d", (int) sizeof *self)
-    OBJECT_INIT(self)
-    LINK_CHILD(trans, self)
-    self->positioned = 0;
-    self->key_buf = NULL;
-    self->val_buf = NULL;
-    self->key.mv_size = 0;
-    self->val.mv_size = 0;
-    self->item_tup = NULL;
-    self->trans = trans;
-    Py_INCREF(self->trans);
-    return (PyObject *) self;
 }
 
 static PyObject *
