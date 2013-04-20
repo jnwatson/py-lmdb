@@ -662,9 +662,23 @@ class Environment(object):
              db=None):
         """Use a temporary write transaction to invoke
         :py:meth:`Transaction.put` as `put(x, y)` for each `(x, y)`
-        in `items`. Items must be a dict, or any iterable producing 2-tuples.
+        in `items`. Items must be a dict, or an iterable producing 2-tuples.
         This function requires 2-tuples, no other sequence type is accepted.
-        Returns a list of :py:meth:`Transaction.put` return values."""
+
+        Returns a list of :py:meth:`Transaction.put` return values.
+
+            .. code-block:: python
+
+                a_existed, b_existed = env.puts(overwrite=False, items={
+                    'a': '1',
+                    'b': '2'
+                })
+
+                if a_existed:
+                    print 'Did not overwrite a, it already existed.'
+                if b_existed:
+                    print 'Did not overwrite b, it already existed.'
+        """
         if type(items) is dict:
             items = items.iteritems()
         with Transaction(self, write=True) as txn:
