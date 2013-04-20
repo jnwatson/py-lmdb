@@ -250,18 +250,6 @@ X HFS+ does not support sparse files.
 Transaction management
 ++++++++++++++++++++++
 
-``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
-freely migrate across threads and for a single thread to maintain multiple read
-transactions. This enables mostly care-free use of read transactions, for
-example from within a `gevent <http://www.gevent.org/>`_ process.
-
-*Caution*: while any reader exists, writers cannot reuse space in the database
-file that has subsequently become unused. For this reason, continual use of
-long-lived read transactions may cause the database file to grow without bound.
-If transactions are directly exposed to users, some form of deadline timer
-should be employed to ensure unused areas of the database file will eventually
-be recycled.
-
 On CPython the :py:class:`Environment` :py:meth:`get <Environment.get>`,
 :py:meth:`gets <Environment.gets>`, :py:meth:`put <Environment.put>`,
 :py:meth:`puts <Environment.puts>`, :py:meth:`delete <Environment.delete>`,
@@ -273,26 +261,34 @@ faster than equivalent Python code using :py:class:`Transaction` or
 :py:meth:`Environment.begin`, and writes hold an exclusive lock for a shorter
 period. Currently CFFI uses a more obvious implementation of these methods.
 
-Since ``MDB_NOTLS`` is used, there is very little penalty for losing a
-reference to an open read transaction: it will simply be aborted (and its
-associated shared memory reader slot freed) when the :py:class:`Transaction` is
-eventually garbage collected. This should occur immediately on CPython, but may
-be deferred indefinitely on PyPy.
+``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
+freely migrate across threads and for a single thread to maintain multiple read
+transactions. This enables mostly care-free use of read transactions, for
+example when using `gevent <http://www.gevent.org/>`_.
+
+*Caution*: while any reader exists, writers cannot reuse space in the database
+file that has become unused in later versions. Due to this, continual use of
+long-lived read transactions may cause the database to grow without bound. If
+transactions are exposed to users, some form of deadline timer should be
+employed to prevent this from occurring. A lost reference to an open read
+transaction will simply be aborted (and its associated shared memory reader
+slot freed) when the :py:class:`Transaction` is eventually garbage collected.
+This should occur immediately on CPython, but may be deferred indefinitely on
+PyPy.
 
 However the same is *not* true for write transactions: losing a reference to a
-write transaction, particularly on PyPy can potentially result in database
-deadlock, since if the same process that lost the :py:class:`Transaction`
-reference immediately starts another write transaction, it will deadlock on its
-own lock. Subsequently the old transaction may never be garbage collected
-(since the process is now blocked on itself), and the database will become
-unusable.
+write transaction can lead to deadlock, particularly on PyPy, since if the same
+process that lost the :py:class:`Transaction` reference immediately starts
+another write transaction, it will deadlock on its own lock. Subsequently the
+lost transaction may never be garbage collected (since the process is now
+blocked on itself) and the database will become unusable.
 
 These problems are easily avoided by always wrapping :py:class:`Transaction` in
 a ``with`` statement somewhere on the stack:
 
 .. code-block:: python
 
-    # Even if this code crashes, txn will be cleaned up correctly.
+    # Even if this crashes, txn will be correctly finalized.
     with env.begin() as txn:
         if txn.get('foo'):
             function_that_stashes_away_txn_ref(txn)
