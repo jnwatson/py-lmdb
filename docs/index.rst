@@ -258,6 +258,9 @@ example from within a `gevent <http://www.gevent.org/>`_ process.
 *Caution*: while any reader exists, writers cannot reuse space in the database
 file that has subsequently become unused. For this reason, continual use of
 long-lived read transactions may cause the database file to grow without bound.
+If transactions will be directly exposed to users, some form of deadline timer
+should be employed to ensure unused areas of the database file will eventually
+be recycled.
 
 On CPython the :py:class:`Environment` :py:meth:`get <Environment.get>`,
 :py:meth:`gets <Environment.gets>`, :py:meth:`put <Environment.put>`,
