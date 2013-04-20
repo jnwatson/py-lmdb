@@ -372,11 +372,29 @@ class Environment(object):
         `max_dbs`:
             Maximum number of databases available. If 0, assume environment
             will be used as a single database.
+
+        `initial_readers`:
+            Indicates the number of read transaction to preallocate in the
+            `reset` state. When `max_readers` is large and there are many open
+            read transactions, starting a read will incur a penalty due to the
+            linear scan required on the readers table. In this case read
+            transactions may be accelerated through preallocation.
+
+            Currently unused in both CPython and CFFI.
+
+        `spare_readers`:
+            Indicates the number of read transactions to maintain in the
+            `reset` state. When a read transaction completes and the internal
+            `spare_readers` list is smaller than this number, the transaction
+            is reset and appended to the list. Otherwise, the transaction is
+            aborted and its associated reader slot is freed.
+
+            Currently unused in both CPython and CFFI.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=0644, create=True, writemap=False, max_readers=126,
-            max_dbs=0):
+            max_dbs=0, initial_readers=0, spare_readers=0):
         envpp = _ffi.new('MDB_env **')
 
         rc = mdb_env_create(envpp)
