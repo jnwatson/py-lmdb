@@ -724,16 +724,23 @@ open = Environment
 
 class Transaction(object):
     """
-    A transaction handle.
+    A transaction object. All operations require a transaction handle,
+    transactions may be read-only or read-write. Write transactions may not
+    span threads.
 
-    All operations require a transaction handle, transactions may be read-only
-    or read-write. Transactions may not span threads; a transaction must only
-    be used by a single thread.
+    Transaction objects implement the context manager protocol, so that
+    reliable release of the transaction happens even in the face of unhandled
+    exceptions:
 
-    Threads may only have a single transaction open for each environment.
+    .. code-block:: python
 
-    Cursors may not span transactions; each cursor must be opened and closed
-    within a single transaction.
+        # Transaction aborts corectly:
+        with env.begin(write=True) as txn:
+            crash()
+
+        # Transaction commits automatically:
+        with env.begin(write=True) as txn:
+            txn.put('a', 'b')
 
     Equivalent to `mdb_txn_begin()
     <http://symas.com/mdb/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
