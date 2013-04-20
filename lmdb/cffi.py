@@ -635,7 +635,7 @@ class Environment(object):
 
     def put(self, key, value, dupdata=False, overwrite=True, append=False,
             db=None):
-        """Use a temporary read transaction to invoke
+        """Use a temporary write transaction to invoke
         :py:meth:`Transaction.put`."""
         with Transaction(self, write=True) as txn:
             txn.put(key, value, dupdata, overwrite, append, db)
