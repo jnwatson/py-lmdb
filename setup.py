@@ -50,9 +50,16 @@ else:
         print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
         ext_modules = []
 
+def grep_version():
+    path = os.path.join(os.path.dirname(__file__), 'lmdb/__init__.py')
+    with file(path) as fp:
+        for line in fp:
+            if line.startswith('__version__'):
+                return eval(line.split()[-1])
+
 setup(
     name = 'lmdb',
-    version = '0.60',
+    version = grep_version(),
     description = "cffi/CPython native wrapper for OpenLDAP MDB 'Lightning Database' library",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',

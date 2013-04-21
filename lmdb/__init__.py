@@ -39,3 +39,4 @@ except ImportError:
 
 del os
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error']
+__version__ = '0.61'
