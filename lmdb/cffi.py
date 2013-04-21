@@ -308,11 +308,10 @@ def drop_gil():
     This flag is ignored and always assumed to be ``True`` on cffi. Note this
     can only be set once per process.
 
-    Continually dropping and reacquiring the GIL may incur unnecessary
-    performance overhead in single-threaded programs. Since Python
-    intra-process concurrency is already limited, and LMDB supports
-    inter-process access, programs using LMDB will achieve much better
-    throughput by forking rather than using threads.
+    Continually dropping and reacquiring the GIL may incur unnecessary overhead
+    in single-threaded programs. Since Python intra-process concurrency is
+    already limited, and LMDB supports inter-process access, programs using
+    LMDB will achieve better throughput by forking rather than using threads.
 
     *Caution:* this function should be invoked before any threads are created.
     """
