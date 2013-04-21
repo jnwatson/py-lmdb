@@ -52,7 +52,7 @@ else:
 
 def grep_version():
     path = os.path.join(os.path.dirname(__file__), 'lmdb/__init__.py')
-    with file(path) as fp:
+    with open(path) as fp:
         for line in fp:
             if line.startswith('__version__'):
                 return eval(line.split()[-1])
