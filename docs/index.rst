@@ -17,10 +17,6 @@ selected during installation: a `cffi
 <http://www.pypy.org/>`_ and all versions of CPython, and a custom module that
 supports CPython 2.6/2.7 and 3.3+.
 
-
-Introduction
-++++++++++++
-
 MDB is a tiny database with some excellent properties:
 
 * Ordered-map interface (keys are always sorted)
