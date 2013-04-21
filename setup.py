@@ -28,7 +28,8 @@ from setuptools import setup, Extension
 use_cpython = platform.python_implementation() == 'CPython'
 if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
-
+if sys.version[:3] in ('3.0', '3.1', '3.2'):
+    use_cpython = False
 
 if use_cpython:
     print('Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.')
