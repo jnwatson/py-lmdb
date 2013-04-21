@@ -14,11 +14,12 @@ This is a Python wrapper for the `OpenLDAP MDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two versions are provided and automatically
 selected during installation: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ version that supports `PyPy
-<http://www.pypy.org/>`_ and a custom module for CPython. Python 3.x is not
-supported yet.
+<http://www.pypy.org/>`_ and all versions of CPython, and a custom module that
+supports CPython 2.6/2.7 and 3.3+.
 
-As no packages are available the MDB library is bundled inline with the
-wrapper and built statically.
+Due to profoundly insane, utterly pointless API breakage and gratuitous
+bikeshedding, Python 3.0 – 3.2 will never be supported by the custom module,
+although cffi may still be used.
 
 
 Introduction
@@ -45,6 +46,9 @@ MDB is a tiny database with some excellent properties:
 
 Installation
 ++++++++++++
+
+For convenience the MDB library is currently bundled inline with the wrapper
+and built statically.
 
 *Note:* on PyPy the wrapper depends on cffi which in turn depends on
 ``libffi``, so you may need to install the development package for it. Both

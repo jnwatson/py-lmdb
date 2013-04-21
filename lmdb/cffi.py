@@ -393,7 +393,7 @@ class Environment(object):
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
-            mode=0644, create=True, writemap=False, max_readers=126,
+            mode=0o644, create=True, writemap=False, max_readers=126,
             max_dbs=0, initial_readers=0, spare_readers=0):
         envpp = _ffi.new('MDB_env **')
 
