@@ -34,7 +34,8 @@ import weakref
 
 import cffi
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error', 'drop_gil']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
+           'enable_drop_gil']
 
 _ffi = cffi.FFI()
 _ffi.cdef('''
