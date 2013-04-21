@@ -34,7 +34,7 @@ import weakref
 
 import cffi
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error', 'drop_gil']
 
 _ffi = cffi.FFI()
 _ffi.cdef('''
@@ -301,6 +301,21 @@ def _mvbuf(mv):
 def _mvstr(mv):
     """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
+
+def drop_gil():
+    """
+    Arrange for the global interpreter lock to be released during database IO.
+    This flag is ignored and always assumed to be ``True`` on cffi. Note this
+    can only be set once per process.
+
+    Continually dropping and reacquiring the GIL may incur unnecessary
+    performance overhead in single-threaded programs. Since Python
+    intra-process concurrency is already limited, and LMDB supports
+    inter-process access, programs using LMDB will achieve much better
+    throughput by forking rather than using threads.
+
+    *Caution:* this function should be invoked before any threads are created.
+    """
 
 
 class Environment(object):

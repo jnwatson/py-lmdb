@@ -324,3 +324,9 @@ Exceptions
 ##########
 
 .. autoclass:: lmdb.Error
+
+
+Threading control
+#################
+
+.. autofunction:: lmdb.drop_gil

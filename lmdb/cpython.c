@@ -47,6 +47,7 @@
 
 
 static PyObject *Error;
+static int drop_gil = 0;
 
 enum string_id {
     APPEND_S,
@@ -426,10 +427,44 @@ val_from_buffer(MDB_val *val, PyObject *buf)
 }
 
 
+// -------------------
+// Concurrency control
+// -------------------
 
-// ------------------------
-// Exceptions.
-// ------------------------
+static PyThreadState *save_thread(void)
+{
+    PyThreadState *s = NULL;
+    if(drop_gil) {
+        s = PyEval_SaveThread();
+    }
+    return s;
+}
+
+static void restore_thread(PyThreadState *state)
+{
+    if(drop_gil) {
+        PyEval_RestoreThread(state);
+    }
+}
+
+// Like Py_BEGIN_ALLOW_THREADS
+#define DROP_GIL \
+    { PyThreadState *_save; _save = save_thread();
+
+// Like Py_END_ALLOW_THREADS
+#define LOCK_GIL \
+    restore_thread(_save); }
+
+#define UNLOCKED(out, e) \
+    DROP_GIL \
+    out = (e); \
+    LOCK_GIL
+
+
+
+// ----------
+// Exceptions
+// ----------
 
 static void * NOINLINE
 err_set(const char *what, int rc)
@@ -648,7 +683,8 @@ generic_get(int valid, MDB_txn *txn, DbObject *db, int buffers,
     }
 
     MDB_val val;
-    int rc = mdb_get(txn, arg.db->dbi, &arg.key, &val);
+    int rc;
+    UNLOCKED(rc, mdb_get(txn, arg.db->dbi, &arg.key, &val));
     if(rc) {
         if(rc == MDB_NOTFOUND) {
             Py_INCREF(arg.default_);
@@ -705,7 +741,8 @@ generic_put(int valid, MDB_txn *txn, DbObject *db,
         (int)arg.value.mv_size, (char *)arg.value.mv_data,
         (int)arg.value.mv_size)
 
-    int rc = mdb_put(txn, (arg.db)->dbi, &arg.key, &arg.value, flags);
+    int rc;
+    UNLOCKED(rc, mdb_put(txn, (arg.db)->dbi, &arg.key, &arg.value, flags));
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -735,7 +772,8 @@ generic_delete(int valid, MDB_txn *txn, DbObject *db,
         return NULL;
     }
     MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
-    int rc = mdb_del(txn, arg.db->dbi, &arg.key, val_ptr);
+    int rc;
+    UNLOCKED(rc, mdb_del(txn, arg.db->dbi, &arg.key, val_ptr));
     if(rc) {
         if(rc == MDB_NOTFOUND) {
              Py_RETURN_FALSE;
@@ -772,7 +810,8 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     }
 
     int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
-    int rc = mdb_txn_begin(env->env, parent_txn, flags, &self->txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
     if(rc) {
         PyObject_Del(self);
         return err_set("mdb_txn_begin", rc);
@@ -798,7 +837,8 @@ make_cursor(DbObject *db, TransObject *trans)
     }
 
     CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
-    int rc = mdb_cursor_open(trans->txn, db->dbi, &self->curs);
+    int rc;
+    UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &self->curs));
     if(rc) {
         PyObject_Del(self);
         return err_set("mdb_cursor_open", rc);
@@ -829,7 +869,8 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     MDB_dbi dbi;
     int rc;
 
-    if((rc = mdb_dbi_open(txn, name, flags, &dbi))) {
+    UNLOCKED(rc, mdb_dbi_open(txn, name, flags, &dbi));
+    if(rc) {
         err_set("mdb_dbi_open", rc);
         return NULL;
     }
@@ -856,18 +897,22 @@ txn_db_from_name(EnvObject *env, const char *name,
     MDB_txn *txn;
 
     int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
-    if((rc = mdb_txn_begin(env->env, NULL, begin_flags, &txn))) {
+    UNLOCKED(rc, mdb_txn_begin(env->env, NULL, begin_flags, &txn));
+    if(rc) {
         err_set("mdb_txn_begin", rc);
         return NULL;
     }
 
     DbObject *dbo = db_from_name(env, txn, name, flags);
     if(! dbo) {
+        DROP_GIL
         mdb_txn_abort(txn);
+        LOCK_GIL
         return NULL;
     }
 
-    if((rc = mdb_txn_commit(txn))) {
+    UNLOCKED(rc, mdb_txn_commit(txn));
+    if(rc) {
         Py_DECREF(dbo);
         return err_set("mdb_txn_commit", rc);
     }
@@ -913,7 +958,9 @@ env_clear(EnvObject *self)
     if(self->env) {
         INVALIDATE(self)
         DEBUG("Closing env")
+        DROP_GIL
         mdb_env_close(self->env);
+        LOCK_GIL
         self->env = NULL;
     }
     if(self->main_db) {
@@ -1035,7 +1082,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, arg.mode)
-    if((rc = mdb_env_open(self->env, arg.path, flags, arg.mode))) {
+    UNLOCKED(rc, mdb_env_open(self->env, arg.path, flags, arg.mode));
+    if(rc) {
         err_set(arg.path, rc);
         goto fail;
     }
@@ -1083,7 +1131,9 @@ env_close(EnvObject *self)
         INVALIDATE(self)
         self->valid = 0;
         DEBUG("Closing env")
+        DROP_GIL
         mdb_env_close(self->env);
+        LOCK_GIL
         self->env = NULL;
     }
     Py_RETURN_NONE;
@@ -1121,7 +1171,8 @@ env_info(EnvObject *self)
     }
 
     MDB_envinfo info;
-    int rc = mdb_env_info(self->env, &info);
+    int rc;
+    UNLOCKED(rc, mdb_env_info(self->env, &info));
     if(rc) {
         err_set("mdb_env_info", rc);
         return NULL;
@@ -1206,7 +1257,8 @@ env_stat(EnvObject *self)
     }
 
     MDB_stat st;
-    int rc = mdb_env_stat(self->env, &st);
+    int rc;
+    UNLOCKED(rc, mdb_env_stat(self->env, &st));
     if(rc) {
         err_set("mdb_env_stat", rc);
         return NULL;
@@ -1229,7 +1281,8 @@ env_sync(EnvObject *self, PyObject *args)
         return NULL;
     }
 
-    int rc = mdb_env_sync(self->env, arg.force);
+    int rc;
+    UNLOCKED(rc, mdb_env_sync(self->env, arg.force));
     if(rc) {
         return err_set("mdb_env_sync", rc);
     }
@@ -1244,13 +1297,16 @@ env_get(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn));
     if(rc) {
         return err_set("mdb_txn_begin", rc);
     }
 
     PyObject *ret = generic_get(1, txn, self->main_db, 0, NULL, args, kwds);
+    DROP_GIL
     mdb_txn_abort(txn);
+    LOCK_GIL
     return ret;
 }
 
@@ -1288,7 +1344,8 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn));
     if(rc) {
         Py_DECREF(iter);
         Py_DECREF(dict);
@@ -1304,7 +1361,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
             break;
         }
 
-        rc = mdb_get(txn, arg.db->dbi, &key, &val);
+        UNLOCKED(rc, mdb_get(txn, arg.db->dbi, &key, &val));
         if(rc == 0) {
             PyObject *val_obj = string_from_val(&val);
             if(! val_obj) {
@@ -1322,7 +1379,9 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         Py_DECREF(key_obj);
     }
 
+    DROP_GIL
     mdb_txn_abort(txn);
+    LOCK_GIL
     Py_DECREF(iter);
     Py_XDECREF(key_obj);
     if(PyErr_Occurred()) {
@@ -1339,19 +1398,23 @@ env_put(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
     if(rc) {
         return err_set("mdb_txn_begin", rc);
     }
 
     PyObject *ret = generic_put(1, txn, self->main_db, args, kwds);
     if(ret) {
-        if((rc = mdb_txn_commit(txn))) {
+        UNLOCKED(rc, mdb_txn_commit(txn));
+        if(rc) {
             Py_DECREF(ret);
             ret = err_set("mdb_txn_commit", rc);
         }
     } else {
+        DROP_GIL
         mdb_txn_abort(txn);
+        LOCK_GIL
     }
     return ret;
 }
@@ -1401,7 +1464,8 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
     if(rc) {
         Py_DECREF(iter);
         Py_DECREF(list);
@@ -1439,7 +1503,7 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
             (int)key.mv_size, (char *)key.mv_data, (int)key.mv_size,
             (int)val.mv_size, (char *)val.mv_data, (int)val.mv_size)
-        rc = mdb_put(txn, arg.db->dbi, &key, &val, flags);
+        UNLOCKED(rc, mdb_put(txn, arg.db->dbi, &key, &val, flags));
         Py_DECREF(item);
 
         PyObject *res;
@@ -1461,11 +1525,14 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
     Py_DECREF(iter);
     if(PyErr_Occurred()) {
         DEBUG("abort")
+        DROP_GIL
         mdb_txn_abort(txn);
+        LOCK_GIL
         Py_CLEAR(list);
     } else {
         DEBUG("commit")
-        if((rc = mdb_txn_commit(txn))) {
+        UNLOCKED(rc, mdb_txn_commit(txn));
+        if(rc) {
             err_set("mdb_txn_commit", rc);
             Py_CLEAR(list);
         }
@@ -1481,19 +1548,23 @@ env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
     if(rc) {
         return err_set("mdb_txn_begin", rc);
     }
 
     PyObject *ret = generic_delete(1, txn, self->main_db, args, kwds);
     if(ret) {
-        if((rc = mdb_txn_commit(txn))) {
+        UNLOCKED(rc, mdb_txn_commit(txn));
+        if(rc) {
             Py_DECREF(ret);
             ret = err_set("mdb_txn_commit", rc);
         }
     } else {
+        DROP_GIL
         mdb_txn_abort(txn);
+        LOCK_GIL
     }
     return ret;
 }
@@ -1531,7 +1602,8 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     MDB_txn *txn;
-    int rc = mdb_txn_begin(self->env, NULL, 0, &txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
     if(rc) {
         return err_set("mdb_txn_begin", rc);
     }
@@ -1543,7 +1615,7 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
             break;
         }
 
-        rc = mdb_del(txn, arg.db->dbi, &key, NULL);
+        UNLOCKED(rc, mdb_del(txn, arg.db->dbi, &key, NULL));
         Py_DECREF(key_obj);
 
         PyObject *res;
@@ -1561,10 +1633,13 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     if(PyErr_Occurred()) {
+        DROP_GIL
         mdb_txn_abort(txn);
+        LOCK_GIL
         Py_CLEAR(list);
     } else {
-        if((rc = mdb_txn_commit(txn))) {
+        UNLOCKED(rc, mdb_txn_commit(txn));
+        if(rc) {
             Py_CLEAR(list);
             err_set("mdb_txn_commit", rc);
         }
@@ -1643,7 +1718,9 @@ cursor_clear(CursorObject *self)
     if(self->valid) {
         INVALIDATE(self)
         UNLINK_CHILD(self->trans, self)
+        DROP_GIL
         mdb_cursor_close(self->curs);
+        LOCK_GIL
         self->valid = 0;
     }
     if(self->key_buf) {
@@ -1700,7 +1777,8 @@ cursor_count(CursorObject *self)
     }
 
     size_t count;
-    int rc = mdb_cursor_count(self->curs, &count);
+    int rc;
+    UNLOCKED(rc, mdb_cursor_count(self->curs, &count));
     if(rc) {
         return err_set("mdb_cursor_count", rc);
     }
@@ -1711,7 +1789,8 @@ cursor_count(CursorObject *self)
 static int
 _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 {
-    int rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
+    int rc;
+    UNLOCKED(rc, mdb_cursor_get(self->curs, &self->key, &self->val, op));
     self->positioned = rc == 0;
     if(rc) {
         self->key.mv_size = 0;
@@ -1750,7 +1829,8 @@ cursor_delete(CursorObject *self)
         DEBUG("deleting key '%.*s'",
               (int) self->key.mv_size,
               (char*) self->key.mv_data)
-        int rc = mdb_cursor_del(self->curs, 0);
+        int rc;
+        UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
@@ -1928,7 +2008,8 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_APPEND;
     }
 
-    int rc = mdb_cursor_put(self->curs, &arg.key, &arg.val, flags);
+    int rc;
+    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -1988,7 +2069,7 @@ cursor_value(CursorObject *self)
 
 static PyObject *
 iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
-                   enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
+               enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
 {
     struct iter_from_args {
         int keys;
@@ -2202,7 +2283,9 @@ trans_clear(TransObject *self)
         INVALIDATE(self)
         if(self->txn) {
             DEBUG("aborting")
+            DROP_GIL
             mdb_txn_abort(self->txn);
+            LOCK_GIL
             self->txn = NULL;
         }
         self->valid = 0;
@@ -2257,7 +2340,9 @@ trans_abort(TransObject *self)
     }
     DEBUG("aborting")
     INVALIDATE(self)
+    DROP_GIL
     mdb_txn_abort(self->txn);
+    LOCK_GIL
     self->txn = NULL;
     self->valid = 0;
     Py_RETURN_NONE;
@@ -2271,7 +2356,8 @@ trans_commit(TransObject *self)
     }
     DEBUG("committing")
     INVALIDATE(self)
-    int rc = mdb_txn_commit(self->txn);
+    int rc;
+    UNLOCKED(rc, mdb_txn_commit(self->txn));
     self->txn = NULL;
     self->valid = 0;
     if(rc) {
@@ -2330,7 +2416,8 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
         return type_error("'db' argument required.");
     }
 
-    int rc = mdb_drop(self->txn, arg.db->dbi, arg.delete);
+    int rc;
+    UNLOCKED(rc, mdb_drop(self->txn, arg.db->dbi, arg.delete));
     if(rc) {
         return err_set("mdb_drop", rc);
     }
@@ -2407,13 +2494,27 @@ static int add_type(PyObject *mod, PyTypeObject *type)
 }
 
 
+static PyObject *
+py_drop_gil(void)
+{
+    drop_gil = 1;
+    Py_RETURN_NONE;
+}
+
+
+static struct PyMethodDef module_methods[] = {
+    {"drop_gil", (PyCFunction) py_drop_gil, METH_NOARGS, ""},
+    {0, 0, 0, 0}
+};
+
+
 #if PY_MAJOR_VERSION >= 3
 static struct PyModuleDef moduledef = {
     PyModuleDef_HEAD_INIT,
     "cpython",
     NULL,
-    0,
-    NULL,
+    -1,
+    module_methods,
     NULL,
     NULL,
     NULL,
@@ -2428,7 +2529,7 @@ MODINIT_NAME(void)
 #if PY_MAJOR_VERSION >= 3
     PyObject *mod = PyModule_Create(&moduledef);
 #else
-    PyObject *mod = Py_InitModule3("cpython", NULL, "");
+    PyObject *mod = Py_InitModule3("cpython", module_methods, "");
 #endif
     if(! mod) {
         MOD_RETURN(NULL);

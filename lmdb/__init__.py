@@ -38,5 +38,5 @@ except ImportError:
     from lmdb.cffi import __doc__
 
 del os
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error', 'drop_gil']
 __version__ = '0.61'
