@@ -17,10 +17,6 @@ selected during installation: a `cffi
 <http://www.pypy.org/>`_ and all versions of CPython, and a custom module that
 supports CPython 2.6/2.7 and 3.3+.
 
-Due to profoundly insane, utterly pointless API breakage and gratuitous
-bikeshedding, Python 3.0 – 3.2 will never be supported by the custom module,
-although cffi may still be used.
-
 
 Introduction
 ++++++++++++
