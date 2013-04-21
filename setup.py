@@ -31,7 +31,7 @@ if os.getenv('LMDB_FORCE_CFFI') is not None:
 
 
 if use_cpython:
-    print 'Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.'
+    print('Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.')
     install_requires = []
     ext_modules = [Extension(
         name='cpython',
@@ -40,7 +40,7 @@ if use_cpython:
         include_dirs=['lib']
     )]
 else:
-    print 'Using cffi extension.'
+    print('Using cffi extension.')
     install_requires = ['cffi']
     try:
         import lmdb.cffi

@@ -45,6 +45,7 @@
 
 #define NOINLINE __attribute__((noinline))
 
+
 static PyObject *Error;
 
 enum string_id {
@@ -56,6 +57,7 @@ enum string_id {
     DELETE_S,
     DUPDATA_S,
     DUPSORT_S,
+    FORCE_S,
     ITEMS_S,
     ITERITEMS_S,
     KEY_S,
@@ -94,6 +96,7 @@ static const char *strings = (
     "delete\0"
     "dupdata\0"
     "dupsort\0"
+    "force\0"
     "items\0"
     "iteritems\0"
     "key\0"
@@ -132,6 +135,20 @@ extern PyTypeObject PyIterator_Type;
 
 struct EnvObject;
 
+#if PY_MAJOR_VERSION >= 3
+
+// Python 3.3 kindly exports the struct definitions for us.
+#   define MOD_RETURN(mod) return mod;
+#   define MODINIT_NAME PyInit_cpython
+#   define BUFFER_TYPE PyMemoryViewObject
+#   define MAKE_BUFFER() PyMemoryView_FromMemory("", 0, PyBUF_READ)
+#   define SET_BUFFER(buff, ptr, size) {\
+        (buff)->view.buf = (ptr); \
+        (buff)->view.len = (size); \
+        (buff)->hash = -1; \
+    }
+
+#else
 
 // So evil.
 typedef struct {
@@ -143,6 +160,23 @@ typedef struct {
     int b_readonly;
     long b_hash;
 } PyBufferObject;
+
+#   define PyUnicode_InternFromString PyString_InternFromString
+#   define PyBytes_AS_STRING PyString_AS_STRING
+#   define PyBytes_GET_SIZE PyString_GET_SIZE
+#   define PyBytes_CheckExact PyString_CheckExact
+#   define PyBytes_FromStringAndSize PyString_FromStringAndSize
+#   define MOD_RETURN(mod) return
+#   define MODINIT_NAME initcpython
+#   define BUFFER_TYPE PyBufferObject
+#   define MAKE_BUFFER() PyBuffer_FromMemory("", 0)
+#   define SET_BUFFER(buf, ptr, size) {\
+        (buf)->b_hash = -1; \
+        (buf)->b_ptr = (ptr); \
+        (buf)->b_size = (size); \
+    }
+
+#endif
 
 struct list_head {
     struct lmdb_object *prev;
@@ -223,7 +257,7 @@ static void invalidate(struct lmdb_object *parent)
     while(child) {
         struct lmdb_object *next = child->siblings.next;
         DEBUG("invalidating parent=%p child %p", parent, child)
-        child->ob_type->tp_clear((PyObject *) child);
+        Py_TYPE(child)->tp_clear((PyObject *) child);
         child = next;
     }
 }
@@ -254,7 +288,7 @@ typedef struct {
 
     MDB_txn *txn;
     int buffers;
-    PyBufferObject *key_buf;
+    BUFFER_TYPE *key_buf;
 } TransObject;
 
 typedef struct {
@@ -263,8 +297,8 @@ typedef struct {
 
     int positioned;
     MDB_cursor *curs;
-    PyBufferObject *key_buf;
-    PyBufferObject *val_buf;
+    BUFFER_TYPE *key_buf;
+    BUFFER_TYPE *val_buf;
     PyObject *item_tup;
     MDB_val key;
     MDB_val val;
@@ -342,20 +376,18 @@ dict_from_fields(void *o, const struct dict_field *fields)
 
 
 static PyObject * NOINLINE
-buffer_from_val(PyBufferObject **bufp, MDB_val *val)
+buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
 {
-    PyBufferObject *buf = *bufp;
+    BUFFER_TYPE *buf = *bufp;
     if(! buf) {
-        buf = (PyBufferObject *) PyBuffer_FromMemory("", 0);
+        buf = (BUFFER_TYPE *) MAKE_BUFFER();
         if(! buf) {
             return NULL;
         }
         *bufp = buf;
     }
 
-    buf->b_hash = -1;
-    buf->b_ptr = val->mv_data;
-    buf->b_size = val->mv_size;
+    SET_BUFFER(buf, val->mv_data, val->mv_size);
     Py_INCREF(buf);
     return (PyObject *) buf;
 }
@@ -364,18 +396,30 @@ buffer_from_val(PyBufferObject **bufp, MDB_val *val)
 static PyObject *
 string_from_val(MDB_val *val)
 {
-    return PyString_FromStringAndSize(val->mv_data, val->mv_size);
+    return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
 }
 
 
 static int NOINLINE
 val_from_buffer(MDB_val *val, PyObject *buf)
 {
-    if(PyString_CheckExact(buf)) {
-        val->mv_data = PyString_AS_STRING(buf);
-        val->mv_size = Py_SIZE(buf);
+    if(PyBytes_CheckExact(buf)) {
+        val->mv_data = PyBytes_AS_STRING(buf);
+        val->mv_size = PyBytes_GET_SIZE(buf);
         return 0;
     }
+#if PY_MAJOR_VERSION >= 3
+    if(PyUnicode_CheckExact(buf)) {
+        char *data;
+        Py_ssize_t size;
+        if(! (data = PyUnicode_AsUTF8AndSize(buf, &size))) {
+            return -1;
+        }
+        val->mv_data = data;
+        val->mv_size = size;
+        return 0;
+    }
+#endif
     return PyObject_AsReadBuffer(buf,
         (const void **) &val->mv_data,
         (Py_ssize_t *) &val->mv_size);
@@ -454,7 +498,11 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
         type_error("Integer argument exceeds limit.");
         return -1;
     }
+#if PY_MAJOR_VERSION >= 3
+    *l = PyLong_AsUnsignedLongLongMask(obj);
+#else
     *l = PyInt_AsUnsignedLongLongMask(obj);
+#endif
     return 0;
 }
 
@@ -551,7 +599,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
             if(val) {
                 if(set & (1 << i)) {
                     PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
-                                 PyString_AS_STRING(kwd));
+                                 PyBytes_AS_STRING(kwd));
                     return -1;
                 }
                 if(parse_arg(spec, val, out)) {
@@ -577,7 +625,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
 
 static PyObject *
 generic_get(int valid, MDB_txn *txn, DbObject *db, int buffers,
-            PyBufferObject **bptr, PyObject *args, PyObject *kwds)
+            BUFFER_TYPE **bptr, PyObject *args, PyObject *kwds)
 {
     struct generic_get {
         MDB_val key;
@@ -1136,7 +1184,7 @@ env_path(EnvObject *self)
     if((rc = mdb_env_get_path(self->env, &path))) {
         return err_set("mdb_env_get_path", rc);
     }
-    return PyString_FromString(path);
+    return PyUnicode_FromString(path);
 }
 
 
@@ -1167,21 +1215,21 @@ env_stat(EnvObject *self)
 }
 
 static PyObject *
-env_sync(EnvObject *self, PyObject *arg)
+env_sync(EnvObject *self, PyObject *args)
 {
-    if(! self->valid) {
-        return err_invalid();
+    struct env_sync {
+        int force;
+    } arg = {0};
+
+    static const struct argspec argspec[] = {
+        {ARG_BOOL, FORCE_S, OFFSET(env_sync, force)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+        return NULL;
     }
 
-    int force = arg == NULL;
-    if(arg) {
-        int force = PyObject_IsTrue(arg);
-        if(force == -1) {
-            return NULL;
-        }
-    }
-
-    int rc = mdb_env_sync(self->env, force);
+    int rc = mdb_env_sync(self->env, arg.force);
     if(rc) {
         return err_set("mdb_env_sync", rc);
     }
@@ -1561,7 +1609,7 @@ static struct PyMethodDef env_methods[] = {
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
-    {"sync", (PyCFunction)env_sync, METH_OLDARGS},
+    {"sync", (PyCFunction)env_sync, METH_VARARGS},
     {"get", (PyCFunction)env_get, METH_VARARGS|METH_KEYWORDS},
     {"gets", (PyCFunction)env_gets, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)env_put, METH_VARARGS|METH_KEYWORDS},
@@ -1599,11 +1647,11 @@ cursor_clear(CursorObject *self)
         self->valid = 0;
     }
     if(self->key_buf) {
-        self->key_buf->b_size = 0;
+        SET_BUFFER(self->key_buf, "", 0);
         Py_CLEAR(self->key_buf);
     }
     if(self->val_buf) {
-        self->val_buf->b_size = 0;
+        SET_BUFFER(self->val_buf, "", 0);
         Py_CLEAR(self->val_buf);
     }
     if(self->item_tup) {
@@ -2076,7 +2124,7 @@ PyTypeObject PyCursor_Type = {
     .tp_basicsize = sizeof(CursorObject),
     .tp_dealloc = (destructor) cursor_dealloc,
     .tp_clear = (inquiry) cursor_clear,
-    .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_iter = (getiterfunc)cursor_iter,
     .tp_methods = cursor_methods,
     .tp_name = "Cursor",
@@ -2135,7 +2183,7 @@ PyTypeObject PyIterator_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
     .tp_dealloc = (destructor) iter_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_ITER,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_iter = (getiterfunc)iter_iter,
     .tp_iternext = (iternextfunc)iter_next,
     .tp_methods = iter_methods,
@@ -2356,14 +2404,34 @@ static int add_type(PyObject *mod, PyTypeObject *type)
         return -1;
     }
     return PyObject_SetAttrString(mod, type->tp_name, (PyObject *)type);
- }
+}
+
+
+#if PY_MAJOR_VERSION >= 3
+static struct PyModuleDef moduledef = {
+    PyModuleDef_HEAD_INIT,
+    "cpython",
+    NULL,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+};
+#endif
+
 
 PyMODINIT_FUNC
-initcpython(void)
+MODINIT_NAME(void)
 {
+#if PY_MAJOR_VERSION >= 3
+    PyObject *mod = PyModule_Create(&moduledef);
+#else
     PyObject *mod = Py_InitModule3("cpython", NULL, "");
+#endif
     if(! mod) {
-        return;
+        MOD_RETURN(NULL);
     }
 
     static PyTypeObject *types[] = {
@@ -2377,41 +2445,42 @@ initcpython(void)
     int i;
     for(i = 0; types[i]; i++) {
         if(add_type(mod, types[i])) {
-            return;
+            MOD_RETURN(NULL);
         }
     }
 
     string_tbl = malloc(sizeof(PyObject *) * STRING_ID_COUNT);
     if(! string_tbl) {
-        return;
+        MOD_RETURN(NULL);
     }
 
     const char *cur = strings;
     for(i = 0; i < STRING_ID_COUNT; i++) {
-        if(! ((string_tbl[i] = PyString_InternFromString(cur)))) {
-            return;
+        if(! ((string_tbl[i] = PyUnicode_InternFromString(cur)))) {
+            MOD_RETURN(NULL);
         }
         cur += strlen(cur) + 1;
     }
 
     if(! ((py_zero = PyLong_FromSize_t(0)))) {
-        return;
+        MOD_RETURN(NULL);
     }
     if(! ((py_int_max = PyLong_FromSize_t(INT_MAX)))) {
-        return;
+        MOD_RETURN(NULL);
     }
     if(! ((py_size_max = PyLong_FromSize_t(SIZE_MAX)))) {
-        return;
+        MOD_RETURN(NULL);
     }
 
     Error = PyErr_NewException("lmdb.Error", NULL, NULL);
     if(! Error) {
-        return;
+        MOD_RETURN(NULL);
     }
     if(PyObject_SetAttrString(mod, "Error", Error)) {
-        return;
+        MOD_RETURN(NULL);
     }
     if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
-        return;
+        MOD_RETURN(NULL);
     }
+    MOD_RETURN(mod);
 }
