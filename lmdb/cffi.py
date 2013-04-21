@@ -1297,7 +1297,10 @@ class Cursor(object):
         """Helper for centidb. Please do not rely on this interface, it may be
         removed in future.
         """
-        found = self.set_range(k)
+        if not k and not reverse:
+            found = self.first()
+        else:
+            found = self.set_range(k)
         if reverse:
             if not found:
                 self.last()

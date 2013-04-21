@@ -2017,12 +2017,15 @@ cursor_iter_from(CursorObject *self, PyObject *args)
         return NULL;
     }
 
-    if(! arg.key.mv_data) {
-        return type_error("key must be specified.");
+    int rc;
+    if((! arg.key.mv_size) && (! arg.reverse)) {
+        rc = _cursor_get_c(self, MDB_FIRST);
+    } else {
+        self->key = arg.key;
+        rc = _cursor_get_c(self, MDB_SET_RANGE);
     }
 
-    self->key = arg.key;
-    if(_cursor_get_c(self, MDB_SET_RANGE)) {
+    if(rc) {
         return NULL;
     }
 
