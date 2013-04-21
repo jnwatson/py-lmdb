@@ -58,6 +58,12 @@ setup(
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
     packages = ['lmdb'],
+    classifiers = [
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 3",
+        "Topic :: Database",
+        "Topic :: Database :: Database Engines/Servers",
+    ],
     ext_package = 'lmdb',
     ext_modules = ext_modules,
     install_requires = install_requires,
