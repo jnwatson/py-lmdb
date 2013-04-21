@@ -2495,7 +2495,7 @@ static int add_type(PyObject *mod, PyTypeObject *type)
 
 
 static PyObject *
-py_drop_gil(void)
+enable_drop_gil(void)
 {
     drop_gil = 1;
     Py_RETURN_NONE;
@@ -2503,7 +2503,7 @@ py_drop_gil(void)
 
 
 static struct PyMethodDef module_methods[] = {
-    {"drop_gil", (PyCFunction) py_drop_gil, METH_NOARGS, ""},
+    {"enable_drop_gil", (PyCFunction) enable_drop_gil, METH_NOARGS, ""},
     {0, 0, 0, 0}
 };
 

@@ -329,4 +329,4 @@ Exceptions
 Threading control
 #################
 
-.. autofunction:: lmdb.drop_gil
+.. autofunction:: lmdb.enable_drop_gil

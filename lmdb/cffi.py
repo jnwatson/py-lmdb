@@ -302,7 +302,7 @@ def _mvstr(mv):
     """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
-def drop_gil():
+def enable_drop_gil():
     """
     Arrange for the global interpreter lock to be released during database IO.
     This flag is ignored and always assumed to be ``True`` on cffi. Note this
