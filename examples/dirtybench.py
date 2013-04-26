@@ -94,10 +94,10 @@ with env.begin(buffers=True) as txn:
     print 'rand lookup all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
 with env.begin() as txn:
-    curs = txn.cursor()
+    cursget = txn.cursor().get
     t0 = now()
     for word in words:
-        curs.get(word)
+        cursget(word)
     t1 = now()
     print 'rand lookup all buffers (cursor) %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
