@@ -40,4 +40,4 @@ except ImportError:
 del os
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
            'enable_drop_gil']
-__version__ = '0.61'
+__version__ = '0.62'
