@@ -18,6 +18,7 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <assert.h>
 #include "midl.h"
@@ -70,17 +71,6 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 {
 	unsigned x, i;
 
-	if (MDB_IDL_IS_RANGE( ids )) {
-		/* if already in range, treat as a dup */
-		if (id >= MDB_IDL_RANGE_FIRST(ids) && id <= MDB_IDL_RANGE_LAST(ids))
-			return -1;
-		if (id < MDB_IDL_RANGE_FIRST(ids))
-			ids[1] = id;
-		else if (id > MDB_IDL_RANGE_LAST(ids))
-			ids[2] = id;
-		return 0;
-	}
-
 	x = mdb_midl_search( ids, id );
 	assert( x > 0 );
 
@@ -96,15 +86,9 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 	}
 
 	if ( ++ids[0] >= MDB_IDL_DB_MAX ) {
-		if( id < ids[1] ) {
-			ids[1] = id;
-			ids[2] = ids[ids[0]-1];
-		} else if ( ids[ids[0]-1] < id ) {
-			ids[2] = id;
-		} else {
-			ids[2] = ids[ids[0]-1];
-		}
-		ids[0] = MDB_NOID;
+		/* no room */
+		--ids[0];
+		return -2;
 	
 	} else {
 		/* insert id */
@@ -117,16 +101,18 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 }
 #endif
 
-MDB_IDL mdb_midl_alloc(void)
+MDB_IDL mdb_midl_alloc(int num)
 {
-	MDB_IDL ids = malloc((MDB_IDL_UM_MAX+1) * sizeof(MDB_ID));
-	*ids++ = MDB_IDL_UM_MAX;
+	MDB_IDL ids = malloc((num+2) * sizeof(MDB_ID));
+	if (ids)
+		*ids++ = num;
 	return ids;
 }
 
 void mdb_midl_free(MDB_IDL ids)
 {
-	free(ids-1);
+	if (ids)
+		free(ids-1);
 }
 
 int mdb_midl_shrink( MDB_IDL *idp )
@@ -141,19 +127,26 @@ int mdb_midl_shrink( MDB_IDL *idp )
 	return 0;
 }
 
+int mdb_midl_grow( MDB_IDL *idp, int num )
+{
+	MDB_IDL idn = *idp-1;
+	/* grow it */
+	idn = realloc(idn, (*idn + num + 2) * sizeof(MDB_ID));
+	if (!idn)
+		return ENOMEM;
+	*idn++ += num;
+	*idp = idn;
+	return 0;
+}
+
 int mdb_midl_append( MDB_IDL *idp, MDB_ID id )
 {
 	MDB_IDL ids = *idp;
 	/* Too big? */
 	if (ids[0] >= ids[-1]) {
-		MDB_IDL idn = ids-1;
-		/* grow it */
-		idn = realloc(idn, (*idn + MDB_IDL_UM_MAX + 1) * sizeof(MDB_ID));
-		if (!idn)
-			return -1;
-		*idn++ += MDB_IDL_UM_MAX;
-		ids = idn;
-		*idp = ids;
+		if (mdb_midl_grow(idp, MDB_IDL_UM_MAX))
+			return ENOMEM;
+		ids = *idp;
 	}
 	ids[0]++;
 	ids[ids[0]] = id;
@@ -165,14 +158,9 @@ int mdb_midl_append_list( MDB_IDL *idp, MDB_IDL app )
 	MDB_IDL ids = *idp;
 	/* Too big? */
 	if (ids[0] + app[0] >= ids[-1]) {
-		MDB_IDL idn = ids-1;
-		/* grow it */
-		idn = realloc(idn, (*idn + app[-1]) * sizeof(MDB_ID));
-		if (!idn)
-			return -1;
-		*idn++ += app[-1];
-		ids = idn;
-		*idp = ids;
+		if (mdb_midl_grow(idp, app[0]))
+			return ENOMEM;
+		ids = *idp;
 	}
 	memcpy(&ids[ids[0]+1], &app[1], app[0] * sizeof(MDB_ID));
 	ids[0] += app[0];
