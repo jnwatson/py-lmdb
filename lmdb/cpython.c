@@ -1239,19 +1239,20 @@ env_path(EnvObject *self)
 }
 
 
+static const struct dict_field mdb_stat_fields[] = {
+    { TYPE_UINT, "psize",           offsetof(MDB_stat, ms_psize) },
+    { TYPE_UINT, "depth",           offsetof(MDB_stat, ms_depth) },
+    { TYPE_SIZE, "branch_pages",    offsetof(MDB_stat, ms_branch_pages) },
+    { TYPE_SIZE, "leaf_pages",      offsetof(MDB_stat, ms_leaf_pages) },
+    { TYPE_SIZE, "overflow_pages",  offsetof(MDB_stat, ms_overflow_pages) },
+    { TYPE_SIZE, "entries",         offsetof(MDB_stat, ms_entries) },
+    { TYPE_EOF, NULL, 0 }
+};
+
+
 static PyObject *
 env_stat(EnvObject *self)
 {
-    static const struct dict_field fields[] = {
-        { TYPE_UINT, "psize",           offsetof(MDB_stat, ms_psize) },
-        { TYPE_UINT, "depth",           offsetof(MDB_stat, ms_depth) },
-        { TYPE_SIZE, "branch_pages",    offsetof(MDB_stat, ms_branch_pages) },
-        { TYPE_SIZE, "leaf_pages",      offsetof(MDB_stat, ms_leaf_pages) },
-        { TYPE_SIZE, "overflow_pages",  offsetof(MDB_stat, ms_overflow_pages) },
-        { TYPE_SIZE, "entries",         offsetof(MDB_stat, ms_entries) },
-        { TYPE_EOF, NULL, 0 }
-    };
-
     if(! self->valid) {
         return err_invalid();
     }
@@ -1263,8 +1264,9 @@ env_stat(EnvObject *self)
         err_set("mdb_env_stat", rc);
         return NULL;
     }
-    return dict_from_fields(&st, fields);
+    return dict_from_fields(&st, mdb_stat_fields);
 }
+
 
 static PyObject *
 env_sync(EnvObject *self, PyObject *args)
@@ -2460,6 +2462,34 @@ static PyObject *trans_exit(TransObject *self, PyObject *args)
 }
 
 
+static PyObject *
+trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
+{
+    struct trans_stat {
+        DbObject *db;
+    } arg = { NULL };
+
+    static const struct argspec argspec[] = {
+        {ARG_DB, DB_S, OFFSET(trans_stat, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! arg.db) {
+        return type_error("'db' argument required.");
+    }
+
+    MDB_stat st;
+    int rc;
+    UNLOCKED(rc, mdb_stat(self->txn, arg.db->dbi, &st));
+    if(rc) {
+        return err_set("mdb_stat", rc);
+    }
+    return dict_from_fields(&st, mdb_stat_fields);
+}
+
+
 static struct PyMethodDef trans_methods[] = {
     {"__enter__", (PyCFunction)trans_enter, METH_NOARGS},
     {"__exit__", (PyCFunction)trans_exit, METH_VARARGS},
@@ -2470,6 +2500,7 @@ static struct PyMethodDef trans_methods[] = {
     {"drop", (PyCFunction)trans_drop, METH_VARARGS|METH_KEYWORDS},
     {"get", (PyCFunction)trans_get, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)trans_put, METH_VARARGS|METH_KEYWORDS},
+    {"stat", (PyCFunction)trans_stat, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
 

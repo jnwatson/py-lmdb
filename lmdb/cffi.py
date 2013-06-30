@@ -520,6 +520,18 @@ class Environment(object):
         if rc:
             raise Error("mdb_env_sync", rc)
 
+    def _convert_stat(self, st):
+        """Convert a MDB_stat to a dict.
+        """
+        return {
+            "psize": st.ms_psize,
+            "depth": st.ms_depth,
+            "branch_pages": st.ms_branch_pages,
+            "leaf_pages": st.ms_leaf_pages,
+            "overflow_pages": st.ms_overflow_pages,
+            "entries": st.ms_entries
+        }
+
     def stat(self):
         """stat()
 
@@ -546,14 +558,7 @@ class Environment(object):
         rc = mdb_env_stat(self._env, st)
         if rc:
             raise Error("mdb_env_stat", rc)
-        return {
-            "psize": st.ms_psize,
-            "depth": st.ms_depth,
-            "branch_pages": st.ms_branch_pages,
-            "leaf_pages": st.ms_leaf_pages,
-            "overflow_pages": st.ms_overflow_pages,
-            "entries": st.ms_entries
-        }
+        return self._convert_stat(st)
 
     def info(self):
         """Return some nice environment information as a dict:
@@ -848,6 +853,18 @@ class Transaction(object):
             self.abort()
         else:
             self.commit()
+
+    def stat(self, db):
+        """stat(db)
+
+        Return statistics like :py:meth:`Environment.stat`, except for a single
+        DBI. `db` must be a database handle returned by :py:meth:`open_db`.
+        """
+        st = _ffi.new('MDB_stat *')
+        rc = mdb_stat(self._txn, db._dbi, st)
+        if rc:
+            raise Error('mdb_stat', rc)
+        return self.env._convert_stat(st)
 
     def drop(self, db, delete=True):
         """Delete all keys in a sub-database, and optionally delete the
