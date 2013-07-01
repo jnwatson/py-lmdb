@@ -52,64 +52,33 @@ typedef size_t MDB_ID;
 	 */
 typedef MDB_ID *MDB_IDL;
 
-#define	MDB_NOID	(~(MDB_ID)0)
-
 /* IDL sizes - likely should be even bigger
  *   limiting factors: sizeof(ID), thread stack size
  */
 #define	MDB_IDL_LOGN	16	/* DB_SIZE is 2^16, UM_SIZE is 2^17 */
 #define MDB_IDL_DB_SIZE		(1<<MDB_IDL_LOGN)
 #define MDB_IDL_UM_SIZE		(1<<(MDB_IDL_LOGN+1))
-#define MDB_IDL_UM_SIZEOF	(MDB_IDL_UM_SIZE * sizeof(MDB_ID))
 
 #define MDB_IDL_DB_MAX		(MDB_IDL_DB_SIZE-1)
-
 #define MDB_IDL_UM_MAX		(MDB_IDL_UM_SIZE-1)
 
-#define MDB_IDL_IS_RANGE(ids)	((ids)[0] == MDB_NOID)
-#define MDB_IDL_RANGE_SIZE		(3)
-#define MDB_IDL_RANGE_SIZEOF	(MDB_IDL_RANGE_SIZE * sizeof(MDB_ID))
-#define MDB_IDL_SIZEOF(ids)		((MDB_IDL_IS_RANGE(ids) \
-	? MDB_IDL_RANGE_SIZE : ((ids)[0]+1)) * sizeof(MDB_ID))
-
-#define MDB_IDL_RANGE_FIRST(ids)	((ids)[1])
-#define MDB_IDL_RANGE_LAST(ids)		((ids)[2])
-
-#define MDB_IDL_RANGE( ids, f, l ) \
-	do { \
-		(ids)[0] = MDB_NOID; \
-		(ids)[1] = (f);  \
-		(ids)[2] = (l);  \
-	} while(0)
-
-#define MDB_IDL_ZERO(ids) \
-	do { \
-		(ids)[0] = 0; \
-		(ids)[1] = 0; \
-		(ids)[2] = 0; \
-	} while(0)
-
+#define MDB_IDL_SIZEOF(ids)		(((ids)[0]+1) * sizeof(MDB_ID))
 #define MDB_IDL_IS_ZERO(ids) ( (ids)[0] == 0 )
-#define MDB_IDL_IS_ALL( range, ids ) ( (ids)[0] == MDB_NOID \
-	&& (ids)[1] <= (range)[1] && (range)[2] <= (ids)[2] )
-
 #define MDB_IDL_CPY( dst, src ) (memcpy( dst, src, MDB_IDL_SIZEOF( src ) ))
-
-#define MDB_IDL_ID( bdb, ids, id ) MDB_IDL_RANGE( ids, id, ((bdb)->bi_lastid) )
-#define MDB_IDL_ALL( bdb, ids ) MDB_IDL_RANGE( ids, 1, ((bdb)->bi_lastid) )
-
 #define MDB_IDL_FIRST( ids )	( (ids)[1] )
-#define MDB_IDL_LAST( ids )		( MDB_IDL_IS_RANGE(ids) \
-	? (ids)[2] : (ids)[(ids)[0]] )
+#define MDB_IDL_LAST( ids )		( (ids)[(ids)[0]] )
 
-#define MDB_IDL_N( ids )		( MDB_IDL_IS_RANGE(ids) \
-	? ((ids)[2]-(ids)[1])+1 : (ids)[0] )
+	/** Append ID to IDL. The IDL must be big enough. */
+#define mdb_midl_xappend(idl, id) do { \
+		MDB_ID *xidl = (idl), xlen = ++(xidl[0]); \
+		xidl[xlen] = (id); \
+	} while (0)
 
 #if 0	/* superseded by append/sort */
 	/** Insert an ID into an IDL.
 	 * @param[in,out] ids	The IDL to insert into.
 	 * @param[in] id	The ID to insert.
-	 * @return	0 on success, -1 if the ID was already present in the IDL.
+	 * @return	0 on success, -1 if ID was already present, -2 on error.
 	 */
 int mdb_midl_insert( MDB_IDL ids, MDB_ID id );
 #endif
@@ -132,27 +101,34 @@ void mdb_midl_free(MDB_IDL ids);
 	 */
 int mdb_midl_shrink(MDB_IDL *idp);
 
-	/** Grow an IDL.
-	 * Add room for num additional elements.
-	 * @param[in,out] idp	Address of the IDL to grow.
-	 * @param[in] num	Number of elements to add.
-	 * @return	0 on success, -1 on failure.
+	/** Make room for num additional elements in an IDL.
+	 * @param[in,out] idp	Address of the IDL.
+	 * @param[in] num	Number of elements to make room for.
+	 * @return	0 on success, ENOMEM on failure.
 	 */
-int mdb_midl_grow(MDB_IDL *idp, int num);
+int mdb_midl_need(MDB_IDL *idp, unsigned num);
 
 	/** Append an ID onto an IDL.
 	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] id	The ID to append.
-	 * @return	0 on success, -1 if the IDL is too large.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
 	 */
 int mdb_midl_append( MDB_IDL *idp, MDB_ID id );
 
 	/** Append an IDL onto an IDL.
 	 * @param[in,out] idp	Address of the IDL to append to.
 	 * @param[in] app	The IDL to append.
-	 * @return	0 on success, -1 if the IDL is too large.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
 	 */
 int mdb_midl_append_list( MDB_IDL *idp, MDB_IDL app );
+
+	/** Append an ID range onto an IDL.
+	 * @param[in,out] idp	Address of the IDL to append to.
+	 * @param[in] id	The lowest ID to append.
+	 * @param[in] n		Number of IDs to append.
+	 * @return	0 on success, ENOMEM if the IDL is too large.
+	 */
+int mdb_midl_append_range( MDB_IDL *idp, MDB_ID id, unsigned n );
 
 	/** Sort an IDL.
 	 * @param[in,out] ids	The IDL to sort.
