@@ -144,16 +144,6 @@ typedef	int	mdb_mode_t;
 typedef	mode_t	mdb_mode_t;
 #endif
 
-/** An abstraction for a file handle.
- *	On POSIX systems file handles are small integers. On Windows
- *	they're opaque pointers.
- */
-#ifdef _WIN32
-typedef	void *mdb_filehandle_t;
-#else
-typedef int mdb_filehandle_t;
-#endif
-
 /** @defgroup mdb MDB API
  *	@{
  *	@brief OpenLDAP Lightning Memory-Mapped Database Manager
@@ -335,11 +325,13 @@ typedef enum MDB_cursor_op {
 								Only for #MDB_DUPSORT */
 	MDB_NEXT_MULTIPLE,		/**< Return all duplicate data items at the next
 								cursor position. Only for #MDB_DUPFIXED */
-	MDB_NEXT_NODUP,			/**< Position at first data item of next key */
+	MDB_NEXT_NODUP,			/**< Position at first data item of next key.
+								Only for #MDB_DUPSORT */
 	MDB_PREV,				/**< Position at previous data item */
 	MDB_PREV_DUP,			/**< Position at previous data item of current key.
 								Only for #MDB_DUPSORT */
-	MDB_PREV_NODUP,			/**< Position at last data item of previous key */
+	MDB_PREV_NODUP,			/**< Position at last data item of previous key.
+								Only for #MDB_DUPSORT */
 	MDB_SET,				/**< Position at specified key */
 	MDB_SET_KEY,			/**< Position at specified key, return key + data */
 	MDB_SET_RANGE			/**< Position at first key greater than or equal to specified key. */
@@ -542,17 +534,6 @@ int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_copy(MDB_env *env, const char *path);
-
-	/** @brief Copy an MDB environment to the specified file descriptor.
-	 *
-	 * This function may be used to make a backup of an existing environment.
-	 * @param[in] env An environment handle returned by #mdb_env_create(). It
-	 * must have already been opened successfully.
-	 * @param[in] fd The filedescriptor to write the copy to. It must
-	 * have already been opened for Write access.
-	 * @return A non-zero error value on failure and 0 on success.
-	 */
-int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
 
 	/** @brief Return statistics about the MDB environment.
 	 *
