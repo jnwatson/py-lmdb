@@ -1050,7 +1050,7 @@ class Cursor(object):
     inefficient code. In cases where the iteration order is not obvious, or is
     related to the data being read, use of :py:meth:`set_key`,
     :py:meth:`set_range`, :py:meth:`key`, :py:meth:`value`, and :py:meth:`item`
-    are often preferable:
+    may be preferable:
 
         ::
 
