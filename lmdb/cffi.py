@@ -655,7 +655,7 @@ class Environment(object):
         self._dbs[name] = weakref.ref(db)
         return db
 
-    def begin(self, db=None, parent=None, write=False, buffers=False)
+    def begin(self, db=None, parent=None, write=False, buffers=False):
         """Shortcut for :py:class:`lmdb.Transaction`"""
         return Transaction(self, db, parent, write, buffers)
 
