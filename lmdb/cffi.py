@@ -1245,7 +1245,7 @@ class Cursor(object):
         return default
 
     def set_range(self, key):
-        """Seek to the first key greater than or equal `key`, returning
+        """Seek to the first key greater than or equal to `key`, returning
         ``True`` on success, or ``False`` to indicate key was past end of
         database.
 
