@@ -1290,7 +1290,7 @@ class Cursor(object):
 
     def put(self, key, val, dupdata=False, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
-        to indicate the key was already present and `override=False`. On
+        to indicate the key was already present and `overwrite=False`. On
         success, the cursor is positioned on the key.
 
         Equivalent to `mdb_cursor_put()
