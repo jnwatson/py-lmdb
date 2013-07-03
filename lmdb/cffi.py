@@ -595,9 +595,9 @@ class Environment(object):
     def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
             create=True):
         """
-        Open a database, returning an opaque handle. Repeat :py:meth:`open_db`
-        calls for the same name will return the same handle. As a special case,
-        the main database is always open.
+        Open a database, returning an opaque handle. Repeat
+        :py:meth:`Environment.open_db` calls for the same name will return the
+        same handle. As a special case, the main database is always open.
 
         Equivalent to `mdb_dbi_open()
         <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
