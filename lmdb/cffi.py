@@ -1029,7 +1029,7 @@ class Cursor(object):
             ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
             ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
 
-    Both :py:meth:`forward` and :py:meth:`reverse` accept `keys` and `values`
+    Both :py:meth:`iternext` and :py:meth:`iterprev` accept `keys` and `values`
     arguments. If both are ``True``, then the value of :py:meth:`item` is
     yielded on each iteration. If only `keys` is ``True``, :py:meth:`key` is
     yielded, otherwise only :py:meth:`value` is yielded.
