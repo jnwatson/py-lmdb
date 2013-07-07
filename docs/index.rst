@@ -106,7 +106,7 @@ this reason databases are never closed automatically, you must do it
 explicitly.
 
 There is little reason to close a handle: open handles only consume slots in
-the shared environment and repeated calls to :py:meth:`Environment.open` for
+the shared environment and repeated calls to :py:meth:`Environment.open_db` for
 the same name return the same handle. Simply setting `max_dbs=` higher than the
 maximum number of handles required will alleviate any need to coordinate
 management amongst users.
