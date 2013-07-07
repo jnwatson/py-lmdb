@@ -177,7 +177,28 @@ typedef struct {
         (buf)->b_size = (size); \
     }
 
+// Python 2.5
+#ifndef Py_TYPE
+#   define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
 #endif
+
+#endif
+
+#if (PY_MAJOR_VERSION == 2) && (PY_MINOR_VERSION < 6)
+static PyObject *
+PyUnicode_FromString(const char *u)
+{
+    PyObject *s = PyString_FromString(u);
+    if(s) {
+        PyObject *t = PyUnicode_FromEncodedObject(
+            s, Py_FileSystemDefaultEncoding, "strict");
+        Py_DECREF(s);
+        s = t;
+    }
+    return s;
+}
+#endif
+
 
 struct list_head {
     struct lmdb_object *prev;
@@ -2594,13 +2615,13 @@ MODINIT_NAME(void)
         cur += strlen(cur) + 1;
     }
 
-    if(! ((py_zero = PyLong_FromSize_t(0)))) {
+    if(! ((py_zero = PyLong_FromUnsignedLongLong(0)))) {
         MOD_RETURN(NULL);
     }
-    if(! ((py_int_max = PyLong_FromSize_t(INT_MAX)))) {
+    if(! ((py_int_max = PyLong_FromUnsignedLongLong(INT_MAX)))) {
         MOD_RETURN(NULL);
     }
-    if(! ((py_size_max = PyLong_FromSize_t(SIZE_MAX)))) {
+    if(! ((py_size_max = PyLong_FromUnsignedLongLong(SIZE_MAX)))) {
         MOD_RETURN(NULL);
     }
 
