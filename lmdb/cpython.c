@@ -291,13 +291,22 @@ struct EnvObject {
     int readonly;
 };
 
+/** TransObject.flags bitfield values. */
+enum trans_flags {
+    /** Buffers should be yielded by get. */
+    TRANS_BUFFERS       = 1,
+    /** Transaction is read-only and go on the freelist at deallocation. */
+    TRANS_RDONLY        = 2
+};
+
 /** lmdb.Transaction */
 struct TransObject {
     LmdbObject_HEAD
     EnvObject *env;
     /** MDB transaction object. */
     MDB_txn *txn;
-    int buffers;
+    /** Bitfield of trans_flags values. */
+    int flags;
     /** NULL if !TRANS_BUFFERS, or prior to any call to get(). */
     BUFFER_TYPE *key_buf;
 };
@@ -945,8 +954,15 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     LINK_CHILD(env, self)
     self->env = env;
     Py_INCREF(env);
-    self->buffers = buffers;
     self->key_buf = NULL;
+
+    self->flags = 0;
+    if(! write) {
+        self->flags |= TRANS_RDONLY;
+    }
+    if(buffers) {
+        self->flags |= TRANS_BUFFERS;
+    }
     return (PyObject *)self;
 }
 
@@ -2070,7 +2086,7 @@ cursor_item(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    if(self->trans->buffers) {
+    if(self->trans->flags & TRANS_BUFFERS) {
         if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
@@ -2108,7 +2124,7 @@ cursor_key(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    if(self->trans->buffers) {
+    if(self->trans->flags & TRANS_BUFFERS) {
         if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
@@ -2224,7 +2240,7 @@ cursor_value(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    if(self->trans->buffers) {
+    if(self->trans->flags & TRANS_BUFFERS) {
         if(! buffer_from_val(&self->val_buf, &self->val)) {
             return NULL;
         }
@@ -2595,7 +2611,8 @@ static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
     return generic_get(self->valid, self->txn, self->env->main_db,
-                       self->buffers, &self->key_buf, args, kwds);
+                       self->flags & TRANS_BUFFERS,
+                       &self->key_buf, args, kwds);
 }
 
 static PyObject *
