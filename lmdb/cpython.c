@@ -32,15 +32,15 @@
 
 #include "lmdb.h"
 
-#define DEBUG(s, ...) \
-    fprintf(stderr, "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, \
-            ## __VA_ARGS__);
 
+// Comment out for copious debug.
 #define NODEBUG
 
 #ifdef NODEBUG
-#undef DEBUG
-#define DEBUG(s, ...)
+#   define DEBUG(s, ...)
+#else
+#   define DEBUG(s, ...) fprintf(stderr, \
+    "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, ## __VA_ARGS__);
 #endif
 
 #define NOINLINE __attribute__((noinline))
