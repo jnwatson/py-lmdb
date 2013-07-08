@@ -261,6 +261,37 @@ struct lmdb_object {
     ((struct lmdb_object *)o)->valid = 1;
 
 
+/** lmdb._Database */
+struct DbObject {
+    LmdbObject_HEAD
+    /** Python Environment reference. */
+    struct EnvObject *env; // Not refcounted.
+    /** MDB database handle. */
+    MDB_dbi dbi;
+};
+
+/** lmdb.Environment */
+struct EnvObject {
+    LmdbObject_HEAD
+    /** MDB environment object. */
+    MDB_env *env;
+    /** DBI for main database, opened during Environment construction. */
+    DbObject *main_db;
+    /**  1 if env opened read-only; transactions must always be read-only. */
+    int readonly;
+};
+
+/** lmdb.Transaction */
+struct TransObject {
+    LmdbObject_HEAD
+    EnvObject *env;
+    /** MDB transaction object. */
+    MDB_txn *txn;
+    int buffers;
+    /** NULL if !TRANS_BUFFERS, or prior to any call to get(). */
+    BUFFER_TYPE *key_buf;
+};
+
 /*
  * Invalidation works by keeping a list of transactions attached to the
  * environment, which in turn have a list of cursors attached to the
@@ -279,6 +310,27 @@ struct lmdb_object {
  *
  * Iterators keep no significant state, so they are not tracked.
  */
+
+/** lmdb.Cursor */
+struct CursorObject {
+    LmdbObject_HEAD
+    /** Transaction cursor belongs to. */
+    TransObject *trans;
+    /** 1 if mdb_cursor_get() has been called and it last returned 0. */
+    int positioned;
+    /** MDB-level cursor object. */
+    MDB_cursor *curs;
+    /** NULL if trans->buffers==0, or prior to any fetch call. */
+    BUFFER_TYPE *key_buf;
+    /** NULL if trans->buffers==0, or prior to any fetch call. */
+    BUFFER_TYPE *val_buf;
+    /** NULL if trans->buffers==0, or prior to any item() call.*/
+    PyObject *item_tup;
+    /** mv_size==0 if positioned==0, otherwise points to current key. */
+    MDB_val key;
+    /** mv_size==0 if positioned==0, otherwise points to current value. */
+    MDB_val val;
+};
 
 /** lmdb.Iterator
  *
@@ -370,44 +422,6 @@ static void invalidate(struct lmdb_object *parent)
 }
 
 #define INVALIDATE(parent) invalidate((void *)parent);
-
-
-struct DbObject {
-    LmdbObject_HEAD
-    struct EnvObject *env; // Not refcounted.
-    MDB_dbi dbi;
-};
-
-struct EnvObject {
-    LmdbObject_HEAD
-    MDB_env *env;
-    DbObject *main_db;
-    int readonly; // If 1, transactions are always readonly.
-};
-
-struct TransObject {
-    LmdbObject_HEAD
-    EnvObject *env;
-
-    MDB_txn *txn;
-    int buffers;
-    BUFFER_TYPE *key_buf;
-};
-
-struct CursorObject {
-    LmdbObject_HEAD
-    TransObject *trans;
-
-    int positioned;
-    MDB_cursor *curs;
-    BUFFER_TYPE *key_buf;
-    BUFFER_TYPE *val_buf;
-    PyObject *item_tup;
-    MDB_val key;
-    MDB_val val;
-};
-
-
 
 
 // -------
