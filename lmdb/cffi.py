@@ -105,6 +105,7 @@ _ffi.cdef('''
     int mdb_env_open(MDB_env *env, const char *path, unsigned int flags,
                      mode_t mode);
     int mdb_env_copy(MDB_env *env, const char *path);
+    int mdb_env_copyfd(MDB_env *env, int fd);
     int mdb_env_stat(MDB_env *env, MDB_stat *stat);
     int mdb_env_info(MDB_env *env, MDB_envinfo *stat);
     int mdb_env_sync(MDB_env *env, int force);
@@ -499,6 +500,17 @@ class Environment(object):
         rc = mdb_env_copy(self._env, path)
         if rc:
             raise Error("mdb_env_copy", rc)
+
+    def copyfd(self, fd):
+        """Copy a consistent version of the environment to file descriptor
+        `fd`.
+
+        Equivalent to `mdb_env_copyfd()
+        <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
+        """
+        rc = mdb_env_copyfd(self._env, fd)
+        if rc:
+            raise Error("mdb_env_copyfd")
 
     def sync(self, force=False):
         """Flush the data buffers to disk.

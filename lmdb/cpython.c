@@ -72,6 +72,7 @@ enum string_id {
     DELETE_S,
     DUPDATA_S,
     DUPSORT_S,
+    FD_S,
     FORCE_S,
     ITEMS_S,
     ITERITEMS_S,
@@ -119,6 +120,7 @@ static const char *strings = (
     "delete\0"
     "dupdata\0"
     "dupsort\0"
+    "fd\0"
     "force\0"
     "items\0"
     "iteritems\0"
@@ -1311,6 +1313,31 @@ env_copy(EnvObject *self, PyObject *args)
 }
 
 static PyObject *
+env_copyfd(EnvObject *self, PyObject *args)
+{
+    struct env_copyfd {
+        int fd;
+    } arg = {-1};
+
+    static const struct argspec argspec[] = {
+        {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+        return NULL;
+    }
+    if(arg.fd == -1) {
+        return type_error("fd argument required");
+    }
+    int rc;
+    UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
+    if(rc) {
+        return err_set("mdb_env_copyfd", rc);
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 env_info(EnvObject *self)
 {
     static const struct dict_field fields[] = {
@@ -1838,6 +1865,7 @@ static struct PyMethodDef env_methods[] = {
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
     {"copy", (PyCFunction)env_copy, METH_VARARGS},
+    {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
