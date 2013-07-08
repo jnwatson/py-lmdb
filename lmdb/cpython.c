@@ -425,6 +425,12 @@ dict_from_fields(void *o, const struct dict_field *fields)
 }
 
 
+/**
+ * Given an MDB_val `val`, create a new buffer object to describe it, storing
+ * the result in `bufp`. If `*bufp` is not NULL, then it is assumed to already
+ * contain a buffer object. In that case simply update the existing object.
+ * Return the buffer object on success, or NULL on failure.
+ */
 static PyObject * NOINLINE
 buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
 {
@@ -443,6 +449,11 @@ buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
 }
 
 
+/**
+ * Given an MDB_val `val`, convert it to a Python string or bytes object,
+ * depending on the Python version. Returns a new reference to the object on
+ * sucess, or NULL on failure.
+ */
 static PyObject *
 string_from_val(MDB_val *val)
 {
@@ -450,6 +461,12 @@ string_from_val(MDB_val *val)
 }
 
 
+/**
+ * Given some Python object, try to get at its raw data. For string or bytes
+ * objects, this is the object value. For Unicode objects, this is the UTF-8
+ * representation of the object value. For all other objects, attempt to invoke
+ * the Python 2.x buffer protocol.
+ */
 static int NOINLINE
 val_from_buffer(MDB_val *val, PyObject *buf)
 {
@@ -480,7 +497,7 @@ val_from_buffer(MDB_val *val, PyObject *buf)
 // Concurrency control
 // -------------------
 
-static PyThreadState *save_thread(void)
+static NOINLINE PyThreadState *save_thread(void)
 {
     PyThreadState *s = NULL;
     if(drop_gil) {
@@ -489,7 +506,7 @@ static PyThreadState *save_thread(void)
     return s;
 }
 
-static void restore_thread(PyThreadState *state)
+static NOINLINE void restore_thread(PyThreadState *state)
 {
     if(drop_gil) {
         PyEval_RestoreThread(state);
@@ -508,7 +525,6 @@ static void restore_thread(PyThreadState *state)
     DROP_GIL \
     out = (e); \
     LOCK_GIL
-
 
 
 // ----------
@@ -537,9 +553,9 @@ type_error(const char *what)
 }
 
 
-/// ------------------------------
-// argument parsing
-//-------------------------------
+// ----------------
+// Argument parsing
+// ----------------
 
 #define OFFSET(k, y) offsetof(struct k, y)
 #define SPECSIZE() (sizeof(argspec) / sizeof(argspec[0]))
@@ -907,9 +923,10 @@ make_cursor(DbObject *db, TransObject *trans)
     return (PyObject *) self;
 }
 
-// ----------------------------
+
+// --------
 // Database
-// ----------------------------
+// --------
 
 static DbObject *
 db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
@@ -996,9 +1013,9 @@ PyTypeObject PyDatabase_Type = {
 };
 
 
-// -------------------------
-// Environment.
-// -------------------------
+// -----------
+// Environment
+// -----------
 
 static int
 env_clear(EnvObject *self)
