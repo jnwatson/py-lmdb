@@ -162,7 +162,17 @@ extern PyTypeObject PyTransaction_Type;
 extern PyTypeObject PyCursor_Type;
 extern PyTypeObject PyIterator_Type;
 
-struct EnvObject;
+/** Typedefs and forward declarations. */
+typedef struct CursorObject CursorObject;
+typedef struct DbObject DbObject;
+typedef struct EnvObject EnvObject;
+typedef struct IterObject IterObject;
+typedef struct TransObject TransObject;
+
+
+// --------------------------
+// Buffer object abuse macros
+// --------------------------
 
 #if PY_MAJOR_VERSION >= 3
 
@@ -270,6 +280,11 @@ struct lmdb_object {
  * Iterators keep no significant state, so they are not tracked.
  */
 
+
+/**
+ * Link `child` into `parent`'s list of dependent objects. Use LINK_CHILD()
+ * maro to avoid casting PyObject to lmdb_object.
+ */
 static void link_child(struct lmdb_object *parent, struct lmdb_object *child)
 {
     struct lmdb_object *sibling = parent->children.next;
@@ -280,6 +295,13 @@ static void link_child(struct lmdb_object *parent, struct lmdb_object *child)
     parent->children.next = child;
 }
 
+#define LINK_CHILD(parent, child) link_child((void *)parent, (void *)child);
+
+
+/**
+ * Remove `child` from `parent`'s list of dependent objects. Use UNLINK_CHILD
+ * macro to avoid casting PyObject to lmdb_object.
+ */
 static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
 {
     if(! parent) {
@@ -301,6 +323,24 @@ static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
     child->siblings.next = NULL;
 }
 
+#define UNLINK_CHILD(parent, child) unlink_child((void *)parent, (void *)child);
+
+
+/**
+ * Notify dependents of `parent` that `parent` is about to become invalid,
+ * and that they should free any dependent resources.
+ *
+ * To save effort, tp_clear is overloaded to be the invalidation function,
+ * instead of carrying a separate pointer. Objects are added to their parent's
+ * list during construction and removed during deallocation.
+ *
+ * When the environment is closed, it walks its list calling tp_clear on each
+ * child, which in turn walk their own lists. Child transactions are added to
+ * their parent transaction's list. Iterators keep no significant state, so
+ * they are not tracked.
+ *
+ * Use INVALIDATE() macro to avoid casting PyObject to lmdb_object.
+ */
 static void invalidate(struct lmdb_object *parent)
 {
     struct lmdb_object *child = parent->children.next;
@@ -312,12 +352,8 @@ static void invalidate(struct lmdb_object *parent)
     }
 }
 
-#define LINK_CHILD(parent, child) link_child((void *)parent, (void *)child);
-#define UNLINK_CHILD(parent, child) unlink_child((void *)parent, (void *)child);
 #define INVALIDATE(parent) invalidate((void *)parent);
 
-
-struct EnvObject;
 
 typedef struct {
     LmdbObject_HEAD
@@ -370,16 +406,30 @@ typedef struct {
 
 
 
-// ----------- helpers
-//
-//
-//
+// -------
+// Helpers
+// -------
 
-enum field_type { TYPE_EOF, TYPE_UINT, TYPE_SIZE, TYPE_ADDR };
+/** Describes the type of a struct field. */
+enum field_type {
+    /** Last field in set, stop converting. */
+    TYPE_EOF,
+    /** Unsigned 32bit integer. */
+    TYPE_UINT,
+    /** size_t */
+    TYPE_SIZE,
+    /** void pointer */
+    TYPE_ADDR
+};
 
+
+/** Describes a struct field. */
 struct dict_field {
+    /** Field type. */
     enum field_type type;
+    /** Field name in target dict. */
     const char *name;
+    /* Offset into structure where field is found. */
     int offset;
 };
 
