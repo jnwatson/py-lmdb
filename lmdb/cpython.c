@@ -1428,7 +1428,6 @@ env_get(EnvObject *self, PyObject *args, PyObject *kwds)
     return ret;
 }
 
-
 static PyObject *
 env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1773,7 +1772,7 @@ env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
     struct env_cursor {
         int buffers;
         DbObject *db;
-    } arg = { 0, self->main_db };
+    } arg = {0, self->main_db};
 
     static const struct argspec argspec[] = {
         {ARG_BOOL, BUFFERS_S, OFFSET(env_cursor, buffers)},
