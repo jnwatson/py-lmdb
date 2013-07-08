@@ -1288,15 +1288,26 @@ env_close(EnvObject *self)
 static PyObject *
 env_copy(EnvObject *self, PyObject *args)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
+    struct env_copy {
+        char *path;
+    } arg = {NULL};
 
-    PyObject *path;
-    if(! PyArg_ParseTuple(args, "|O:copy", &path)) {
+    static const struct argspec argspec[] = {
+        {ARG_STR, PATH_S, OFFSET(env_copy, path)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
-    return NULL;
+    if(! arg.path) {
+        return type_error("path argument required");
+    }
+    int rc;
+    UNLOCKED(rc, mdb_env_copy(self->env, arg.path));
+    if(rc) {
+        return err_set("mdb_env_copy", rc);
+    }
+    Py_RETURN_NONE;
 }
 
 static PyObject *
