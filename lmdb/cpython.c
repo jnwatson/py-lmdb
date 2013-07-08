@@ -300,25 +300,6 @@ struct TransObject {
     BUFFER_TYPE *key_buf;
 };
 
-/*
- * Invalidation works by keeping a list of transactions attached to the
- * environment, which in turn have a list of cursors attached to the
- * transaction. The pointers are at the same offset so a generic function is
- * used.
- *
- * To save effort, tp_clear is overloaded to be the object's invalidation
- * function, instead of carrying a separate pointer around. Objects are added
- * to their parent's list during construction and removed only during
- * deallocation.
- *
- * When the environment is closed, it walks its list calling tp_clear on each
- * child, which in turn walk their own lists.
- *
- * Child transactions are added to their parent transaction's list.
- *
- * Iterators keep no significant state, so they are not tracked.
- */
-
 /** lmdb.Cursor */
 struct CursorObject {
     LmdbObject_HEAD
