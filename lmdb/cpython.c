@@ -43,7 +43,14 @@
     "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, ## __VA_ARGS__);
 #endif
 
-#define NOINLINE __attribute__((noinline))
+// Inlining control for compatible compilers.
+#if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
+#   define NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#   define NOINLINE __declspec(noinline)
+#else
+#   define NOINLINE
+#endif
 
 
 static PyObject *Error;
