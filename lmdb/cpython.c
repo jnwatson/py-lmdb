@@ -281,6 +281,8 @@ struct DbObject {
 /** lmdb.Environment */
 struct EnvObject {
     LmdbObject_HEAD
+    /** Python-managed list of weakrefs to this object. */
+    PyObject *weaklist;
     /** MDB environment object. */
     MDB_env *env;
     /** DBI for main database, opened during Environment construction. */
@@ -1153,6 +1155,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
 
     OBJECT_INIT(self)
+    self->weaklist = NULL;
     self->main_db = NULL;
     self->env = NULL;
 
@@ -1872,6 +1875,7 @@ PyTypeObject PyEnvironment_Type = {
     .tp_methods = env_methods,
     .tp_name = "Environment",
     .tp_new = env_new,
+    .tp_weaklistoffset = offsetof(EnvObject, weaklist),
 };
 
 
