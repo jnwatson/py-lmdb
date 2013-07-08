@@ -1223,13 +1223,13 @@ static PyObject *
 env_info(EnvObject *self)
 {
     static const struct dict_field fields[] = {
-        { TYPE_ADDR, "map_addr",        offsetof(MDB_envinfo, me_mapaddr) },
-        { TYPE_SIZE, "map_size",        offsetof(MDB_envinfo, me_mapsize) },
-        { TYPE_SIZE, "last_pgno",       offsetof(MDB_envinfo, me_last_pgno) },
-        { TYPE_SIZE, "last_txnid",      offsetof(MDB_envinfo, me_last_txnid) },
-        { TYPE_UINT, "max_readers",     offsetof(MDB_envinfo, me_maxreaders) },
-        { TYPE_UINT, "num_readers",     offsetof(MDB_envinfo, me_numreaders) },
-        { TYPE_EOF, NULL, 0 }
+        {TYPE_ADDR, "map_addr",    offsetof(MDB_envinfo, me_mapaddr)},
+        {TYPE_SIZE, "map_size",    offsetof(MDB_envinfo, me_mapsize)},
+        {TYPE_SIZE, "last_pgno",   offsetof(MDB_envinfo, me_last_pgno)},
+        {TYPE_SIZE, "last_txnid",  offsetof(MDB_envinfo, me_last_txnid)},
+        {TYPE_UINT, "max_readers", offsetof(MDB_envinfo, me_maxreaders)},
+        {TYPE_UINT, "num_readers", offsetof(MDB_envinfo, me_numreaders)},
+        {TYPE_EOF, NULL, 0}
     };
 
     if(! self->valid) {
@@ -1306,13 +1306,13 @@ env_path(EnvObject *self)
 
 
 static const struct dict_field mdb_stat_fields[] = {
-    { TYPE_UINT, "psize",           offsetof(MDB_stat, ms_psize) },
-    { TYPE_UINT, "depth",           offsetof(MDB_stat, ms_depth) },
-    { TYPE_SIZE, "branch_pages",    offsetof(MDB_stat, ms_branch_pages) },
-    { TYPE_SIZE, "leaf_pages",      offsetof(MDB_stat, ms_leaf_pages) },
-    { TYPE_SIZE, "overflow_pages",  offsetof(MDB_stat, ms_overflow_pages) },
-    { TYPE_SIZE, "entries",         offsetof(MDB_stat, ms_entries) },
-    { TYPE_EOF, NULL, 0 }
+    {TYPE_UINT, "psize",          offsetof(MDB_stat, ms_psize)},
+    {TYPE_UINT, "depth",          offsetof(MDB_stat, ms_depth)},
+    {TYPE_SIZE, "branch_pages",   offsetof(MDB_stat, ms_branch_pages)},
+    {TYPE_SIZE, "leaf_pages",     offsetof(MDB_stat, ms_leaf_pages)},
+    {TYPE_SIZE, "overflow_pages", offsetof(MDB_stat, ms_overflow_pages)},
+    {TYPE_SIZE, "entries",        offsetof(MDB_stat, ms_entries)},
+    {TYPE_EOF, NULL, 0}
 };
 
 
@@ -1776,9 +1776,9 @@ PyTypeObject PyEnvironment_Type = {
 };
 
 
-// ==================================
-/// cursors
-// ==================================
+// -------
+// Cursors
+// -------
 
 static int
 cursor_clear(CursorObject *self)
@@ -2131,10 +2131,6 @@ cursor_value(CursorObject *self)
     return string_from_val(&self->val);
 }
 
-// ==================================
-// Cursor iteration
-// ==================================
-
 static PyObject *
 iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
                enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
@@ -2440,7 +2436,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
     struct trans_cursor {
         DbObject *db;
-    } arg = { 0 };
+    } arg = {0};
 
     static const struct argspec argspec[] = {
         {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
@@ -2470,7 +2466,7 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     struct trans_drop {
         DbObject *db;
         int delete;
-    } arg = { NULL, 1 };
+    } arg = {NULL, 1};
 
     static const struct argspec argspec[] = {
         {ARG_DB, DB_S, OFFSET(trans_drop, db)},
@@ -2533,7 +2529,7 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
 {
     struct trans_stat {
         DbObject *db;
-    } arg = { NULL };
+    } arg = {NULL};
 
     static const struct argspec argspec[] = {
         {ARG_DB, DB_S, OFFSET(trans_stat, db)}
