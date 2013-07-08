@@ -280,6 +280,23 @@ struct lmdb_object {
  * Iterators keep no significant state, so they are not tracked.
  */
 
+/** lmdb.Iterator
+ *
+ * This is separate from Cursor since we want to define Cursor.next() to mean
+ * MDB_NEXT, and a Python iterator's next() has different semantics.
+ */
+struct IterObject {
+    PyObject_HEAD
+    /** Cursor being iterated, or NULL for freelist iterator. */
+    CursorObject *curs;
+    /** 1 if iteration has started (Cursor should advance on next()). */
+    int started;
+    /** Operation used to advance cursor. */
+    MDB_cursor_op op;
+    /** Iterator value function, should be item(), key(), or value(). */
+    PyObject *(*val_func)(CursorObject *);
+};
+
 
 /**
  * Link `child` into `parent`'s list of dependent objects. Use LINK_CHILD()
@@ -355,29 +372,29 @@ static void invalidate(struct lmdb_object *parent)
 #define INVALIDATE(parent) invalidate((void *)parent);
 
 
-typedef struct {
+struct DbObject {
     LmdbObject_HEAD
     struct EnvObject *env; // Not refcounted.
     MDB_dbi dbi;
-} DbObject;
+};
 
-typedef struct EnvObject {
+struct EnvObject {
     LmdbObject_HEAD
     MDB_env *env;
     DbObject *main_db;
     int readonly; // If 1, transactions are always readonly.
-} EnvObject;
+};
 
-typedef struct {
+struct TransObject {
     LmdbObject_HEAD
     EnvObject *env;
 
     MDB_txn *txn;
     int buffers;
     BUFFER_TYPE *key_buf;
-} TransObject;
+};
 
-typedef struct {
+struct CursorObject {
     LmdbObject_HEAD
     TransObject *trans;
 
@@ -388,20 +405,7 @@ typedef struct {
     PyObject *item_tup;
     MDB_val key;
     MDB_val val;
-} CursorObject;
-
-
-// Iterator protocol requires 'next' public method, which we want to use for
-// MDB. So iterator needs to be a separate object to implement the protocol
-// correctly (option #2 was setting .tp_next but exposing MDB next(), which is
-// even worse).
-typedef struct {
-    PyObject_HEAD
-    CursorObject *curs;
-    int started;
-    int op;
-    PyObject *(*val_func)(CursorObject *);
-} IterObject;
+};
 
 
 
