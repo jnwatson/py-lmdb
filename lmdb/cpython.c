@@ -1481,21 +1481,13 @@ env_sync(EnvObject *self, PyObject *args)
 static PyObject *
 env_get(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 0, 0);
+    if(! trans) {
+        return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn));
-    if(rc) {
-        return err_set("mdb_txn_begin", rc);
-    }
-
-    PyObject *ret = generic_get(1, txn, self->main_db, 0, NULL, args, kwds);
-    DROP_GIL
-    mdb_txn_abort(txn);
-    LOCK_GIL
+    PyObject *ret = generic_get(1, trans->txn, self->main_db, 0, NULL, args, kwds);
+    Py_DECREF((PyObject *) trans);
     return ret;
 }
 
@@ -1531,13 +1523,11 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn));
-    if(rc) {
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 0, 0);
+    if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(dict);
-        return err_set("mdb_txn_begin", rc);
+        return NULL;
     }
 
     PyObject *key_obj;
@@ -1549,7 +1539,8 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
             break;
         }
 
-        UNLOCKED(rc, mdb_get(txn, arg.db->dbi, &key, &val));
+        int rc;
+        UNLOCKED(rc, mdb_get(trans->txn, arg.db->dbi, &key, &val));
         if(rc == 0) {
             PyObject *val_obj = string_from_val(&val);
             if(! val_obj) {
@@ -1567,9 +1558,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         Py_DECREF(key_obj);
     }
 
-    DROP_GIL
-    mdb_txn_abort(txn);
-    LOCK_GIL
+    Py_DECREF(trans);
     Py_DECREF(iter);
     Py_XDECREF(key_obj);
     if(PyErr_Occurred()) {
@@ -1578,34 +1567,44 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
     return dict;
 }
 
+
+static PyObject *trans_abort(TransObject *);
+static PyObject *trans_commit(TransObject *);
+
+static PyObject *
+generic_finish(TransObject *trans, PyObject *ret)
+{
+    if(PyErr_Occurred()) {
+        Py_CLEAR(ret);
+    }
+    PyObject *rett;
+    if(ret) {
+        rett = trans_commit(trans);
+    } else {
+        rett = trans_abort(trans);
+    }
+    Py_DECREF(trans);
+    if(! rett) {
+        Py_CLEAR(ret);
+        return NULL;
+    }
+    Py_DECREF(rett);
+    return ret;
+}
+
+
 static PyObject *
 env_put(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    if(! trans) {
+        return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
-    if(rc) {
-        return err_set("mdb_txn_begin", rc);
-    }
-
-    PyObject *ret = generic_put(1, txn, self->main_db, args, kwds);
-    if(ret) {
-        UNLOCKED(rc, mdb_txn_commit(txn));
-        if(rc) {
-            Py_DECREF(ret);
-            ret = err_set("mdb_txn_commit", rc);
-        }
-    } else {
-        DROP_GIL
-        mdb_txn_abort(txn);
-        LOCK_GIL
-    }
-    return ret;
+    PyObject *ret = generic_put(1, trans->txn, self->main_db, args, kwds);
+    return generic_finish(trans, ret);
 }
+
 
 static PyObject *
 env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
@@ -1651,13 +1650,11 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
-    if(rc) {
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(list);
-        return err_set("mdb_txn_begin", rc);
+        return NULL;
     }
 
     int flags = 0;
@@ -1691,7 +1688,8 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
             (int)key.mv_size, (char *)key.mv_data, (int)key.mv_size,
             (int)val.mv_size, (char *)val.mv_data, (int)val.mv_size)
-        UNLOCKED(rc, mdb_put(txn, arg.db->dbi, &key, &val, flags));
+        int rc;
+        UNLOCKED(rc, mdb_put(trans->txn, arg.db->dbi, &key, &val, flags));
         Py_DECREF(item);
 
         PyObject *res;
@@ -1711,50 +1709,19 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
 
     DEBUG("got this far; list size now %d", (int) PyList_GET_SIZE(list))
     Py_DECREF(iter);
-    if(PyErr_Occurred()) {
-        DEBUG("abort")
-        DROP_GIL
-        mdb_txn_abort(txn);
-        LOCK_GIL
-        Py_CLEAR(list);
-    } else {
-        DEBUG("commit")
-        UNLOCKED(rc, mdb_txn_commit(txn));
-        if(rc) {
-            err_set("mdb_txn_commit", rc);
-            Py_CLEAR(list);
-        }
-    }
-    return list;
+    return generic_finish(trans, list);
 }
 
 static PyObject *
 env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    if(! trans) {
+        return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
-    if(rc) {
-        return err_set("mdb_txn_begin", rc);
-    }
-
-    PyObject *ret = generic_delete(1, txn, self->main_db, args, kwds);
-    if(ret) {
-        UNLOCKED(rc, mdb_txn_commit(txn));
-        if(rc) {
-            Py_DECREF(ret);
-            ret = err_set("mdb_txn_commit", rc);
-        }
-    } else {
-        DROP_GIL
-        mdb_txn_abort(txn);
-        LOCK_GIL
-    }
-    return ret;
+    PyObject *ret = generic_delete(1, trans->txn, self->main_db, args, kwds);
+    return generic_finish(trans, ret);
 }
 
 static PyObject *
@@ -1789,11 +1756,9 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    MDB_txn *txn;
-    int rc;
-    UNLOCKED(rc, mdb_txn_begin(self->env, NULL, 0, &txn));
-    if(rc) {
-        return err_set("mdb_txn_begin", rc);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    if(! trans) {
+        return NULL;
     }
 
     PyObject *key_obj;
@@ -1803,7 +1768,8 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
             break;
         }
 
-        UNLOCKED(rc, mdb_del(txn, arg.db->dbi, &key, NULL));
+        int rc;
+        UNLOCKED(rc, mdb_del(trans->txn, arg.db->dbi, &key, NULL));
         Py_DECREF(key_obj);
 
         PyObject *res;
@@ -1819,20 +1785,7 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
             break;
         }
     }
-
-    if(PyErr_Occurred()) {
-        DROP_GIL
-        mdb_txn_abort(txn);
-        LOCK_GIL
-        Py_CLEAR(list);
-    } else {
-        UNLOCKED(rc, mdb_txn_commit(txn));
-        if(rc) {
-            Py_CLEAR(list);
-            err_set("mdb_txn_commit", rc);
-        }
-    }
-    return list;
+    return generic_finish(trans, list);
 }
 
 static PyObject *
