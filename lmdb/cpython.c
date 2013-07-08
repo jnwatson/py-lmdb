@@ -81,6 +81,9 @@ enum string_id {
     MAP_SIZE_S,
     MAX_DBS_S,
     MAX_READERS_S,
+    MAX_SPARE_CURSORS_S,
+    MAX_SPARE_ITERS_S,
+    MAX_SPARE_TXNS_S,
     METASYNC_S,
     MODE_S,
     NAME_S,
@@ -125,6 +128,9 @@ static const char *strings = (
     "map_size\0"
     "max_dbs\0"
     "max_readers\0"
+    "max_spare_cursors\0"
+    "max_spare_iters\0"
+    "max_spare_txns\0"
     "metasync\0"
     "mode\0"
     "name\0"
@@ -1127,7 +1133,10 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int writemap;
         int max_readers;
         int max_dbs;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 0, 126, 0};
+        ssize_t max_spare_txns;
+        ssize_t max_spare_cursors;
+        ssize_t max_spare_iters;
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 0, 126, 0, 1, 32, 32};
 
     static const struct argspec argspec[] = {
         {ARG_STR, PATH_S, OFFSET(env_new, path)},
@@ -1142,6 +1151,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, WRITEMAP_S, OFFSET(env_new, writemap)},
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
+        {ARG_SIZE, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
+        {ARG_SIZE, MAX_SPARE_CURSORS_S, OFFSET(env_new, max_spare_cursors)},
+        {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)}
     };
 
     if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
