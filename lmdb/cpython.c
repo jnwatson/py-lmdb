@@ -53,9 +53,16 @@
 #endif
 
 
-static PyObject *Error;
-static int drop_gil = 0;
-
+/**
+ * Integer indices into `string_tbl', representing an associated string. We
+ * use an enum of indices since they can be stored with 1 byte instead of 8
+ * bytes for a direct pointer, shaving a few KB data off all argspec arrays,
+ * and allowing indirect reference to a table of interned strings created
+ * during initialization, to avoid constructing and hashing temporary PyStrings
+ * to parse keyword arguments on every call.
+ *
+ * Must be in the same order as `strings' below.
+ */
 enum string_id {
     APPEND_S,
     BUFFERS_S,
@@ -95,6 +102,11 @@ enum string_id {
     STRING_ID_COUNT
 };
 
+/**
+ * NUL-separated array of strings corresponding to `string_ids`. Expanded into
+ * `string_tbl` PyObject* array representing interned strings during module
+ * init.
+ */
 static const char *strings = (
     "append\0"
     "buffers\0"
@@ -130,10 +142,19 @@ static const char *strings = (
     "write\0"
     "writemap\0"
 );
+
+/** Interned string array corresponding to `string_ids'. */
 static PyObject **string_tbl;
+/** PyLong representing integer 0. */
 static PyObject *py_zero;
+/** PyLong representing INT_MAX. */
 static PyObject *py_int_max;
+/** PyLong representing SIZE_MAX. */
 static PyObject *py_size_max;
+/** lmdb.Error type. */
+static PyObject *Error;
+/** If 1, save_thread() and restore_thread() drop GIL. */
+static int drop_gil = 0;
 
 extern PyTypeObject PyDatabase_Type;
 extern PyTypeObject PyEnvironment_Type;
