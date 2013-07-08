@@ -927,6 +927,9 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
 
     MDB_txn *parent_txn = NULL;
     if(parent) {
+        if(parent->flags & TRANS_RDONLY) {
+            return err_set("Read-only transactions cannot be nested.", 0);
+        }
         if(! parent->valid) {
             return err_invalid();
         }
