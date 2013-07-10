@@ -105,6 +105,7 @@ _ffi.cdef('''
     int mdb_env_open(MDB_env *env, const char *path, unsigned int flags,
                      mode_t mode);
     int mdb_env_copy(MDB_env *env, const char *path);
+    int mdb_env_copyfd(MDB_env *env, int fd);
     int mdb_env_stat(MDB_env *env, MDB_stat *stat);
     int mdb_env_info(MDB_env *env, MDB_envinfo *stat);
     int mdb_env_sync(MDB_env *env, int force);
@@ -500,6 +501,17 @@ class Environment(object):
         if rc:
             raise Error("mdb_env_copy", rc)
 
+    def copyfd(self, fd):
+        """Copy a consistent version of the environment to file descriptor
+        `fd`.
+
+        Equivalent to `mdb_env_copyfd()
+        <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
+        """
+        rc = mdb_env_copyfd(self._env, fd)
+        if rc:
+            raise Error("mdb_env_copyfd")
+
     def sync(self, force=False):
         """Flush the data buffers to disk.
 
@@ -595,9 +607,9 @@ class Environment(object):
     def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
             create=True):
         """
-        Open a database, returning an opaque handle. Repeat :py:meth:`open_db`
-        calls for the same name will return the same handle. As a special case,
-        the main database is always open.
+        Open a database, returning an opaque handle. Repeat
+        :py:meth:`Environment.open_db` calls for the same name will return the
+        same handle. As a special case, the main database is always open.
 
         Equivalent to `mdb_dbi_open()
         <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
@@ -655,9 +667,9 @@ class Environment(object):
         self._dbs[name] = weakref.ref(db)
         return db
 
-    def begin(self, **kwargs):
+    def begin(self, db=None, parent=None, write=False, buffers=False):
         """Shortcut for :py:class:`lmdb.Transaction`"""
-        return Transaction(self, **kwargs)
+        return Transaction(self, db, parent, write, buffers)
 
     def get(self, key, default=None, db=None):
         """Use a temporary read transaction to invoke
@@ -1029,7 +1041,7 @@ class Cursor(object):
             ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
             ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
 
-    Both :py:meth:`forward` and :py:meth:`reverse` accept `keys` and `values`
+    Both :py:meth:`iternext` and :py:meth:`iterprev` accept `keys` and `values`
     arguments. If both are ``True``, then the value of :py:meth:`item` is
     yielded on each iteration. If only `keys` is ``True``, :py:meth:`key` is
     yielded, otherwise only :py:meth:`value` is yielded.
@@ -1050,7 +1062,7 @@ class Cursor(object):
     inefficient code. In cases where the iteration order is not obvious, or is
     related to the data being read, use of :py:meth:`set_key`,
     :py:meth:`set_range`, :py:meth:`key`, :py:meth:`value`, and :py:meth:`item`
-    are often preferable:
+    may be preferable:
 
         ::
 
@@ -1245,7 +1257,7 @@ class Cursor(object):
         return default
 
     def set_range(self, key):
-        """Seek to the first key greater than or equal `key`, returning
+        """Seek to the first key greater than or equal to `key`, returning
         ``True`` on success, or ``False`` to indicate key was past end of
         database.
 
@@ -1290,7 +1302,7 @@ class Cursor(object):
 
     def put(self, key, val, dupdata=False, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
-        to indicate the key was already present and `override=False`. On
+        to indicate the key was already present and `overwrite=False`. On
         success, the cursor is positioned on the key.
 
         Equivalent to `mdb_cursor_put()

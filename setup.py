@@ -18,16 +18,29 @@
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
 
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import os
 import sys
 import platform
 
-from setuptools import setup, Extension
+from setuptools import setup
+from setuptools import Extension
 
 
-use_cpython = platform.python_implementation() == 'CPython'
+if hasattr(platform, 'python_implementation'):
+    use_cpython = platform.python_implementation() == 'CPython'
+else:
+    use_cpython = True
+
 if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
+
+if sys.version[:3] < '2.5':
+    print >> sys.stderr, 'Error: py-lmdb requires at least CPython 2.5'
+    raise SystemExit(1)
+
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
     use_cpython = False
 

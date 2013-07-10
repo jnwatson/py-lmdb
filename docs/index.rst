@@ -14,8 +14,8 @@ This is a Python wrapper for the `OpenLDAP MDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two versions are provided and automatically
 selected during installation: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ version that supports `PyPy
-<http://www.pypy.org/>`_ and all versions of CPython, and a custom module that
-supports CPython 2.6/2.7 and 3.3+.
+<http://www.pypy.org/>`_ and all versions of CPython >=2.6, and a custom module
+that supports CPython 2.5-2.7 and >=3.3.
 
 MDB is a tiny database with some excellent properties:
 
@@ -106,7 +106,7 @@ this reason databases are never closed automatically, you must do it
 explicitly.
 
 There is little reason to close a handle: open handles only consume slots in
-the shared environment and repeated calls to :py:meth:`Environment.open` for
+the shared environment and repeated calls to :py:meth:`Environment.open_db` for
 the same name return the same handle. Simply setting `max_dbs=` higher than the
 maximum number of handles required will alleviate any need to coordinate
 management amongst users.
