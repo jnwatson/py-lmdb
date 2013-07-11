@@ -628,9 +628,9 @@ type_error(const char *what)
 #define OFFSET(k, y) offsetof(struct k, y)
 #define SPECSIZE() (sizeof(argspec) / sizeof(argspec[0]))
 enum arg_type {
-    ARG_OBJ,
     ARG_DB,
     ARG_TRANS,
+    ARG_OBJ,
     ARG_BOOL,
     ARG_BUF,
     ARG_STR,
@@ -684,13 +684,14 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
 
     if(val != Py_None) {
         switch((enum arg_type) spec->type) {
-        case ARG_OBJ:
         case ARG_DB:
         case ARG_TRANS:
-            if(spec->type && val->ob_type != type_tbl[spec->type - 1]) {
+            if(val->ob_type != type_tbl[spec->type]) {
                 type_error("invalid type");
                 return -1;
             }
+            /** fallthrough */
+        case ARG_OBJ:
             *((PyObject **) dst) = val;
             break;
         case ARG_BOOL:
