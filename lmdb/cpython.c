@@ -649,7 +649,7 @@ static PyTypeObject *type_tbl[] = {
 };
 
 
-static int
+static int NOINLINE
 parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
 {
     int rc = PyObject_RichCompareBool(obj, py_zero, Py_GE);
@@ -708,16 +708,12 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
             break;
         }
         case ARG_INT:
-            if(parse_ulong(val, &l, py_int_max)) {
-                ret = -1;
-            } else {
+            if(! (ret = parse_ulong(val, &l, py_int_max))) {
                 *((int *) dst) = l;
             }
             break;
         case ARG_SIZE:
-            if(parse_ulong(val, &l, py_size_max)) {
-                ret = -1;
-            } else {
+            if(! (ret = parse_ulong(val, &l, py_size_max))) {
                 *((size_t *) dst) = l;
             }
             break;
