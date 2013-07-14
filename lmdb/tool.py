@@ -218,7 +218,7 @@ def restore_cursor_from_fp(cursor, fp):
             klen = int(read_until(','), 10)
             dlen = int(read_until(':'), 10)
         except ValueError, e:
-            self.die('bad or missing length, line/record #%d', rec_nr)
+            die('bad or missing length, line/record #%d', rec_nr)
 
         key = read(klen)
         if read(2) != '->':
