@@ -28,6 +28,11 @@ Basic tools for working with LMDB.
 
         The special db name ":main:" may be used to indicate the main DB.
 
+    rewrite: Re-create an environment using MDB_APPEND
+        %prog rewrite -e src.lmdb -E dst.lmdb [<db1> [<dbN> ..]]
+
+        If no databases are given, rewrites only the main database.
+
     shell: Open interactive console with ENV set to the open environment.
 """
 
@@ -200,7 +205,7 @@ def cmd_dump(opts, args):
                 dump_cursor_to_fp(cursor, fp)
 
 
-def restore_cursor_from_fp(cursor, fp):
+def restore_cursor_from_fp(txn, fp, db):
     read = fp.read
     read1 = functools.partial(read, 1)
     read_until = lambda sep: ''.join(iter(read1, sep))
@@ -233,7 +238,7 @@ def restore_cursor_from_fp(cursor, fp):
         if read(1) != '\n':
             die('bad line ending, line/record #%d', rec_nr)
 
-        cursor.put(key, data)
+        txn.put(key, data, db=db)
 
     return rec_nr
 
@@ -258,9 +263,32 @@ def cmd_restore(opts, args):
         for dbname, (db, path) in db_map.iteritems():
             with open(path, 'rb', BUF_SIZE) as fp:
                 print('Restoring from %r...' % (path,))
-                cursor = txn.cursor(db=db)
-                count = restore_cursor_from_fp(cursor, fp)
+                count = restore_cursor_from_fp(txn, fp, db)
                 print('Loaded %d keys from %r' % (count, path))
+
+
+def cmd_rewrite(opts, args):
+    if not opts.target_env:
+        die('Must specify target environment path with -E')
+
+    target_env = lmdb.open(opts.target_env, map_size=opts.map_size*1048576,
+                           max_dbs=opts.max_dbs)
+
+    dbs = []
+    for arg in args:
+        name = None if arg == ':main:' else arg
+        src_db = ENV.open_db(name)
+        dst_db = ENV.open_db(name)
+        dbs.append((arg, src_db, dst_db))
+
+    if not dbs:
+        dbs.append((':main:', ENV.open_db(None), target_env.open_db(None)))
+
+    for name, src_db, dst_db in dbs:
+        print('Writing %r...' % (name,))
+        with target_env.begin(db=dst_db, write=True) as wtxn:
+            for key, value in ENV.cursor(db=src_db, buffers=True):
+                wtxn.put(key, value, append=True)
 
 
 def cmd_get(opts, args):
