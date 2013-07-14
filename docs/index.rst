@@ -372,6 +372,11 @@ These functions are useful for use in e.g. backup cron jobs.
 
             The special db name ":main:" may be used to indicate the main DB.
 
+        rewrite: Re-create an environment using MDB_APPEND
+            python -mlmdb rewrite -e src.lmdb -E dst.lmdb [<db1> [<dbN> ..]]
+
+            If no databases are given, rewrites only the main database.
+
         shell: Open interactive console with ENV set to the open environment.
 
     Options:
