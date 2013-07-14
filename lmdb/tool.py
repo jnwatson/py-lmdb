@@ -2,14 +2,17 @@
 Basic tools for working with LMDB.
 
     dump: Dump one or more databases to disk in 'cdbmake' format.
-        Usage: dump [<db1> [<dbN> [..]]]
+        Usage: dump [db1=file1.cdbmake db2=file2.cdbmake]
 
-        If no databases are given, dumps the main database.
+        If no databases are given, dumps the main database to 'main.cdbmake'.
 
     restore: Read one or more database from disk in 'cdbmake' format.
-        %prog restore <-e ...>
+        %prog restore db1=file1.cdbmake db2=file2.cdbmake
+
+        The special db name ":main:" may be used to indicate the main DB.
 
     copy: Consistent high speed backup an environment.
+        %prog copy -e source.lmdb target.lmdb
 
     get: Read one or more values from a database.
         %prog get [<key1> [<keyN> [..]]]
@@ -18,10 +21,13 @@ Basic tools for working with LMDB.
         %prog edit --set key=value --set-file key=/path \\
                    --add key=value --add-file key=/path/to/file \\
                    --delete key
+
+    shell: Open interactive console with ENV set to the open environment.
 """
 
 from __future__ import absolute_import
 import contextlib
+import functools
 import optparse
 import string
 import sys
@@ -38,6 +44,7 @@ except ImportError:
 import lmdb
 
 
+BUF_SIZE = 10485760
 ENV = None
 DB = None
 
@@ -89,10 +96,12 @@ def make_parser():
     parser.add_option('-a', '--all', action='store_true',
                       help='Make "dump" dump all databases')
     parser.add_option('-T', '--txn_size', type='int', default=1000,
-                     help='Writes per transaction (default: 1000)')
+                      help='Writes per transaction (default: 1000)')
     parser.add_option('-E', '--target_env',
-                     help='Target environment file for "dumpfd"')
+                      help='Target environment file for "dumpfd"')
     parser.add_option('-x', '--xxd', help='Print values in xxd format')
+    parser.add_option('-M', '--max-dbs', type='int', default=128,
+                      help='Maximum open DBs (default: 128)')
 
     group = parser.add_option_group('Options for "edit" command')
     group.add_option('--set', action='append',
@@ -116,59 +125,109 @@ def die(fmt, *args):
     raise SystemExit(1)
 
 
-def cdbdump_cursor_to_fp(cursor, fp):
+def dump_cursor_to_fp(cursor, fp):
     for key, value in cursor:
         fp.write('+%d,%d:' % (len(key), len(value)))
         fp.write(key)
         fp.write('->')
         fp.write(value)
         fp.write('\n')
+    fp.write('\n')
+
+
+def db_map_from_args(args):
+    db_map = {}
+
+    for arg in args:
+        dbname, sep, path = arg.partition('=')
+        if not sep:
+            die('DB specification missing "=": %r', arg)
+
+        if dbname == ':main:':
+            dbname = None
+        if dbname in db_map:
+            die('DB specified twice: %r', arg)
+        db_map[dbname] = (ENV.open_db(dbname), path)
+
+    if not db_map:
+        db_map[':main:'] = (ENV.open_db(None), 'main.cdbmake')
+    return db_map
 
 
 def cmd_dump(opts, args):
-    args = args or [None]
-    dbs = dict((name, ENV.open_db(name)) for name in args)
-
+    db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
-        for arg in args:
-            path = '%s.cdbmake' % ((arg or 'main'),)
-            with file(path, 'w', 1048576) as fp:
+        for dbname, (db, path) in db_map.iteritems():
+            with file(path, 'wb', BUF_SIZE) as fp:
                 print 'Dumping to %r...' % (path,)
-                cursor = txn.cursor(db=dbs[arg])
-                cdbdump_cursor_to_fp(cursor, fp)
+                cursor = txn.cursor(db=db)
+                dump_cursor_to_fp(cursor, fp)
 
 
-def cmd_restore(opts, args):
-    read = self.stdin.read
+def restore_cursor_from_fp(cursor, fp):
+    read = fp.read
+    read1 = functools.partial(read, 1)
+    read_until = lambda sep: ''.join(iter(read1, sep))
+
     rec_nr = 0
 
     while True:
         rec_nr += 1
         plus = read(1)
         if plus == '\n':
-            return
+            break
         elif plus != '+':
-            self.die('bad or missing plus, line/record #%d', rec_nr)
+            die('bad or missing plus, line/record #%d', rec_nr)
 
         bad = False
         try:
-            klen = int(''.join(iter(partial(read, 1), ',')), 10)
-            dlen = int(''.join(iter(partial(read, 1), ':')), 10)
+            klen = int(read_until(','), 10)
+            dlen = int(read_until(':'), 10)
         except ValueError, e:
             self.die('bad or missing length, line/record #%d', rec_nr)
 
         key = read(klen)
         if read(2) != '->':
-            self.die('bad or missing separator, line/record #%d', rec_nr)
+            die('bad or missing separator, line/record #%d', rec_nr)
 
         data = read(dlen)
         if (len(key) + len(data)) != (klen + dlen):
-            self.die('short key or data, line/record #%d', rec_nr)
+            die('short key or data, line/record #%d', rec_nr)
 
         if read(1) != '\n':
-            self.die('bad line ending, line/record #%d', rec_nr)
+            die('bad line ending, line/record #%d', rec_nr)
 
-        self.writer.put(key, data)
+        cursor.put(key, data)
+
+    return rec_nr
+
+
+def cmd_restore(opts, args):
+    db_map = db_map_from_args(args)
+    with ENV.begin(buffers=True, write=True) as txn:
+        for dbname, (db, path) in db_map.iteritems():
+            with file(path, 'rb', BUF_SIZE) as fp:
+                print('Restoring from %r...' % (path,))
+                cursor = txn.cursor(db=db)
+                count = restore_cursor_from_fp(cursor, fp)
+                print('Loaded %d keys from %r' % (count, path))
+
+
+def cmd_get(opts, args):
+    print_header = len(args) > 1
+
+    with ENV.begin(buffers=True, db=DB) as txn:
+        for arg in args:
+            value = txn.get(arg)
+            if value is None:
+                print '%r: missing' % (arg,)
+                continue
+            if print_header:
+                print '%r:' % (arg,)
+            if opts.xxd:
+                xxd(value)
+            else:
+                print value
 
 
 def cmd_edit(opts, args):
@@ -186,6 +245,12 @@ def cmd_edit(opts, args):
             cursor.put(key, value)
 
 
+def cmd_shell(opts, args):
+    import code
+    import readline
+    code.InteractiveConsole(globals()).interact()
+
+
 
 def main():
     parser = make_parser()
@@ -197,7 +262,8 @@ def main():
         die('Please specify environment (--env)')
 
     global ENV
-    ENV = lmdb.open(opts.env, map_size=opts.map_size*1048576)
+    ENV = lmdb.open(opts.env, map_size=opts.map_size*1048576,
+                    max_dbs=opts.max_dbs)
 
     if opts.db:
         global DB

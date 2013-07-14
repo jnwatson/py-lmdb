@@ -44,6 +44,5 @@ __version__ = '0.66'
 
 # Hack to support Python v2.5 'python -mlmdb'
 if __name__ == '__main__':
-    import atexit
-    from lmdb import tool
-    atexit.register(tool.main)
+    import lmdb.tool
+    atexit.register(lmdb.tool.main)
