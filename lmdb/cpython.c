@@ -72,6 +72,7 @@ enum string_id {
     DELETE_S,
     DUPDATA_S,
     DUPSORT_S,
+    ENV_S,
     FD_S,
     FORCE_S,
     ITEMS_S,
@@ -120,6 +121,7 @@ static const char *strings = (
     "delete\0"
     "dupdata\0"
     "dupsort\0"
+    "env\0"
     "fd\0"
     "force\0"
     "items\0"
@@ -309,6 +311,8 @@ struct TransObject {
     int flags;
     /** NULL if !TRANS_BUFFERS, or prior to any call to get(). */
     BUFFER_TYPE *key_buf;
+    /** Default database if none specified. */
+    DbObject *db;
 };
 
 /** lmdb.Cursor */
@@ -630,6 +634,7 @@ type_error(const char *what)
 enum arg_type {
     ARG_DB,
     ARG_TRANS,
+    ARG_ENV,
     ARG_OBJ,
     ARG_BOOL,
     ARG_BUF,
@@ -646,6 +651,7 @@ struct argspec {
 static PyTypeObject *type_tbl[] = {
     &PyDatabase_Type,
     &PyTransaction_Type,
+    &PyEnvironment_Type
 };
 
 
@@ -686,6 +692,7 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
         switch((enum arg_type) spec->type) {
         case ARG_DB:
         case ARG_TRANS:
+        case ARG_ENV:
             if(val->ob_type != type_tbl[spec->type]) {
                 type_error("invalid type");
                 return -1;
@@ -914,12 +921,16 @@ generic_delete(int valid, MDB_txn *txn, DbObject *db,
 }
 
 static PyObject *
-make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
+make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buffers)
 {
     DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
         env, parent, write, buffers)
     if(! env->valid) {
         return err_invalid();
+    }
+
+    if(! db) {
+        db = env->main_db;
     }
 
     MDB_txn *parent_txn = NULL;
@@ -954,6 +965,8 @@ make_trans(EnvObject *env, TransObject *parent, int write, int buffers)
     LINK_CHILD(env, self)
     self->env = env;
     Py_INCREF(env);
+    self->db = db;
+    Py_INCREF(db);
     self->key_buf = NULL;
 
     self->flags = 0;
@@ -1255,21 +1268,23 @@ static PyObject *
 env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     struct env_begin {
-        int buffers;
-        int write;
+        DbObject *db;
         TransObject *parent;
-    } arg = {0, 0, NULL};
+        int write;
+        int buffers;
+    } arg = {self->main_db, NULL, 0, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
-        {ARG_BOOL, WRITE_S, OFFSET(env_begin, write)},
+        {ARG_DB, DB_S, OFFSET(env_begin, db)},
         {ARG_TRANS, PARENT_S, OFFSET(env_begin, parent)},
+        {ARG_BOOL, WRITE_S, OFFSET(env_begin, write)},
+        {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
-    return make_trans(self, arg.parent, arg.write, arg.buffers);
+    return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
 }
 
 static PyObject *
@@ -1478,7 +1493,7 @@ env_sync(EnvObject *self, PyObject *args)
 static PyObject *
 env_get(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 0, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 0, 0);
     if(! trans) {
         return NULL;
     }
@@ -1520,7 +1535,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 0, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 0, 0);
     if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(dict);
@@ -1593,7 +1608,7 @@ generic_finish(TransObject *trans, PyObject *ret)
 static PyObject *
 env_put(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
     if(! trans) {
         return NULL;
     }
@@ -1647,7 +1662,7 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
     if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(list);
@@ -1712,7 +1727,7 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
 {
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
     if(! trans) {
         return NULL;
     }
@@ -1753,7 +1768,7 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    TransObject *trans = (TransObject *) make_trans(self, NULL, 1, 0);
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
     if(! trans) {
         return NULL;
     }
@@ -1804,7 +1819,7 @@ env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    PyObject *trans = make_trans(self, NULL, 0, arg.buffers);
+    PyObject *trans = make_trans(self, NULL, NULL, 0, arg.buffers);
     if(! trans) {
         return NULL;
     }
@@ -2424,6 +2439,7 @@ trans_clear(TransObject *self)
             LOCK_GIL
             self->txn = NULL;
         }
+        Py_CLEAR(self->db);
         self->valid = 0;
     }
     UNLINK_CHILD(self->env, self)
@@ -2446,13 +2462,15 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     struct trans_new {
         EnvObject *env;
+        DbObject *db;
         TransObject *parent;
         int write;
         int buffers;
-    } arg = {NULL, NULL, 0, 0};
+    } arg = {NULL, NULL, NULL, 0, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_TRANS, TXN_S, OFFSET(trans_new, env)},
+        {ARG_ENV, ENV_S, OFFSET(trans_new, env)},
+        {ARG_DB, DB_S, OFFSET(trans_new, db)},
         {ARG_TRANS, PARENT_S, OFFSET(trans_new, parent)},
         {ARG_BOOL, WRITE_S, OFFSET(trans_new, write)},
         {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
@@ -2464,7 +2482,7 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
-    return make_trans(arg.env, arg.parent, arg.write, arg.buffers);
+    return make_trans(arg.env, arg.db, arg.parent, arg.write, arg.buffers);
 }
 
 
@@ -2508,7 +2526,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
     struct trans_cursor {
         DbObject *db;
-    } arg = {0};
+    } arg = {self->db};
 
     static const struct argspec argspec[] = {
         {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
@@ -2517,9 +2535,6 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
-    if(! arg.db) {
-        arg.db = self->env->main_db;
-    }
     return make_cursor(arg.db, self);
 }
 
@@ -2527,8 +2542,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    return generic_delete(self->valid, self->txn, self->env->main_db,
-                          args, kwds);
+    return generic_delete(self->valid, self->txn, self->db, args, kwds);
 }
 
 
@@ -2563,7 +2577,7 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    return generic_get(self->valid, self->txn, self->env->main_db,
+    return generic_get(self->valid, self->txn, self->db,
                        self->flags & TRANS_BUFFERS,
                        &self->key_buf, args, kwds);
 }
@@ -2571,8 +2585,7 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 {
-    return generic_put(self->valid, self->txn, self->env->main_db,
-                       args, kwds);
+    return generic_put(self->valid, self->txn, self->db, args, kwds);
 }
 
 static PyObject *trans_enter(TransObject *self)
@@ -2602,7 +2615,7 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
 {
     struct trans_stat {
         DbObject *db;
-    } arg = {NULL};
+    } arg = {self->db};
 
     static const struct argspec argspec[] = {
         {ARG_DB, DB_S, OFFSET(trans_stat, db)}
@@ -2610,9 +2623,6 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
-    }
-    if(! arg.db) {
-        return type_error("'db' argument required.");
     }
 
     MDB_stat st;
