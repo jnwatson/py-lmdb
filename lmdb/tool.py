@@ -312,7 +312,6 @@ def cmd_shell(opts, args):
     code.InteractiveConsole(globals()).interact()
 
 
-
 def main():
     parser = make_parser()
     opts, args = parser.parse_args()
