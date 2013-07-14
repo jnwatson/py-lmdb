@@ -58,7 +58,7 @@ def isprint(c):
 def xxd(s):
     """Return a vaguely /usr/bin/xxd formatted representation of the bytestring
     `s`."""
-    sio = StringIO.StringIO()
+    sio = StringIO()
     for idx, ch in enumerate(s):
         if not (idx % 16):
             if idx:
@@ -99,7 +99,8 @@ def make_parser():
                       help='Writes per transaction (default: 1000)')
     parser.add_option('-E', '--target_env',
                       help='Target environment file for "dumpfd"')
-    parser.add_option('-x', '--xxd', help='Print values in xxd format')
+    parser.add_option('-x', '--xxd', action='store_true',
+                      help='Print values in xxd format')
     parser.add_option('-M', '--max-dbs', type='int', default=128,
                       help='Maximum open DBs (default: 128)')
 
@@ -225,7 +226,7 @@ def cmd_get(opts, args):
             if print_header:
                 print '%r:' % (arg,)
             if opts.xxd:
-                xxd(value)
+                print xxd(value)
             else:
                 print value
 
