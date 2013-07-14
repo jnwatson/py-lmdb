@@ -11,6 +11,9 @@ Basic tools for working with LMDB.
 
         The special db name ":main:" may be used to indicate the main DB.
 
+    drop: Delete one or more sub-databases.
+        %prog drop db1
+
     copy: Consistent high speed backup an environment.
         %prog copy -e source.lmdb target.lmdb
 
@@ -29,6 +32,7 @@ from __future__ import absolute_import
 import contextlib
 import functools
 import optparse
+import os
 import string
 import sys
 
@@ -155,12 +159,26 @@ def db_map_from_args(args):
     return db_map
 
 
+def cmd_copy(opts, args):
+    if len(args) != 1:
+        die('Please specify output directory (see --help)')
+
+    output_dir = args[0]
+    if os.path.exists(output_dir):
+        die('Output directory %r already exists.', output_dir)
+
+    os.makedirs(output_dir, 0755)
+    path = os.path.join(output_dir, 'data.mdb')
+    print('Running copy to %r....' % (path,))
+    ENV.copy(output_dir)
+
+
 def cmd_dump(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
         for dbname, (db, path) in db_map.iteritems():
             with file(path, 'wb', BUF_SIZE) as fp:
-                print 'Dumping to %r...' % (path,)
+                print('Dumping to %r...' % (path,))
                 cursor = txn.cursor(db=db)
                 dump_cursor_to_fp(cursor, fp)
 
@@ -203,6 +221,20 @@ def restore_cursor_from_fp(cursor, fp):
     return rec_nr
 
 
+def cmd_drop(opts, args):
+    if not args:
+        die('Must specify at least one sub-database (see --help)')
+
+    dbs = map(ENV.open_db, args)
+    for idx, db in enumerate(dbs):
+        name = args[idx]
+        if name == ':main:':
+            die('Cannot drop main DB')
+        print('Dropping DB %r...' % (name,))
+        with ENV.begin(write=True) as txn:
+            txn.drop(db)
+
+
 def cmd_restore(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True, write=True) as txn:
@@ -221,14 +253,14 @@ def cmd_get(opts, args):
         for arg in args:
             value = txn.get(arg)
             if value is None:
-                print '%r: missing' % (arg,)
+                print('%r: missing' % (arg,))
                 continue
             if print_header:
-                print '%r:' % (arg,)
+                print('%r:' % (arg,))
             if opts.xxd:
-                print xxd(value)
+                print(xxd(value))
             else:
-                print value
+                print(value)
 
 
 def cmd_edit(opts, args):
