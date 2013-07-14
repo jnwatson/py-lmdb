@@ -336,7 +336,7 @@ Command line tools
 ++++++++++++++++++
 
 A rudimentary interface to most of the binding's functionality is provided.
-These functions are useful for use in e.g. backup cron jobs.
+These functions are useful for e.g. backup jobs.
 
 ::
 
