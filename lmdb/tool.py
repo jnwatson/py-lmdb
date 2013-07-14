@@ -177,7 +177,7 @@ def cmd_dump(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
         for dbname, (db, path) in db_map.iteritems():
-            with file(path, 'wb', BUF_SIZE) as fp:
+            with open(path, 'wb', BUF_SIZE) as fp:
                 print('Dumping to %r...' % (path,))
                 cursor = txn.cursor(db=db)
                 dump_cursor_to_fp(cursor, fp)
@@ -239,7 +239,7 @@ def cmd_restore(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True, write=True) as txn:
         for dbname, (db, path) in db_map.iteritems():
-            with file(path, 'rb', BUF_SIZE) as fp:
+            with open(path, 'rb', BUF_SIZE) as fp:
                 print('Restoring from %r...' % (path,))
                 cursor = txn.cursor(db=db)
                 count = restore_cursor_from_fp(cursor, fp)
@@ -276,6 +276,19 @@ def cmd_edit(opts, args):
         for elem in opts.set or []:
             key, _, value = elem.partition('=')
             cursor.put(key, value)
+
+        for key in opts.delete or []:
+            cursor.delete(key)
+
+        for elem in opts.add_file or []:
+            key, _, path = elem.partition('=')
+            with open(path, 'rb') as fp:
+                cursor.put(key, fp.read(), overwrite=False)
+
+        for elem in opts.set_file or []:
+            key, _, path = elem.partition('=')
+            with open(path, 'rb') as fp:
+                cursor.put(key, fp.read())
 
 
 def cmd_shell(opts, args):
