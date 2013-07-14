@@ -510,7 +510,7 @@ class Environment(object):
         """
         rc = mdb_env_copyfd(self._env, fd)
         if rc:
-            raise Error("mdb_env_copyfd")
+            raise Error("mdb_env_copyfd", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.

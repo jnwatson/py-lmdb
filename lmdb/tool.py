@@ -1,29 +1,32 @@
 """
 Basic tools for working with LMDB.
 
+    copy: Consistent high speed backup an environment.
+        %prog copy -e source.lmdb target.lmdb
+
+    copyfd: Consistent high speed backup an environment to stdout.
+        %prog copyfd -e source.lmdb > target.lmdb/data.mdb
+
+    drop: Delete one or more sub-databases.
+        %prog drop db1
+
     dump: Dump one or more databases to disk in 'cdbmake' format.
         Usage: dump [db1=file1.cdbmake db2=file2.cdbmake]
 
         If no databases are given, dumps the main database to 'main.cdbmake'.
 
-    restore: Read one or more database from disk in 'cdbmake' format.
-        %prog restore db1=file1.cdbmake db2=file2.cdbmake
-
-        The special db name ":main:" may be used to indicate the main DB.
-
-    drop: Delete one or more sub-databases.
-        %prog drop db1
-
-    copy: Consistent high speed backup an environment.
-        %prog copy -e source.lmdb target.lmdb
-
-    get: Read one or more values from a database.
-        %prog get [<key1> [<keyN> [..]]]
-
     edit: Add/delete/replace values from a database.
         %prog edit --set key=value --set-file key=/path \\
                    --add key=value --add-file key=/path/to/file \\
                    --delete key
+
+    get: Read one or more values from a database.
+        %prog get [<key1> [<keyN> [..]]]
+
+    restore: Read one or more database from disk in 'cdbmake' format.
+        %prog restore db1=file1.cdbmake db2=file2.cdbmake
+
+        The special db name ":main:" may be used to indicate the main DB.
 
     shell: Open interactive console with ENV set to the open environment.
 """
@@ -90,7 +93,7 @@ def xxd(s):
 
 def make_parser():
     parser = optparse.OptionParser()
-    parser.prog = 'python -mlmdb.tool'
+    parser.prog = 'python -mlmdb'
     parser.usage = '%prog [options] <command>\n' + __doc__.rstrip()
     parser.add_option('-e', '--env', help='Environment file to open')
     parser.add_option('-d', '--db', help='Database to open (default: main)')
@@ -107,7 +110,8 @@ def make_parser():
                       help='Print values in xxd format')
     parser.add_option('-M', '--max-dbs', type='int', default=128,
                       help='Maximum open DBs (default: 128)')
-
+    parser.add_option('--out-fd', type='int', default=1,
+                      help='"copyfd" command target fd')
     group = parser.add_option_group('Options for "edit" command')
     group.add_option('--set', action='append',
                      help='List of key=value pairs to set.')
@@ -168,9 +172,20 @@ def cmd_copy(opts, args):
         die('Output directory %r already exists.', output_dir)
 
     os.makedirs(output_dir, 0755)
-    path = os.path.join(output_dir, 'data.mdb')
-    print('Running copy to %r....' % (path,))
+    print('Running copy to %r....' % (output_dir,))
     ENV.copy(output_dir)
+
+
+def cmd_copyfd(opts, args):
+    if args:
+        die('"copyfd" command takes no arguments (see --help)')
+
+    try:
+        fp = os.fdopen(opts.out_fd, 'w', 0)
+    except OSError, e:
+        die('Bad --out-fd %d: %s', opts.out_fd, e)
+
+    ENV.copyfd(opts.out_fd)
 
 
 def cmd_dump(opts, args):

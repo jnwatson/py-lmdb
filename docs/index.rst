@@ -330,3 +330,73 @@ Threading control
 #################
 
 .. autofunction:: lmdb.enable_drop_gil
+
+
+Command line tools
+++++++++++++++++++
+
+A rudimentary interface to most of the binding's functionality is provided.
+These functions are useful for use in e.g. backup cron jobs.
+
+::
+
+    $ python -mlmdb --help
+    Usage: python -mlmdb [options] <command>
+
+    Basic tools for working with LMDB.
+
+        copy: Consistent high speed backup an environment.
+            python -mlmdb copy -e source.lmdb target.lmdb
+
+        copyfd: Consistent high speed backup an environment to stdout.
+            python -mlmdb copyfd -e source.lmdb > target.lmdb/data.mdb
+
+        drop: Delete one or more sub-databases.
+            python -mlmdb drop db1
+
+        dump: Dump one or more databases to disk in 'cdbmake' format.
+            Usage: dump [db1=file1.cdbmake db2=file2.cdbmake]
+
+            If no databases are given, dumps the main database to 'main.cdbmake'.
+
+        edit: Add/delete/replace values from a database.
+            python -mlmdb edit --set key=value --set-file key=/path \
+                       --add key=value --add-file key=/path/to/file \
+                       --delete key
+
+        get: Read one or more values from a database.
+            python -mlmdb get [<key1> [<keyN> [..]]]
+
+        restore: Read one or more database from disk in 'cdbmake' format.
+            python -mlmdb restore db1=file1.cdbmake db2=file2.cdbmake
+
+            The special db name ":main:" may be used to indicate the main DB.
+
+        shell: Open interactive console with ENV set to the open environment.
+
+    Options:
+      -h, --help            show this help message and exit
+      -e ENV, --env=ENV     Environment file to open
+      -d DB, --db=DB        Database to open (default: main)
+      -r READ, --read=READ  Open environment read-only
+      -S MAP_SIZE, --map_size=MAP_SIZE
+                            Map size in megabytes (default: 10)
+      -a, --all             Make "dump" dump all databases
+      -T TXN_SIZE, --txn_size=TXN_SIZE
+                            Writes per transaction (default: 1000)
+      -E TARGET_ENV, --target_env=TARGET_ENV
+                            Target environment file for "dumpfd"
+      -x, --xxd             Print values in xxd format
+      -M MAX_DBS, --max-dbs=MAX_DBS
+                            Maximum open DBs (default: 128)
+      --out-fd=OUT_FD       "copyfd" command target fd
+
+      Options for "edit" command:
+        --set=SET           List of key=value pairs to set.
+        --set-file=SET_FILE
+                            List of key pairs to read from files.
+        --add=ADD           List of key=value pairs to add.
+        --add-file=ADD_FILE
+                            List of key pairs to read from files.
+        --delete=DELETE     List of key=value pairs to delete.
+
