@@ -32,6 +32,7 @@ Basic tools for working with LMDB.
 """
 
 from __future__ import absolute_import
+from __future__ import with_statement
 import contextlib
 import functools
 import optparse
@@ -171,7 +172,7 @@ def cmd_copy(opts, args):
     if os.path.exists(output_dir):
         die('Output directory %r already exists.', output_dir)
 
-    os.makedirs(output_dir, 0755)
+    os.makedirs(output_dir, int('0755', 8))
     print('Running copy to %r....' % (output_dir,))
     ENV.copy(output_dir)
 
@@ -182,7 +183,8 @@ def cmd_copyfd(opts, args):
 
     try:
         fp = os.fdopen(opts.out_fd, 'w', 0)
-    except OSError, e:
+    except OSError:
+        e = sys.exc_info()[1]
         die('Bad --out-fd %d: %s', opts.out_fd, e)
 
     ENV.copyfd(opts.out_fd)
@@ -217,7 +219,7 @@ def restore_cursor_from_fp(cursor, fp):
         try:
             klen = int(read_until(','), 10)
             dlen = int(read_until(':'), 10)
-        except ValueError, e:
+        except ValueError:
             die('bad or missing length, line/record #%d', rec_nr)
 
         key = read(klen)
