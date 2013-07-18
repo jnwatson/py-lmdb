@@ -29,6 +29,7 @@ from __future__ import absolute_import
 import os
 import shutil
 import tempfile
+import threading
 import warnings
 import weakref
 
@@ -36,6 +37,9 @@ import cffi
 
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
            'enable_drop_gil']
+
+# Used to track context across cffi callbcks.
+_callbacks = threading.local()
 
 _ffi = cffi.FFI()
 _ffi.cdef('''
@@ -131,6 +135,10 @@ _ffi.cdef('''
     int mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
     int mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
     int mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val*data, int op);
+
+    typedef int (MDB_msg_func)(const char *msg, void *ctx);
+    int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
+    int mdb_reader_check(MDB_env *env, int *dead);
 
     #define EINVAL ...
     #define MDB_APPEND ...
@@ -317,6 +325,13 @@ def enable_drop_gil():
 
     *Caution:* this function should be invoked before any threads are created.
     """
+
+@_ffi.callback("int(char *, void *)")
+def _msg_func(s, _):
+    """mdb_msg_func() callback. Appends `s` to _callbacks.msg_func list.
+    """
+    _callbacks.msg_func.append(_ffi.string(s))
+    return 0
 
 
 class Environment(object):
@@ -603,6 +618,29 @@ class Environment(object):
             "max_readers": info.me_maxreaders,
             "num_readers": info.me_numreaders
         }
+
+    def readers(self):
+        """Return a list of newline-terminated human readable strings
+        describing the current state of the reader lock table.
+        """
+        _callbacks.msg_func = []
+        try:
+            rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
+            if rc:
+                raise Error("mdb_reader_list", rc)
+            return _callbacks.msg_func
+        finally:
+            del _callbacks.msg_func
+
+    def check_readers(self):
+        """Search the reader lock table for stale entries, for example due to a
+        crashed process. Returns the number of stale entries that were cleared.
+        """
+        reaped = _ffi.new('int[]', 1)
+        rc = mdb_reader_check(self._env, reaped)
+        if rc:
+            raise Error('mdb_reader_check', rc)
+        return reaped[0]
 
     def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
             create=True):
