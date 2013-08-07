@@ -2159,7 +2159,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     if(! arg.overwrite) {
         flags |= MDB_NOOVERWRITE;
     }
-    if(! arg.append) {
+    if(arg.append) {
         flags |= MDB_APPEND;
     }
 
