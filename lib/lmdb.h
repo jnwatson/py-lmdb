@@ -138,6 +138,7 @@
 extern "C" {
 #endif
 
+/** Unix permissions for creating files, or dummy definition for Windows */
 #ifdef _MSC_VER
 typedef	int	mdb_mode_t;
 #else
@@ -386,7 +387,11 @@ typedef enum MDB_cursor_op {
 #define MDB_INCOMPATIBLE	(-30784)
 	/** Invalid reuse of reader locktable slot */
 #define MDB_BAD_RSLOT		(-30783)
-#define MDB_LAST_ERRCODE	MDB_BAD_RSLOT
+	/** Transaction cannot recover - it must be aborted */
+#define MDB_BAD_TXN			(-30782)
+	/** Too big key/data, key is empty, or wrong DUPFIXED size */
+#define MDB_BAD_VALSIZE		(-30781)
+#define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
 /** @} */
 
 /** @brief Statistics for a database in the environment */
@@ -534,6 +539,10 @@ int  mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t
 	/** @brief Copy an MDB environment to the specified path.
 	 *
 	 * This function may be used to make a backup of an existing environment.
+	 * No lockfile is created, since it gets recreated at need.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
 	 * @param[in] env An environment handle returned by #mdb_env_create(). It
 	 * must have already been opened successfully.
 	 * @param[in] path The directory in which the copy will reside. This
@@ -546,6 +555,10 @@ int  mdb_env_copy(MDB_env *env, const char *path);
 	/** @brief Copy an MDB environment to the specified file descriptor.
 	 *
 	 * This function may be used to make a backup of an existing environment.
+	 * No lockfile is created, since it gets recreated at need.
+	 * @note This call can trigger significant file size growth if run in
+	 * parallel with write transactions, because it employs a read-only
+	 * transaction. See long-lived transactions under @ref caveats_sec.
 	 * @param[in] env An environment handle returned by #mdb_env_create(). It
 	 * must have already been opened successfully.
 	 * @param[in] fd The filedescriptor to write the copy to. It must
@@ -707,6 +720,13 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 */
 int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 
+	/** @brief Get the maximum size of a key for the environment.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @return The maximum size of a key. (#MDB_MAXKEYSIZE)
+	 */
+int  mdb_env_get_maxkeysize(MDB_env *env);
+
 	/** @brief Create a transaction for use with the environment.
 	 *
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().
@@ -718,8 +738,8 @@ int  mdb_env_set_maxdbs(MDB_env *env, MDB_dbi dbs);
 	 * @param[in] parent If this parameter is non-NULL, the new transaction
 	 * will be a nested transaction, with the transaction indicated by \b parent
 	 * as its parent. Transactions may be nested to any level. A parent
-	 * transaction may not issue any other operations besides mdb_txn_begin,
-	 * mdb_txn_abort, or mdb_txn_commit while it has active child transactions.
+	 * transaction and its cursors may not issue any other operations than
+	 * mdb_txn_commit and mdb_txn_abort while it has active child transactions.
 	 * @param[in] flags Special options for this transaction. This parameter
 	 * must be set to 0 or by bitwise OR'ing together one or more of the
 	 * values described here.
@@ -909,14 +929,12 @@ int mdb_dbi_flags(MDB_env *env, MDB_dbi dbi, unsigned int *flags);
 	 */
 void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
 
-	/** @brief Delete a database and/or free all its pages.
+	/** @brief Empty or delete+close a database.
 	 *
-	 * If the \b del parameter is 1, the DB handle will be closed
-	 * and the DB will be deleted.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
-	 * @param[in] del 1 to delete the DB from the environment,
-	 * 0 to just free its pages.
+	 * @param[in] del 0 to empty the DB, 1 to delete it from the
+	 * environment and close the DB handle.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del);
