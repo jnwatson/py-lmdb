@@ -2476,11 +2476,11 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
     };
 
-    if(! arg.env) {
-        return type_error("'env' argument required");
-    }
     if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
+    }
+    if(! arg.env) {
+        return type_error("'env' argument required");
     }
     return make_trans(arg.env, arg.db, arg.parent, arg.write, arg.buffers);
 }
