@@ -40,7 +40,7 @@ except ImportError:
 del os
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
            'enable_drop_gil']
-__version__ = '0.66'
+__version__ = '0.67'
 
 # Hack to support Python v2.5 'python -mlmdb'
 if __name__ == '__main__':
