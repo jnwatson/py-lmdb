@@ -25,8 +25,8 @@ import os
 import sys
 import platform
 
-from setuptools import setup
 from setuptools import Extension
+from setuptools import setup
 
 
 if hasattr(platform, 'python_implementation'):
