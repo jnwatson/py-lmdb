@@ -158,6 +158,41 @@ def x():
 
     print
     print
+    print '--- MDB_WRITEMAP + one cursor mode ---'
+    print
+
+    env.close()
+    if os.path.exists(dbpath):
+        shutil.rmtree(dbpath)
+    env = lmdb.open(dbpath, map_size=1048576 * 1024, writemap=True)
+
+
+    getword = iter(sorted(words)).next
+    run = True
+    t0 = now()
+    last = t0
+    while run:
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            try:
+                for _ in xrange(50000):
+                    word = getword()
+                    curs.put(word, big or word, append=True)
+            except StopIteration:
+                run = False
+
+        t1 = now()
+        if (t1 - last) > 2:
+            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+            last = t1
+
+    t1 = now()
+    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+    last = t1
+
+
+    print
+    print
     print '--- MDB_APPEND mode ---'
     print
 
