@@ -1,71 +1,78 @@
 
 # Roughly approximates some of Symas microbenchmark.
 
-from time import time, sleep
-import affinity
+import multiprocessing
+import os
 import random
 import shutil
-import os
 import sys
+import time
 
-import multiprocessing
+import affinity
 import lmdb
 
 
-val = ' ' * 100
-max_keys = int(4e6)
-
-t0 = time()
-
-urandom = file('/dev/urandom', 'rb', 1048576).read
-'''
-keys = set()
-while len(keys) < max_keys:
-    for _ in xrange(min(1000, max_keys - len(keys))):
-        keys.add(urandom(16))
-
-print 'make %d keys in %.2fsec' % (len(keys), time() - t0)
-keys = list(keys)
+USE_SPARSE_FILES = sys.platform != 'darwin'
+DB_PATH = '/ram/dbtest'
+MAX_KEYS = int(4e6)
 
 
-if os.path.exists('/tmp/dbtest'):
-    shutil.rmtree('/tmp/dbtest')
-'''
-env = lmdb.open('/tmp/dbtest', map_size=1048576 * 1024
-    #, metasync=False, sync=False, map_async=True)
-)
-'''
-print len(keys)
-exit()
+def open_env():
+    return lmdb.open(DB_PATH,
+        map_size=1048576 * 1024,
+        metasync=False,
+        sync=False,
+        map_async=True,
+        writemap=USE_SPARSE_FILES)
 
-nextkey = iter(keys).next
-run = True
-while run:
-    with env.begin(write=True) as txn:
-        try:
-            for _ in xrange(10000):
-                txn.put(nextkey(), val)
-        except StopIteration:
-            run = False
 
-d = time() - t0
-env.sync(True)
-print 'insert %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys) / d)
+def make_keys():
+    t0 = time.time()
+    urandom = file('/dev/urandom', 'rb', 1048576).read
 
-'''
+    keys = set()
+    while len(keys) < MAX_KEYS:
+        for _ in xrange(min(1000, MAX_KEYS - len(keys))):
+            keys.add(urandom(16))
 
-keys = list(env.cursor().iternext(values=False))
+    print 'make %d keys in %.2fsec' % (len(keys), time.time() - t0)
+    keys = list(keys)
+
+    nextkey = iter(keys).next
+    run = True
+    val = ' ' * 100
+    env = open_env()
+    while run:
+        with env.begin(write=True) as txn:
+            try:
+                for _ in xrange(10000):
+                    txn.put(nextkey(), val)
+            except StopIteration:
+                run = False
+
+    d = time.time() - t0
+    env.sync(True)
+    env.close()
+    print 'insert %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys) / d)
+
+
+if 'drop' in sys.argv and os.path.exists(DB_PATH):
+    shutil.rmtree(DB_PATH)
+
+if not os.path.exists(DB_PATH):
+    make_keys()
+
+
+env = open_env()
+with env.begin() as txn:
+    keys = list(txn.cursor().iternext(values=False))
 env.close()
 
-
-import os
 
 def run(idx):
     affinity.set_process_affinity_mask(os.getpid(), 1 << idx)
 
-    env = lmdb.open('/ram/dbtest', map_size=1048576 * 1024,
-        metasync=False, sync=False, map_async=True)
-
+    env = open_env()
     k = list(keys)
     random.shuffle(k)
     k = k[:1000]
@@ -80,30 +87,20 @@ def run(idx):
                 pass
             arr[idx] += len(k)
 
-        samp = random.sample(keys, int(len(k) / 10))
-        with env.begin(write=True) as txn:
-            for sk in samp:
-                txn.put(sk, sk+sk)
-        arrw[idx] += len(samp)
-
 
 
 nproc = int(sys.argv[1])
 arr = multiprocessing.Array('L', xrange(nproc))
-arrw = multiprocessing.Array('L', xrange(nproc))
 for x in xrange(nproc):
     arr[x] = 0
-    arrw[x] = 0
 procs = [multiprocessing.Process(target=run, args=(x,)) for x in xrange(nproc)]
 [p.start() for p in procs]
 
 
-t0 = time()
+t0 = time.time()
 while True:
-    sleep(2)
-    d = time() - t0
+    time.sleep(2)
+    d = time.time() - t0
     lk = sum(arr)
-    lkw = sum(arrw)
-    print 'lookup %d keys insert %d keys in %.2fsec (%d/%d/%d/sec)' %\
-        (lk, lkw, d, lk / d, lkw / d, (lk+lkw) / d)
+    print 'lookup %d keys in %.2fsec (%d/sec)' % (lk, d, lk / d)
 
