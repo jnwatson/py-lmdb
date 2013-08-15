@@ -271,8 +271,11 @@ def cmd_rewrite(opts, args):
     if not opts.target_env:
         die('Must specify target environment path with -E')
 
-    target_env = lmdb.open(opts.target_env, map_size=opts.map_size*1048576,
-                           max_dbs=opts.max_dbs)
+    src_info = ENV.info()
+    target_env = lmdb.open(opts.target_env,
+                           map_size=src_info['map_size'] * 2,
+                           max_dbs=opts.max_dbs,
+                           writemap=True)
 
     dbs = []
     for arg in args:
