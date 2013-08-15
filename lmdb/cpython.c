@@ -2064,6 +2064,9 @@ cursor_item(CursorObject *self)
         if(! self->item_tup) {
             self->item_tup = PyTuple_Pack(2, self->key_buf, self->val_buf);
         }
+        if(! self->item_tup) {
+            return NULL;
+        }
         Py_INCREF(self->item_tup);
         return self->item_tup;
     }
@@ -2077,12 +2080,14 @@ cursor_item(CursorObject *self)
         Py_DECREF(key);
         return NULL;
     }
-    PyObject *tup = PyTuple_Pack(2, key, val);
+    PyObject *tup = PyTuple_New(2);
     if(! tup) {
         Py_DECREF(key);
         Py_DECREF(val);
         return NULL;
     }
+    PyTuple_SET_ITEM(tup, 0, key);
+    PyTuple_SET_ITEM(tup, 1, val);
     return tup;
 }
 
