@@ -1395,5 +1395,5 @@ class Cursor(object):
             return self.iterprev()
         else:
             if not found:
-                return ()
+                return iter(())
             return self.iternext()
