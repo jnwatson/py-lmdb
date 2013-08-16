@@ -161,6 +161,8 @@ static PyObject *py_zero;
 static PyObject *py_int_max;
 /** PyLong representing SIZE_MAX. */
 static PyObject *py_size_max;
+/** PyObject containing a threading._local (to avoid OS specific APIs). */
+static PyObject *callback_tls;
 /** lmdb.Error type. */
 static PyObject *Error;
 /** If 1, save_thread() and restore_thread() drop GIL. */
@@ -2666,15 +2668,6 @@ PyTypeObject PyTransaction_Type = {
 };
 
 
-static int add_type(PyObject *mod, PyTypeObject *type)
-{
-    if(PyType_Ready(type)) {
-        return -1;
-    }
-    return PyObject_SetAttrString(mod, type->tp_name, (PyObject *)type);
-}
-
-
 static PyObject *
 enable_drop_gil(void)
 {
@@ -2704,6 +2697,100 @@ static struct PyModuleDef moduledef = {
 #endif
 
 
+/**
+ * Initialize and publish the LMDB built-in types.
+ */
+static int init_types(PyObject *mod)
+{
+    static PyTypeObject *types[] = {
+        &PyEnvironment_Type,
+        &PyCursor_Type,
+        &PyTransaction_Type,
+        &PyIterator_Type,
+        &PyDatabase_Type,
+        NULL
+    };
+
+    int i;
+    for(i = 0; types[i]; i++) {
+        PyTypeObject *type = types[i];
+        if(PyType_Ready(type)) {
+            return -1;
+        }
+        if(PyObject_SetAttrString(mod, type->tp_name, (PyObject *)type)) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
+/**
+ * Produce `string_tbl' array of PyObjects from `strings'.
+ */
+static int init_strings(PyObject *mod)
+{
+    string_tbl = malloc(sizeof(PyObject *) * STRING_ID_COUNT);
+    if(! string_tbl) {
+        return -1;
+    }
+
+    const char *cur = strings;
+    int i;
+    for(i = 0; i < STRING_ID_COUNT; i++) {
+        if(! ((string_tbl[i] = PyUnicode_InternFromString(cur)))) {
+            return -1;
+        }
+        cur += PyString_GET_SIZE(string_tbl[i]) + 1;
+    }
+    return 0;
+}
+
+
+/**
+ * Initialize a bunch of constants used to ease number compares.
+ */
+static int init_constants(PyObject *mod)
+{
+    if(! ((py_zero = PyLong_FromUnsignedLongLong(0)))) {
+        return -1;
+    }
+    if(! ((py_int_max = PyLong_FromUnsignedLongLong(INT_MAX)))) {
+        return -1;
+    }
+    if(! ((py_size_max = PyLong_FromUnsignedLongLong(SIZE_MAX)))) {
+        return -1;
+    }
+    return 0;
+}
+
+
+/**
+ * Initialize the threading._local used to store callback context. This is done
+ * to avoid depending on pthreads or ifdef soup to support windows.
+ */
+static int init_tls(PyObject *mod)
+{
+    PyObject *threading = PyImport_ImportModule("threading");
+    if(! threading) {
+        return -1;
+    }
+
+    PyObject *local = PyObject_GetAttrString(threading, "local");
+    Py_DECREF(threading);
+    if(! local) {
+        return -1;
+    }
+
+    callback_tls = PyObject_CallFunction(local, "");
+    Py_DECREF(local);
+    if(! callback_tls) {
+        return -1;
+    }
+    return 0;
+}
+
+
 PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
@@ -2716,41 +2803,16 @@ MODINIT_NAME(void)
         MOD_RETURN(NULL);
     }
 
-    static PyTypeObject *types[] = {
-        &PyEnvironment_Type,
-        &PyCursor_Type,
-        &PyTransaction_Type,
-        &PyIterator_Type,
-        &PyDatabase_Type,
-        NULL
-    };
-    int i;
-    for(i = 0; types[i]; i++) {
-        if(add_type(mod, types[i])) {
-            MOD_RETURN(NULL);
-        }
-    }
-
-    string_tbl = malloc(sizeof(PyObject *) * STRING_ID_COUNT);
-    if(! string_tbl) {
+    if(init_types(mod)) {
         MOD_RETURN(NULL);
     }
-
-    const char *cur = strings;
-    for(i = 0; i < STRING_ID_COUNT; i++) {
-        if(! ((string_tbl[i] = PyUnicode_InternFromString(cur)))) {
-            MOD_RETURN(NULL);
-        }
-        cur += strlen(cur) + 1;
-    }
-
-    if(! ((py_zero = PyLong_FromUnsignedLongLong(0)))) {
+    if(init_strings(mod)) {
         MOD_RETURN(NULL);
     }
-    if(! ((py_int_max = PyLong_FromUnsignedLongLong(INT_MAX)))) {
+    if(init_constants(mod)) {
         MOD_RETURN(NULL);
     }
-    if(! ((py_size_max = PyLong_FromUnsignedLongLong(SIZE_MAX)))) {
+    if(init_tls(mod)) {
         MOD_RETURN(NULL);
     }
 
