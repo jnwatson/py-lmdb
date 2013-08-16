@@ -1486,21 +1486,16 @@ env_stat(EnvObject *self)
     return dict_from_fields(&st, mdb_stat_fields);
 }
 
-struct env_readers_state
+static int env_readers_callback(const char *msg, void *str_)
 {
-    PyObject *str;
-};
-
-static int env_readers_callback(const char *msg, void *state_)
-{
-    struct env_readers_state *state = state_;
-    int old_size = PyString_GET_SIZE(state->str);
+    PyObject **str = str_;
+    int old_size = PyString_GET_SIZE(*str);
     int chunk_size = strlen(msg);
 
-    if(_PyString_Resize(&state->str, old_size + chunk_size)) {
+    if(_PyString_Resize(str, old_size + chunk_size)) {
         return -1;
     }
-    memcpy(PyString_AS_STRING(state->str) + old_size, msg, chunk_size);
+    memcpy(PyString_AS_STRING(*str) + old_size, msg, chunk_size);
     return 0;
 }
 
@@ -1511,17 +1506,15 @@ env_readers(EnvObject *self)
         return err_invalid();
     }
 
-    struct env_readers_state state;
-    state.str = PyString_FromStringAndSize(NULL, 20);
-    if(! state.str) {
+    PyObject *str = PyString_FromStringAndSize(NULL, 20);
+    if(! str) {
         return NULL;
     }
 
-    DEBUG("we love lol %ld", (long)state.str);
-    if(mdb_reader_list(self->env, env_readers_callback, &state)) {
-        Py_CLEAR(state.str);
+    if(mdb_reader_list(self->env, env_readers_callback, &str)) {
+        Py_CLEAR(str);
     }
-    return state.str;
+    return str;
 }
 
 static PyObject *
