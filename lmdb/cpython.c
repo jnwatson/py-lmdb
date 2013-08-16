@@ -161,8 +161,6 @@ static PyObject *py_zero;
 static PyObject *py_int_max;
 /** PyLong representing SIZE_MAX. */
 static PyObject *py_size_max;
-/** PyObject containing a threading._local (to avoid OS specific APIs). */
-static PyObject *callback_tls;
 /** lmdb.Error type. */
 static PyObject *Error;
 /** If 1, save_thread() and restore_thread() drop GIL. */
@@ -922,6 +920,30 @@ generic_delete(int valid, MDB_txn *txn, DbObject *db,
     Py_RETURN_TRUE;
 }
 
+static PyObject *trans_abort(TransObject *);
+static PyObject *trans_commit(TransObject *);
+
+static PyObject *
+generic_finish(TransObject *trans, PyObject *ret)
+{
+    if(PyErr_Occurred()) {
+        Py_CLEAR(ret);
+    }
+    PyObject *rett;
+    if(ret) {
+        rett = trans_commit(trans);
+    } else {
+        rett = trans_abort(trans);
+    }
+    Py_DECREF(trans);
+    if(! rett) {
+        Py_CLEAR(ret);
+        return NULL;
+    }
+    Py_DECREF(rett);
+    return ret;
+}
+
 static PyObject *
 make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buffers)
 {
@@ -1381,7 +1403,6 @@ env_info(EnvObject *self)
     return dict_from_fields(&info, fields);
 }
 
-
 static PyObject *
 env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1423,7 +1444,6 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 }
 
-
 static PyObject *
 env_path(EnvObject *self)
 {
@@ -1439,7 +1459,6 @@ env_path(EnvObject *self)
     return PyUnicode_FromString(path);
 }
 
-
 static const struct dict_field mdb_stat_fields[] = {
     {TYPE_UINT, "psize",          offsetof(MDB_stat, ms_psize)},
     {TYPE_UINT, "depth",          offsetof(MDB_stat, ms_depth)},
@@ -1449,7 +1468,6 @@ static const struct dict_field mdb_stat_fields[] = {
     {TYPE_SIZE, "entries",        offsetof(MDB_stat, ms_entries)},
     {TYPE_EOF, NULL, 0}
 };
-
 
 static PyObject *
 env_stat(EnvObject *self)
@@ -1468,6 +1486,58 @@ env_stat(EnvObject *self)
     return dict_from_fields(&st, mdb_stat_fields);
 }
 
+struct env_readers_state
+{
+    PyObject *str;
+};
+
+static int env_readers_callback(const char *msg, void *state_)
+{
+    struct env_readers_state *state = state_;
+    int old_size = PyString_GET_SIZE(state->str);
+    int chunk_size = strlen(msg);
+
+    if(_PyString_Resize(&state->str, old_size + chunk_size)) {
+        return -1;
+    }
+    memcpy(PyString_AS_STRING(state->str) + old_size, msg, chunk_size);
+    return 0;
+}
+
+static PyObject *
+env_readers(EnvObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    struct env_readers_state state;
+    state.str = PyString_FromStringAndSize(NULL, 20);
+    if(! state.str) {
+        return NULL;
+    }
+
+    DEBUG("we love lol %ld", (long)state.str);
+    if(mdb_reader_list(self->env, env_readers_callback, &state)) {
+        Py_CLEAR(state.str);
+    }
+    return state.str;
+}
+
+static PyObject *
+env_reader_check(EnvObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    int dead;
+    int rc = mdb_reader_check(self->env, &dead);
+    if(rc) {
+        return err_set("mdb_reader_check", rc);
+    }
+    return PyInt_FromLong(dead);
+}
 
 static PyObject *
 env_sync(EnvObject *self, PyObject *args)
@@ -1581,32 +1651,6 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
     return dict;
 }
 
-
-static PyObject *trans_abort(TransObject *);
-static PyObject *trans_commit(TransObject *);
-
-static PyObject *
-generic_finish(TransObject *trans, PyObject *ret)
-{
-    if(PyErr_Occurred()) {
-        Py_CLEAR(ret);
-    }
-    PyObject *rett;
-    if(ret) {
-        rett = trans_commit(trans);
-    } else {
-        rett = trans_abort(trans);
-    }
-    Py_DECREF(trans);
-    if(! rett) {
-        Py_CLEAR(ret);
-        return NULL;
-    }
-    Py_DECREF(rett);
-    return ret;
-}
-
-
 static PyObject *
 env_put(EnvObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1618,7 +1662,6 @@ env_put(EnvObject *self, PyObject *args, PyObject *kwds)
     PyObject *ret = generic_put(1, trans->txn, self->main_db, args, kwds);
     return generic_finish(trans, ret);
 }
-
 
 static PyObject *
 env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
@@ -1840,6 +1883,8 @@ static struct PyMethodDef env_methods[] = {
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
+    {"readers", (PyCFunction)env_readers, METH_NOARGS},
+    {"reader_check", (PyCFunction)env_reader_check, METH_NOARGS},
     {"sync", (PyCFunction)env_sync, METH_VARARGS},
     {"get", (PyCFunction)env_get, METH_VARARGS|METH_KEYWORDS},
     {"gets", (PyCFunction)env_gets, METH_VARARGS|METH_KEYWORDS},
@@ -2765,32 +2810,6 @@ static int init_constants(PyObject *mod)
 }
 
 
-/**
- * Initialize the threading._local used to store callback context. This is done
- * to avoid depending on pthreads or ifdef soup to support windows.
- */
-static int init_tls(PyObject *mod)
-{
-    PyObject *threading = PyImport_ImportModule("threading");
-    if(! threading) {
-        return -1;
-    }
-
-    PyObject *local = PyObject_GetAttrString(threading, "local");
-    Py_DECREF(threading);
-    if(! local) {
-        return -1;
-    }
-
-    callback_tls = PyObject_CallFunction(local, "");
-    Py_DECREF(local);
-    if(! callback_tls) {
-        return -1;
-    }
-    return 0;
-}
-
-
 PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
@@ -2810,9 +2829,6 @@ MODINIT_NAME(void)
         MOD_RETURN(NULL);
     }
     if(init_constants(mod)) {
-        MOD_RETURN(NULL);
-    }
-    if(init_tls(mod)) {
         MOD_RETURN(NULL);
     }
 

@@ -632,7 +632,7 @@ class Environment(object):
         finally:
             del _callbacks.msg_func
 
-    def check_readers(self):
+    def reader_check(self):
         """Search the reader lock table for stale entries, for example due to a
         crashed process. Returns the number of stale entries that were cleared.
         """
