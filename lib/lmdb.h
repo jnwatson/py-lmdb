@@ -383,7 +383,7 @@ typedef enum MDB_cursor_op {
 #define MDB_PAGE_FULL	(-30786)
 	/** Database contents grew beyond environment mapsize */
 #define MDB_MAP_RESIZED	(-30785)
-	/** Database flags changed or would change */
+	/** MDB_INCOMPATIBLE: Operation and DB incompatible, or DB flags changed */
 #define MDB_INCOMPATIBLE	(-30784)
 	/** Invalid reuse of reader locktable slot */
 #define MDB_BAD_RSLOT		(-30783)
@@ -761,6 +761,12 @@ int  mdb_env_get_maxkeysize(MDB_env *env);
 	 * </ul>
 	 */
 int  mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags, MDB_txn **txn);
+
+	/** @brief Returns the transaction's #MDB_env
+	 *
+	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
+	 */
+MDB_env *mdb_txn_env(MDB_txn *txn);
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
