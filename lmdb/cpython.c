@@ -166,13 +166,13 @@ static PyObject *Error;
 /** If 1, save_thread() and restore_thread() drop GIL. */
 static int drop_gil = 0;
 
-extern PyTypeObject PyDatabase_Type;
-extern PyTypeObject PyEnvironment_Type;
-extern PyTypeObject PyTransaction_Type;
-extern PyTypeObject PyCursor_Type;
-extern PyTypeObject PyIterator_Type;
-
 /** Typedefs and forward declarations. */
+static PyTypeObject PyDatabase_Type;
+static PyTypeObject PyEnvironment_Type;
+static PyTypeObject PyTransaction_Type;
+static PyTypeObject PyCursor_Type;
+static PyTypeObject PyIterator_Type;
+
 typedef struct CursorObject CursorObject;
 typedef struct DbObject DbObject;
 typedef struct EnvObject EnvObject;
@@ -1115,7 +1115,7 @@ db_dealloc(DbObject *self)
     PyObject_Del(self);
 }
 
-PyTypeObject PyDatabase_Type = {
+static PyTypeObject PyDatabase_Type = {
     PyObject_HEAD_INIT(NULL)
     .tp_basicsize = sizeof(DbObject),
     .tp_dealloc = (destructor) db_dealloc,
@@ -1890,7 +1890,7 @@ static struct PyMethodDef env_methods[] = {
 };
 
 
-PyTypeObject PyEnvironment_Type = {
+static PyTypeObject PyEnvironment_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(EnvObject),
     .tp_dealloc = (destructor) env_dealloc,
@@ -2396,7 +2396,7 @@ static struct PyMethodDef cursor_methods[] = {
     {NULL, NULL}
 };
 
-PyTypeObject PyCursor_Type = {
+static PyTypeObject PyCursor_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(CursorObject),
     .tp_dealloc = (destructor) cursor_dealloc,
@@ -2456,7 +2456,7 @@ static struct PyMethodDef iter_methods[] = {
     {NULL, NULL}
 };
 
-PyTypeObject PyIterator_Type = {
+static PyTypeObject PyIterator_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(IterObject),
     .tp_dealloc = (destructor) iter_dealloc,
@@ -2694,7 +2694,7 @@ static struct PyMethodDef trans_methods[] = {
     {NULL, NULL}
 };
 
-PyTypeObject PyTransaction_Type = {
+static PyTypeObject PyTransaction_Type = {
     PyObject_HEAD_INIT(0)
     .tp_basicsize = sizeof(TransObject),
     .tp_dealloc = (destructor) trans_dealloc,
