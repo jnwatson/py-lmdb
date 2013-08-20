@@ -34,6 +34,8 @@ Basic tools for working with LMDB.
         If no databases are given, rewrites only the main database.
 
     shell: Open interactive console with ENV set to the open environment.
+
+    stat: Print environment statistics.
 """
 
 from __future__ import absolute_import
@@ -42,6 +44,7 @@ import contextlib
 import functools
 import optparse
 import os
+import pprint
 import string
 import sys
 
@@ -343,6 +346,10 @@ def cmd_shell(opts, args):
     import code
     import readline
     code.InteractiveConsole(globals()).interact()
+
+
+def cmd_stat(opts, args):
+    pprint.pprint(ENV.stat())
 
 
 def main():
