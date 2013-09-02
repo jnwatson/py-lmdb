@@ -281,11 +281,11 @@ def cmd_warm(opts, args):
     last_offset = stat['psize'] * info['last_pgno']
     buf = array.array('c', '\x00' * 1048576)
     t0 = time.time()
-    fp = file(opts.env + '/data.mdb', 'rb', 1048576)
+    fp = open(opts.env + '/data.mdb', 'rb', 1048576)
     while fp.tell() < last_offset:
         fp.readinto(buf)
-    print 'Warmed %.2fmb in %dms' %\
-        (last_offset / 1048576., 1000 * (time.time() - t0))
+    print('Warmed %.2fmb in %dms' %
+        (last_offset / 1048576., 1000 * (time.time() - t0)))
 
 
 def cmd_rewrite(opts, args):
