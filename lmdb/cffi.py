@@ -394,6 +394,12 @@ class Environment(object):
             database. Requires operating system support. Please refer to
             documentation.
 
+        'map_async':
+             When ``writemap=True``, use asynchronous flushes to disk. As with
+             ``sync=False``, a system crash can then corrupt the database or
+             lose the last transactions. Calling :py:meth:`sync` ensures
+             on-disk database integrity until next commit.
+
         `max_readers`:
             Maximum number of simultaneous read transactions. Can only be set
             by the first process to open an environment, as it affects the size
