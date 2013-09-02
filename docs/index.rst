@@ -379,6 +379,8 @@ These functions are useful for e.g. backup jobs.
 
         shell: Open interactive console with ENV set to the open environment.
 
+        warm: Read environment into page cache sequentially.
+
     Options:
       -h, --help            show this help message and exit
       -e ENV, --env=ENV     Environment file to open
