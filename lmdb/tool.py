@@ -36,16 +36,20 @@ Basic tools for working with LMDB.
     shell: Open interactive console with ENV set to the open environment.
 
     stat: Print environment statistics.
+
+    warm: Read environment into page cache sequentially.
 """
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import array
 import contextlib
 import functools
 import optparse
 import os
 import pprint
 import string
+import time
 import sys
 
 # Python3.x bikeshedded trechery.
@@ -270,6 +274,20 @@ def cmd_restore(opts, args):
                 print('Loaded %d keys from %r' % (count, path))
 
 
+def cmd_warm(opts, args):
+    stat = ENV.stat()
+    info = ENV.info()
+
+    last_offset = stat['psize'] * info['last_pgno']
+    buf = array.array('c', '\x00' * 1048576)
+    t0 = time.time()
+    fp = file(opts.env + '/data.mdb', 'rb', 1048576)
+    while fp.tell() < last_offset:
+        fp.readinto(buf)
+    print 'Warmed %.2fmb in %dms' %\
+        (last_offset / 1048576., 1000 * (time.time() - t0))
+
+
 def cmd_rewrite(opts, args):
     if not opts.target_env:
         die('Must specify target environment path with -E')
@@ -350,6 +368,7 @@ def cmd_shell(opts, args):
 
 def cmd_stat(opts, args):
     pprint.pprint(ENV.stat())
+    pprint.pprint(ENV.info())
 
 
 def main():
