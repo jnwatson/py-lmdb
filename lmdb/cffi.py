@@ -476,6 +476,9 @@ class Environment(object):
         if writemap:
             flags |= MDB_WRITEMAP
 
+        if isinstance(path, type(u'')):
+            path = path.encode(sys.getfilesystemencoding())
+
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
             raise Error(path, rc)
