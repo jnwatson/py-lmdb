@@ -2842,6 +2842,7 @@ MODINIT_NAME(void)
     }
 
 #ifdef HAVE_MEMSINK
+    MemSink_IMPORT;
     if(ms_init_source(&PyTransaction_Type, offsetof(TransObject, sink_head))) {
         MOD_RETURN(NULL);
     }
