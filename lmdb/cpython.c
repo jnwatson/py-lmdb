@@ -20,6 +20,8 @@
  * <http://www.openldap.org/>.
  */
 
+#define PY_SSIZE_T_CLEAN
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
