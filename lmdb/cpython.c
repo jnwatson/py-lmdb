@@ -30,6 +30,10 @@
 #include "Python.h"
 #include "structmember.h"
 
+#ifdef HAVE_MEMSINK
+#include "memsink.h"
+#endif
+
 #include "lmdb.h"
 
 
@@ -305,6 +309,10 @@ enum trans_flags {
 struct TransObject {
     LmdbObject_HEAD
     EnvObject *env;
+#ifdef HAVE_MEMSINK
+    /** Copy-in-invalid list head. */
+    PyObject *sink_head;
+#endif
     /** MDB transaction object. */
     MDB_txn *txn;
     /** Bitfield of trans_flags values. */
@@ -991,6 +999,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
     Py_INCREF(env);
     self->db = db;
     Py_INCREF(db);
+#ifdef HAVE_MEMSINK
+    self->sink_head = NULL;
+#endif
     self->key_buf = NULL;
 
     self->flags = 0;
@@ -2477,6 +2488,9 @@ trans_clear(TransObject *self)
 {
     if(self->valid) {
         INVALIDATE(self)
+#ifdef HAVE_MEMSINK
+        ms_notify((PyObject *) self, &self->sink_head);
+#endif
         if(self->txn) {
             DEBUG("aborting")
             DROP_GIL
@@ -2539,6 +2553,9 @@ trans_abort(TransObject *self)
     }
     DEBUG("aborting")
     INVALIDATE(self)
+#ifdef HAVE_MEMSINK
+    ms_notify((PyObject *) self, &self->sink_head);
+#endif
     DROP_GIL
     mdb_txn_abort(self->txn);
     LOCK_GIL
@@ -2555,6 +2572,9 @@ trans_commit(TransObject *self)
     }
     DEBUG("committing")
     INVALIDATE(self)
+#ifdef HAVE_MEMSINK
+    ms_notify((PyObject *) self, &self->sink_head);
+#endif
     int rc;
     UNLOCKED(rc, mdb_txn_commit(self->txn));
     self->txn = NULL;
@@ -2818,6 +2838,13 @@ MODINIT_NAME(void)
     if(init_types(mod)) {
         MOD_RETURN(NULL);
     }
+
+#ifdef HAVE_MEMSINK
+    if(ms_init_source(&PyTransaction_Type, offsetof(TransObject, sink_head))) {
+        MOD_RETURN(NULL);
+    }
+#endif
+
     if(init_strings(mod)) {
         MOD_RETURN(NULL);
     }
