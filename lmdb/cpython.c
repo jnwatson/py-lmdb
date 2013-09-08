@@ -312,7 +312,7 @@ struct TransObject {
     LmdbObject_HEAD
     EnvObject *env;
 #ifdef HAVE_MEMSINK
-    /** Copy-in-invalid list head. */
+    /** Copy-on-invalid list head. */
     PyObject *sink_head;
 #endif
     /** MDB transaction object. */
