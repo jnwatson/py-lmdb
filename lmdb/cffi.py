@@ -19,7 +19,7 @@
 # <http://www.openldap.org/>.
 
 """
-cffi wrapper for OpenLDAP's "Lightning" MDB database.
+CPython/cffi wrapper for OpenLDAP's "Lightning" MDB database.
 
 Please see http://lmdb.readthedocs.org/
 """
@@ -33,7 +33,7 @@ import threading
 import warnings
 import weakref
 
-import cffi
+import lmdb
 
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
            'enable_drop_gil']
@@ -41,8 +41,7 @@ __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
 # Used to track context across cffi callbcks.
 _callbacks = threading.local()
 
-_ffi = cffi.FFI()
-_ffi.cdef('''
+_CFFI_CDEF = '''
     typedef int mode_t;
     typedef ... MDB_env;
     typedef struct MDB_txn MDB_txn;
@@ -179,9 +178,9 @@ _ffi.cdef('''
     static int pymdb_cursor_put(MDB_cursor *cursor,
                                 char *key_s, size_t keylen,
                                 char *val_s, size_t vallen, int flags);
-''')
+'''
 
-_lib = _ffi.verify('''
+_CFFI_VERIFY = '''
     #include <sys/stat.h>
     #include "lmdb.h"
 
@@ -234,16 +233,27 @@ _lib = _ffi.verify('''
         MDB_val tmpval = {vallen, val_s};
         return mdb_cursor_put(cursor, &tmpkey, &tmpval, flags);
     }
-''',
-    ext_package='lmdb',
-    sources=['lib/mdb.c', 'lib/midl.c'],
-    extra_compile_args=['-Wno-shorten-64-to-32'],
-    include_dirs=['lib']
-)
+'''
 
-globals().update((k, getattr(_lib, k))
-                 for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
-EINVAL = _lib.EINVAL
+if not lmdb._reading_docs():
+    import cffi
+    _ffi = cffi.FFI()
+    _ffi.cdef(_CFFI_CDEF)
+    _lib = _ffi.verify(_CFFI_VERIFY,
+        ext_package='lmdb',
+        sources=['lib/mdb.c', 'lib/midl.c'],
+        extra_compile_args=['-Wno-shorten-64-to-32'],
+        include_dirs=['lib'])
+    globals().update((k, getattr(_lib, k))
+                     for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
+    EINVAL = _lib.EINVAL
+
+    @_ffi.callback("int(char *, void *)")
+    def _msg_func(s, _):
+        """mdb_msg_func() callback. Appends `s` to _callbacks.msg_func list.
+        """
+        _callbacks.msg_func.append(_ffi.string(s))
+        return 0
 
 class Error(Exception):
     """Raised when any MDB error occurs."""
@@ -325,13 +335,6 @@ def enable_drop_gil():
 
     *Caution:* this function should be invoked before any threads are created.
     """
-
-@_ffi.callback("int(char *, void *)")
-def _msg_func(s, _):
-    """mdb_msg_func() callback. Appends `s` to _callbacks.msg_func list.
-    """
-    _callbacks.msg_func.append(_ffi.string(s))
-    return 0
 
 
 class Environment(object):

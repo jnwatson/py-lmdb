@@ -27,17 +27,20 @@ Please see http://lmdb.readthedocs.org/
 import os
 import sys
 
-try:
+def _reading_docs():
     # Hack: disable speedups while testing or reading docstrings.
-    if os.path.basename(sys.argv[0]) in ('sphinx-build', 'pydoc') or \
-            os.getenv('LMDB_FORCE_CFFI') is not None:
+    basename = os.path.basename(sys.argv[0])
+    return any(x in basename for x in ('sphinx-build', 'pydoc')) or \
+        os.getenv('LMDB_FORCE_CFFI') is not None
+
+try:
+    if _reading_docs():
         raise ImportError
     from lmdb.cpython import *
 except ImportError:
     from lmdb.cffi import *
     from lmdb.cffi import __doc__
 
-del os
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
            'enable_drop_gil']
 __version__ = '0.69'
