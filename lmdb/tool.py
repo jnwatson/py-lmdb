@@ -38,19 +38,27 @@ Basic tools for working with LMDB.
     stat: Print environment statistics.
 
     warm: Read environment into page cache sequentially.
+
+    watch: Show live environment statistics
 """
 
 from __future__ import absolute_import
 from __future__ import with_statement
 import array
+import collections
 import contextlib
+import csv
+import fcntl
 import functools
 import optparse
 import os
 import pprint
+import signal
 import string
-import time
+import struct
 import sys
+import termios
+import time
 
 # Python3.x bikeshedded trechery.
 try:
@@ -136,7 +144,11 @@ def make_parser():
                      help='List of key pairs to read from files.')
     group.add_option('--delete', action='append',
                      help='List of key=value pairs to delete.')
-
+    group = parser.add_option_group('Options for "watch" command')
+    group.add_option('--csv', action='store_true',
+                     help='Generate CSV instead of terminal output.')
+    group.add_option('--interval', type='int', default=1,
+                     help='Interval size (default: 1sec)')
     return parser
 
 
@@ -274,6 +286,78 @@ def cmd_restore(opts, args):
                 print('Loaded %d keys from %r' % (count, path))
 
 
+def delta(hst):
+    return [(hst[i] - hst[i-1]) for i in xrange(1, len(hst))]
+
+def cmd_watch(opts, args):
+    info = None
+    stat = None
+
+    def window(func):
+        sz = 5
+        history = collections.deque()
+        def windowfunc():
+            history.append(func())
+            if len(history) > sz:
+                history.popleft()
+            if len(history) <= 1:
+                return 0
+            return sum(delta(history)) / float(len(history) - 1)
+        return windowfunc
+
+    envmb = lambda: (info['last_pgno'] * stat['psize']) / 1048576.
+
+    cols = [
+        ('%d',    'Depth', lambda: stat['depth']),
+        ('%d',    'Branch', lambda: stat['branch_pages']),
+        ('%d',    'Leaf', lambda: stat['leaf_pages']),
+        ('%+d',   'Leaf/i', window(lambda: stat['leaf_pages'])),
+        ('%d',    'Oflow', lambda: stat['overflow_pages']),
+        ('%+d',   'Oflow/i', window(lambda: stat['overflow_pages'])),
+        ('%d',    'Recs', lambda: stat['entries']),
+        ('%+d',   'Recs/i', window(lambda: stat['entries'])),
+        ('%d',    'Rdrs', lambda: info['num_readers']),
+        ('%.2f',  'EnvMb', envmb),
+        ('%+.2f', 'EnvMb/i', window(envmb)),
+        ('%d',    'Txs', lambda: info['last_txnid']),
+        ('%+.2f', 'Txs/i', window(lambda: info['last_txnid']))
+    ]
+
+    term_width = 0
+    widths = [len(head) for _, head, _ in cols]
+
+    if opts.csv:
+        writer = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL)
+        writer.writerow([head for _, head, _ in cols])
+
+    try:
+        while True:
+            stat = ENV.stat()
+            info = ENV.info()
+
+            vals = []
+            for i, (fmt, head, func) in enumerate(cols):
+                val = fmt % func()
+                vals.append(val)
+                widths[i] = max(widths[i], len(val))
+
+            if opts.csv:
+                writer.writerow(vals)
+            else:
+                if term_width != _TERM_WIDTH:
+                    for i, (fmt, head, func) in enumerate(cols):
+                        sys.stdout.write(head.rjust(widths[i] + 1))
+                    sys.stdout.write('\n')
+                    term_width = _TERM_WIDTH
+                for i, val in enumerate(vals):
+                    sys.stdout.write(val.rjust(widths[i] + 1))
+                sys.stdout.write('\n')
+
+            time.sleep(opts.interval)
+    except KeyboardInterrupt:
+        pass
+
+
 def cmd_warm(opts, args):
     stat = ENV.stat()
     info = ENV.info()
@@ -377,6 +461,18 @@ def cmd_stat(opts, args):
     pprint.pprint(ENV.info())
 
 
+def _get_term_width(default=80):
+    try:
+        s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
+        height, width = struct.unpack('hh', s)
+        return width
+    except:
+        return default
+
+def _on_sigwinch(*args):
+    global _TERM_WIDTH
+    _TERM_WIDTH = _get_term_width()
+
 def main():
     parser = make_parser()
     opts, args = parser.parse_args()
@@ -393,6 +489,10 @@ def main():
     if opts.db:
         global DB
         DB = ENV.open_db(opts.db)
+
+    global _TERM_WIDTH
+    _TERM_WIDTH = _get_term_width()
+    signal.signal(signal.SIGWINCH, _on_sigwinch)
 
     func = globals().get('cmd_' + args[0])
     if not func:

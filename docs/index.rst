@@ -379,7 +379,11 @@ These functions are useful for e.g. backup jobs.
 
         shell: Open interactive console with ENV set to the open environment.
 
+        stat: Print environment statistics.
+
         warm: Read environment into page cache sequentially.
+
+        watch: Show live environment statistics
 
     Options:
       -h, --help            show this help message and exit
@@ -407,3 +411,6 @@ These functions are useful for e.g. backup jobs.
                             List of key pairs to read from files.
         --delete=DELETE     List of key=value pairs to delete.
 
+      Options for "watch" command:
+        --csv               Generate CSV instead of terminal output.
+        --interval=INTERVAL Interval size (default: 1sec)
