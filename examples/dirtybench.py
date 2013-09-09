@@ -7,12 +7,15 @@ from time import time as now
 import random
 import lmdb
 
+MAP_SIZE = 1048576 * 400
+DB_PATH = 'testdb'
+
+
 def x():
     big = '' # '*' * 400
 
-    dbpath = '/ram/testdb'
-    if os.path.exists(dbpath):
-        shutil.rmtree(dbpath)
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
 
     t0 = now()
     words = set(file('/usr/share/dict/words').readlines())
@@ -29,7 +32,7 @@ def x():
 
     getword = iter(words).next
 
-    env = lmdb.open(dbpath, map_size=1048576 * 1024)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE)
     print 'stat:', env.stat()
 
     run = True
@@ -128,9 +131,9 @@ def x():
     print
 
     env.close()
-    if os.path.exists(dbpath):
-        shutil.rmtree(dbpath)
-    env = lmdb.open(dbpath, map_size=1048576 * 1024, writemap=True)
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
 
 
     getword = iter(sorted(words)).next
@@ -162,9 +165,9 @@ def x():
     print
 
     env.close()
-    if os.path.exists(dbpath):
-        shutil.rmtree(dbpath)
-    env = lmdb.open(dbpath, map_size=1048576 * 1024, writemap=True)
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
 
 
     getword = iter(sorted(words)).next
@@ -197,9 +200,9 @@ def x():
     print
 
     env.close()
-    if os.path.exists(dbpath):
-        shutil.rmtree(dbpath)
-    env = lmdb.open(dbpath, map_size=1048576 * 1024)
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE)
 
 
     getword = iter(sorted(words)).next
