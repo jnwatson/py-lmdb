@@ -278,10 +278,12 @@ def cmd_warm(opts, args):
     stat = ENV.stat()
     info = ENV.info()
 
+    bufsize = 32768
     last_offset = stat['psize'] * info['last_pgno']
-    buf = array.array('c', '\x00' * 1048576)
+    buf = array.array('c', '\x00' * bufsize)
     t0 = time.time()
-    fp = open(opts.env + '/data.mdb', 'rb', 1048576)
+
+    fp = open(opts.env + '/data.mdb', 'rb', bufsize)
     while fp.tell() < last_offset:
         fp.readinto(buf)
     print('Warmed %.2fmb in %dms' %
