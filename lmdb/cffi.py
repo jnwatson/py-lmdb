@@ -359,9 +359,11 @@ class Environment(object):
             On 64-bit there is no penalty for making this huge (say 1TB). Must
             be <2GB on 32-bit.
 
-            *Note*: **the default map size is set low to encourage a crash**,
-            so users can figure out a good value before learning about this
-            option too late.
+            .. note::
+
+                **The default map size is set low to encourage a crash**, so
+                users can figure out a good value before learning about this
+                option too late.
 
         `subdir`:
             If ``True``, `path` refers to a subdirectory to store the data and
