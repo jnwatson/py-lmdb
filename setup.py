@@ -28,6 +28,11 @@ import platform
 from setuptools import Extension
 from setuptools import setup
 
+try:
+    import memsink
+except ImportError:
+    memsink = None
+
 
 if hasattr(platform, 'python_implementation'):
     use_cpython = platform.python_implementation() == 'CPython'
@@ -47,10 +52,14 @@ if sys.version[:3] in ('3.0', '3.1', '3.2'):
 if use_cpython:
     print('Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.')
     install_requires = []
+    extra_compile_args = ['-Wno-shorten-64-to-32']
+    if memsink:
+        extra_compile_args += ['-DHAVE_MEMSINK',
+                               '-I' + os.path.dirname(memsink.__file__)]
     ext_modules = [Extension(
         name='cpython',
         sources=['lmdb/cpython.c', 'lib/mdb.c', 'lib/midl.c'],
-        extra_compile_args=['-Wno-shorten-64-to-32'],
+        extra_compile_args=extra_compile_args,
         include_dirs=['lib']
     )]
 else:
