@@ -414,3 +414,4 @@ These functions are useful for e.g. backup jobs.
       Options for "watch" command:
         --csv               Generate CSV instead of terminal output.
         --interval=INTERVAL Interval size (default: 1sec)
+        --window=WINDOW     Average window size (default: 10)

@@ -149,6 +149,8 @@ def make_parser():
                      help='Generate CSV instead of terminal output.')
     group.add_option('--interval', type='int', default=1,
                      help='Interval size (default: 1sec)')
+    group.add_option('--window', type='int', default=10,
+                     help='Average window size (default: 10)')
     return parser
 
 
@@ -294,15 +296,15 @@ def cmd_watch(opts, args):
     stat = None
 
     def window(func):
-        sz = 5
         history = collections.deque()
         def windowfunc():
             history.append(func())
-            if len(history) > sz:
+            if len(history) > opts.window:
                 history.popleft()
             if len(history) <= 1:
                 return 0
-            return sum(delta(history)) / float(len(history) - 1)
+            n = sum(delta(history)) / float(len(history) - 1)
+            return n / opts.interval
         return windowfunc
 
     envmb = lambda: (info['last_pgno'] * stat['psize']) / 1048576.
@@ -311,16 +313,16 @@ def cmd_watch(opts, args):
         ('%d',    'Depth', lambda: stat['depth']),
         ('%d',    'Branch', lambda: stat['branch_pages']),
         ('%d',    'Leaf', lambda: stat['leaf_pages']),
-        ('%+d',   'Leaf/i', window(lambda: stat['leaf_pages'])),
+        ('%+d',   'Leaf/s', window(lambda: stat['leaf_pages'])),
         ('%d',    'Oflow', lambda: stat['overflow_pages']),
-        ('%+d',   'Oflow/i', window(lambda: stat['overflow_pages'])),
+        ('%+d',   'Oflow/s', window(lambda: stat['overflow_pages'])),
         ('%d',    'Recs', lambda: stat['entries']),
-        ('%+d',   'Recs/i', window(lambda: stat['entries'])),
+        ('%+d',   'Recs/s', window(lambda: stat['entries'])),
         ('%d',    'Rdrs', lambda: info['num_readers']),
         ('%.2f',  'EnvMb', envmb),
-        ('%+.2f', 'EnvMb/i', window(envmb)),
+        ('%+.2f', 'EnvMb/s', window(envmb)),
         ('%d',    'Txs', lambda: info['last_txnid']),
-        ('%+.2f', 'Txs/i', window(lambda: info['last_txnid']))
+        ('%+.2f', 'Txs/s', window(lambda: info['last_txnid']))
     ]
 
     term_width = 0
@@ -330,6 +332,7 @@ def cmd_watch(opts, args):
         writer = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL)
         writer.writerow([head for _, head, _ in cols])
 
+    cnt = 0
     try:
         while True:
             stat = ENV.stat()
@@ -344,7 +347,7 @@ def cmd_watch(opts, args):
             if opts.csv:
                 writer.writerow(vals)
             else:
-                if term_width != _TERM_WIDTH:
+                if term_width != _TERM_WIDTH or not (cnt % (_TERM_HEIGHT - 2)):
                     for i, (fmt, head, func) in enumerate(cols):
                         sys.stdout.write(head.rjust(widths[i] + 1))
                     sys.stdout.write('\n')
@@ -354,6 +357,7 @@ def cmd_watch(opts, args):
                 sys.stdout.write('\n')
 
             time.sleep(opts.interval)
+            cnt += 1
     except KeyboardInterrupt:
         pass
 
@@ -465,13 +469,13 @@ def _get_term_width(default=80):
     try:
         s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
         height, width = struct.unpack('hh', s)
-        return width
+        return width, height
     except:
         return default
 
 def _on_sigwinch(*args):
-    global _TERM_WIDTH
-    _TERM_WIDTH = _get_term_width()
+    global _TERM_WIDTH, _TERM_HEIGHT
+    _TERM_WIDTH, _TERM_HEIGHT = _get_term_width()
 
 def main():
     parser = make_parser()
@@ -490,9 +494,8 @@ def main():
         global DB
         DB = ENV.open_db(opts.db)
 
-    global _TERM_WIDTH
-    _TERM_WIDTH = _get_term_width()
     signal.signal(signal.SIGWINCH, _on_sigwinch)
+    _on_sigwinch()
 
     func = globals().get('cmd_' + args[0])
     if not func:
