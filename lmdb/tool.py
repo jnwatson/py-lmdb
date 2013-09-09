@@ -297,8 +297,9 @@ def cmd_rewrite(opts, args):
     src_info = ENV.info()
     target_env = lmdb.open(opts.target_env,
                            map_size=src_info['map_size'] * 2,
-                           max_dbs=opts.max_dbs,
-                           writemap=True)
+                           max_dbs=opts.max_dbs, sync=False,
+                           writemap=True, map_async=True,
+                           metasync=False)
 
     dbs = []
     for arg in args:
@@ -315,6 +316,9 @@ def cmd_rewrite(opts, args):
         with target_env.begin(db=dst_db, write=True) as wtxn:
             for key, value in ENV.cursor(db=src_db, buffers=True):
                 wtxn.put(key, value, append=True)
+
+    print('Syncing..')
+    target_env.sync(True)
 
 
 def cmd_get(opts, args):
