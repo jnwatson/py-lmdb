@@ -391,8 +391,7 @@ class Environment(object):
 
         `writemap`:
             If ``True`` LMDB will use a writeable memory map to update the
-            database. Requires operating system support. Please refer to
-            documentation.
+            database. This option is incompatible with nested transactions.
 
         'map_async':
              When ``writemap=True``, use asynchronous flushes to disk. As with

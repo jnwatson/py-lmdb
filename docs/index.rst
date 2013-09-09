@@ -237,10 +237,10 @@ update storage. This improves performance at a cost to safety: it is possible
 (though fairly unlikely) for buggy C code in the Python process to accidentally
 overwrite the map, resulting in database corruption.
 
-This option also requires a filesystem that supports sparse files by way of the
-`ftruncate` function, and is incompatible with nested transactions. *Note:* OS
-X HFS+ does not support sparse files.
+.. caution::
 
+    This option may cause filesystems that don't support sparse files, such as
+    OSX, to immediately preallocate `map_size=` bytes of underlying storage.
 
 
 Transaction management
