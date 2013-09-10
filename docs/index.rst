@@ -81,13 +81,15 @@ To use the sub-database feature you must call :py:func:`lmdb.open` or
 databases required. This must be done by the first process or thread opening
 the environment as it is used to allocate resources kept in shared memory.
 
-**Caution:** MDB implements sub-databases by *storing a special descriptor key
-in the main database*. All databases in an environment *share the same file*.
-Because a sub-database is just a key in the main database, attempts to create
-one will fail if this key already exists. Furthermore *the key is visible to
-lookups and enumerations*. If your main database keyspace conflicts with the
-names you are using for sub-databases then consider moving the contents of your
-main database to another sub-database.
+.. caution::
+
+    MDB implements sub-databases by *storing a special descriptor key in the
+    main database*. All databases in an environment *share the same file*.
+    Because a sub-database is just a key in the main database, attempts to
+    create one will fail if this key already exists. Furthermore *the key is
+    visible to lookups and enumerations*. If your main database keyspace
+    conflicts with the names you are using for sub-databases then consider
+    moving the contents of your main database to another sub-database.
 
     ::
 
@@ -98,12 +100,11 @@ main database to another sub-database.
         >>> # Error: database cannot share name of existing key!
         >>> subdb = env.open_db('somename')
 
-**Caution:** when a sub-database has been opened with
-:py:meth:`Environment.open_db` the resulting handle is shared with all
-environment users. In particular this means any user calling
-:py:meth:`Environment.close_db` will invalidate the handle for all users. For
-this reason databases are never closed automatically, you must do it
-explicitly.
+When a sub-database has been opened with :py:meth:`Environment.open_db` the
+resulting handle is shared with all environment users. In particular this means
+any user calling :py:meth:`Environment.close_db` will invalidate the handle for
+all users. For this reason databases are never closed automatically, you must
+do it explicitly.
 
 There is little reason to close a handle: open handles only consume slots in
 the shared environment and repeated calls to :py:meth:`Environment.open_db` for
@@ -194,11 +195,13 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
         >>> len(sub_buf)
         200
 
-**Caution:** in CPython buffers returned by :py:class:`Transaction` and
-:py:class:`Cursor` are reused, so that consecutive calls to
-:py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
-overwrite the objects that have already been returned. To preserve a value
-returned in a buffer, convert it to a string using :py:func:`str`.
+.. caution::
+
+    In CPython buffers returned by :py:class:`Transaction` and
+    :py:class:`Cursor` are reused, so that consecutive calls to
+    :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
+    overwrite the objects that have already been returned. To preserve a value
+    returned in a buffer, convert it to a string using :py:func:`str`.
 
     ::
 
@@ -222,10 +225,8 @@ returned in a buffer, convert it to a string using :py:func:`str`.
         >>> vals1
         'value1'
 
-**Caution:** in both PyPy and CPython, *returned buffers absolutely should not
-be used after their generating transaction has completed, or after you modified
-the database in the same transaction!*
-
+    In both PyPy and CPython, returned buffer objects *must be discarded* after
+    their generating transaction has completed.
 
 
 ``writemap`` mode
@@ -262,21 +263,23 @@ freely migrate across threads and for a single thread to maintain multiple read
 transactions. This enables mostly care-free use of read transactions, for
 example when using `gevent <http://www.gevent.org/>`_.
 
-*Caution*: while any reader exists, writers cannot reuse space in the database
-file that has become unused in later versions. Due to this, continual use of
-long-lived read transactions may cause the database to grow without bound. If
-transactions are exposed to users, some form of deadline timer should be
-employed to prevent this from occurring. A lost reference to a read transaction
-will simply be aborted (and its reader slot freed) when the
-:py:class:`Transaction` is eventually garbage collected. This should occur
-immediately on CPython, but may be deferred indefinitely on PyPy.
+.. caution::
 
-However the same is *not* true for write transactions: losing a reference to a
-write transaction can lead to deadlock, particularly on PyPy, since if the same
-process that lost the :py:class:`Transaction` reference immediately starts
-another write transaction, it will deadlock on its own lock. Subsequently the
-lost transaction may never be garbage collected (since the process is now
-blocked on itself) and the database will become unusable.
+    While any reader exists, writers cannot reuse space in the database file
+    that has become unused in later versions. Due to this, continual use of
+    long-lived read transactions may cause the database to grow without bound.
+    A lost reference to a read transaction will simply be aborted (and its
+    reader slot freed) when the :py:class:`Transaction` is eventually garbage
+    collected. This should occur immediately on CPython, but may be deferred
+    indefinitely on PyPy.
+
+    However the same is *not* true for write transactions: losing a reference
+    to a write transaction can lead to deadlock, particularly on PyPy, since if
+    the same process that lost the :py:class:`Transaction` reference
+    immediately starts another write transaction, it will deadlock on its own
+    lock. Subsequently the lost transaction may never be garbage collected
+    (since the process is now blocked on itself) and the database will become
+    unusable.
 
 These problems are easily avoided by always wrapping :py:class:`Transaction` in
 a ``with`` statement somewhere on the stack:
