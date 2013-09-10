@@ -291,6 +291,58 @@ def cmd_restore(opts, args):
 def delta(hst):
     return [(hst[i] - hst[i-1]) for i in xrange(1, len(hst))]
 
+
+SYS_BLOCK = '/sys/block'
+
+def _find_diskstat(path):
+    if not os.path.exists(SYS_BLOCK):
+        return
+    st = os.stat(path)
+    devs = '%s:%s' % (st.st_dev >> 8, st.st_dev & 0xff)
+
+    def maybe(rootpath):
+        dpath = os.path.join(rootpath, 'dev')
+        if os.path.exists(dpath):
+            with file(dpath) as fp:
+                if fp.read().strip() == devs:
+                    return os.path.join(rootpath, 'stat')
+
+    for name in os.listdir(SYS_BLOCK):
+        basepath = os.path.join(SYS_BLOCK, name)
+        statpath = maybe(basepath)
+        if statpath:
+            return statpath
+        for name in os.listdir(basepath):
+            base2path = os.path.join(basepath, name)
+            statpath = maybe(base2path)
+            if statpath:
+                return statpath
+
+class DiskStatter(object):
+    FIELDS = (
+        'reads',
+        'reads_merged',
+        'sectors_read',
+        'read_ms',
+        'writes',
+        'writes_merged',
+        'sectors_written',
+        'write_ms',
+        'io_count',
+        'io_ms',
+        'total_ms'
+    )
+
+    def __init__(self, path):
+        self.fp = file(path)
+        self.refresh()
+
+    def refresh(self):
+        self.fp.seek(0)
+        vars(self).update((self.FIELDS[i], int(s))
+                          for i, s in enumerate(self.fp.read().split()))
+
+
 def cmd_watch(opts, args):
     info = None
     stat = None
@@ -325,6 +377,17 @@ def cmd_watch(opts, args):
         ('%+.2f', 'Txs/s', window(lambda: info['last_txnid']))
     ]
 
+    statter = None
+    statpath = _find_diskstat(ENV.path())
+    if statpath:
+        statter = DiskStatter(statpath)
+        cols += [
+            ('%d', 'SctRd', lambda: statter.sectors_read),
+            ('%+d', 'SctRd/s', window(lambda: statter.sectors_read)),
+            ('%d', 'SctWr', lambda: statter.sectors_written),
+            ('%+d', 'SctWr/s', window(lambda: statter.sectors_written)),
+        ]
+
     term_width = 0
     widths = [len(head) for _, head, _ in cols]
 
@@ -337,6 +400,8 @@ def cmd_watch(opts, args):
         while True:
             stat = ENV.stat()
             info = ENV.info()
+            if statter:
+                statter.refresh()
 
             vals = []
             for i, (fmt, head, func) in enumerate(cols):
