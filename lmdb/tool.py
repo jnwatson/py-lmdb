@@ -488,7 +488,7 @@ def main():
 
     global ENV
     ENV = lmdb.open(opts.env, map_size=opts.map_size*1048576,
-                    max_dbs=opts.max_dbs)
+                    max_dbs=opts.max_dbs, create=False)
 
     if opts.db:
         global DB
