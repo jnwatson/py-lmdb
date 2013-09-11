@@ -382,9 +382,9 @@ def cmd_watch(opts, args):
     if statpath:
         statter = DiskStatter(statpath)
         cols += [
-            ('%d', 'SctRd', lambda: statter.sectors_read),
+            #('%d', 'SctRd', lambda: statter.sectors_read),
             ('%+d', 'SctRd/s', window(lambda: statter.sectors_read)),
-            ('%d', 'SctWr', lambda: statter.sectors_written),
+            #('%d', 'SctWr', lambda: statter.sectors_written),
             ('%+d', 'SctWr/s', window(lambda: statter.sectors_written)),
         ]
 
