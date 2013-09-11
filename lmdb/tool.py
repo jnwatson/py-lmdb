@@ -23,6 +23,11 @@ Basic tools for working with LMDB.
     get: Read one or more values from a database.
         %prog get [<key1> [<keyN> [..]]]
 
+    readers: Display readers in the lock table
+        %prog readers -e /path/to/db [-c]
+
+        If -c is specified, clear stale readers.
+
     restore: Read one or more database from disk in 'cdbmake' format.
         %prog restore db1=file1.cdbmake db2=file2.cdbmake
 
@@ -144,6 +149,9 @@ def make_parser():
                      help='List of key pairs to read from files.')
     group.add_option('--delete', action='append',
                      help='List of key=value pairs to delete.')
+    group = parser.add_option_group('Options for "readers" command')
+    group.add_option('-c', '--clean', action='store_true',
+                     help='Clean stale readers? (default: no)')
     group = parser.add_option_group('Options for "watch" command')
     group.add_option('--csv', action='store_true',
                      help='Generate CSV instead of terminal output.')
@@ -276,6 +284,12 @@ def cmd_drop(opts, args):
         print('Dropping DB %r...' % (name,))
         with ENV.begin(write=True) as txn:
             txn.drop(db)
+
+
+def cmd_readers(opts, args):
+    if opts.clean:
+        print 'Cleaned %d stale entries.' % (ENV.reader_check(),)
+    print ENV.readers()
 
 
 def cmd_restore(opts, args):
