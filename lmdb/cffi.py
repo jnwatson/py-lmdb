@@ -40,7 +40,8 @@ except ImportError:
     _config = None
 
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'enable_drop_gil']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open',
+           'enable_drop_gil', 'version']
 __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
             'CorruptedError', 'PanicError', 'VersionMismatchError',
             'InvalidError', 'MapFullError', 'DbsFullError', 'ReadersFullError',
@@ -149,6 +150,10 @@ _CFFI_CDEF = '''
     typedef int (MDB_msg_func)(const char *msg, void *ctx);
     int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
     int mdb_reader_check(MDB_env *env, int *dead);
+
+    #define MDB_VERSION_MAJOR ...
+    #define MDB_VERSION_MINOR ...
+    #define MDB_VERSION_PATCH ...
 
     #define EACCES ...
     #define EAGAIN ...
@@ -464,6 +469,14 @@ def enable_drop_gil():
 
     *Caution:* this function should be invoked before any threads are created.
     """
+
+def version():
+    """
+    Return a tuple of integers `(major, minor, patch)` describing the LMDB
+    library version that the binding is linked against. The version of the
+    binding itself is available from ``lmdb.__version__``.
+    """
+    return (MDB_VERSION_MAJOR, MDB_VERSION_MINOR, MDB_VERSION_PATCH)
 
 
 class Environment(object):

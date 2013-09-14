@@ -317,6 +317,9 @@ Interface
    Shortcut for :py:class:`Environment` constructor.
 
 
+.. autofunction:: lmdb.version
+
+
 Environment class
 #################
 

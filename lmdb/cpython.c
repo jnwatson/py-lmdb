@@ -2792,8 +2792,17 @@ enable_drop_gil(void)
 }
 
 
+static PyObject *
+get_version(void)
+{
+    return Py_BuildValue("iii", MDB_VERSION_MAJOR,
+        MDB_VERSION_MINOR, MDB_VERSION_PATCH);
+}
+
+
 static struct PyMethodDef module_methods[] = {
     {"enable_drop_gil", (PyCFunction) enable_drop_gil, METH_NOARGS, ""},
+    {"version", (PyCFunction) get_version, METH_NOARGS, ""},
     {0, 0, 0, 0}
 };
 
