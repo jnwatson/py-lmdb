@@ -38,10 +38,9 @@ try:
     from lmdb.cpython import *
 except ImportError:
     from lmdb.cffi import *
+    from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
-           'enable_drop_gil']
 __version__ = '0.70'
 
 # Hack to support Python v2.5 'python -mlmdb'
