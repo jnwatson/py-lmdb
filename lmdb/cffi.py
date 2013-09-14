@@ -511,7 +511,7 @@ class Environment(object):
             If ``True`` LMDB will use a writeable memory map to update the
             database. This option is incompatible with nested transactions.
 
-        'map_async':
+        `map_async`:
              When ``writemap=True``, use asynchronous flushes to disk. As with
              ``sync=False``, a system crash can then corrupt the database or
              lose the last transactions. Calling :py:meth:`sync` ensures
