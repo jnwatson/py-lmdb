@@ -10,7 +10,7 @@ lmdb
     :hidden:
     :maxdepth: 2
 
-This is a universal Python binding for the `OpenLDAP LMDB 'Lightning' Database
+This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two implementations are provided and automatically
 selected during installation, depending on host environment: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ implementation that supports
