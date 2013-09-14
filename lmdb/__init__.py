@@ -41,7 +41,7 @@ except ImportError:
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__version__ = '0.70'
+__version__ = '0.71'
 
 # Hack to support Python v2.5 'python -mlmdb'
 if __name__ == '__main__':
