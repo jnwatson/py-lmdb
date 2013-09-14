@@ -641,7 +641,7 @@ class Environment(object):
             rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
             if rc:
                 raise Error("mdb_reader_list", rc)
-            return _callbacks.msg_func
+            return ''.join(_callbacks.msg_func)
         finally:
             del _callbacks.msg_func
 

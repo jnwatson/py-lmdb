@@ -370,6 +370,11 @@ These functions are useful for e.g. backup jobs.
         get: Read one or more values from a database.
             python -mlmdb get [<key1> [<keyN> [..]]]
 
+        readers: Display readers in the lock table
+            python -mlmdb readers -e /path/to/db [-c]
+
+            If -c is specified, clear stale readers.
+
         restore: Read one or more database from disk in 'cdbmake' format.
             python -mlmdb restore db1=file1.cdbmake db2=file2.cdbmake
 
@@ -413,6 +418,9 @@ These functions are useful for e.g. backup jobs.
         --add-file=ADD_FILE
                             List of key pairs to read from files.
         --delete=DELETE     List of key=value pairs to delete.
+
+      Options for "readers" command:
+        -c, --clean         Clean stale readers? (default: no)
 
       Options for "watch" command:
         --csv               Generate CSV instead of terminal output.
