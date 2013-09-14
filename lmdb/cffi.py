@@ -35,8 +35,14 @@ import weakref
 
 import lmdb
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'Error',
-           'enable_drop_gil']
+__all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'enable_drop_gil']
+__all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
+            'CorruptedError', 'PanicError', 'VersionMismatchError',
+            'InvalidError', 'MapFullError', 'DbsFullError', 'ReadersFullError',
+            'TlsFullError', 'TxnFullError', 'CursorFullError', 'PageFullError',
+            'MapResizedError', 'IncompatibleError', 'BadRslotError',
+            'BadTxnError', 'BadValsizeError', 'ReadonlyError',
+            'InvalidParameterError', 'LockError', 'MemoryError', 'DiskError']
 
 # Used to track context across cffi callbcks.
 _callbacks = threading.local()
@@ -139,7 +145,11 @@ _CFFI_CDEF = '''
     int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
     int mdb_reader_check(MDB_env *env, int *dead);
 
+    #define EACCES ...
+    #define EAGAIN ...
     #define EINVAL ...
+    #define ENOMEM ...
+    #define ENOSPC ...
     #define MDB_APPEND ...
     #define MDB_CREATE ...
     #define MDB_DBS_FULL ...
@@ -246,7 +256,11 @@ if not lmdb._reading_docs():
         include_dirs=['lib'])
     globals().update((k, getattr(_lib, k))
                      for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
+    EACCES = _lib.EACCES
+    EAGAIN = _lib.EAGAIN
     EINVAL = _lib.EINVAL
+    ENOMEM = _lib.ENOMEM
+    ENOSPC = _lib.ENOSPC
 
     @_ffi.callback("int(char *, void *)")
     def _msg_func(s, _):
@@ -256,21 +270,8 @@ if not lmdb._reading_docs():
         return 0
 
 class Error(Exception):
-    """Raised when any MDB error occurs."""
-    def hints(self):
-        # This is wrapped in a function to allow mocking out cffi for
-        # readthedocs.
-        return {
-            MDB_MAP_FULL:
-                "Please use a larger Environment(map_size=) parameter",
-            MDB_DBS_FULL:
-                "Please use a larger Environment(max_dbs=) parameter",
-            MDB_READERS_FULL:
-                "Please use a larger Environment(max_readers=) parameter",
-            MDB_TXN_FULL:
-                "Please do less work within your transaction",
-        }
-
+    """Raised when an LMDB-related error occurs, and no more specific
+    :py:class:`lmdb.Error` subclass exists."""
     def __init__(self, what, code=0):
         self.what = what
         self.code = code
@@ -278,11 +279,123 @@ class Error(Exception):
         msg = what
         if code:
             msg = '%s: %s' % (what, self.reason)
-            hint = self.hints().get(code)
+            hint = getattr(self, 'MDB_HINT', None)
             if hint:
                 msg += ' (%s)' % (hint,)
         Exception.__init__(self, msg)
 
+class KeyExistsError(Error):
+    """Key/data pair already exists."""
+    MDB_NAME = 'MDB_KEYEXIST'
+
+class NotFoundError(Error):
+    """No matching key/data pair found."""
+    MDB_NAME = 'MDB_NOTFOUND'
+
+class PageNotFoundError(Error):
+    """Request page not found."""
+    MDB_NAME = 'MDB_PAGE_NOTFOUND'
+
+class CorruptedError(Error):
+    """Located page was of the wrong type."""
+    MDB_NAME = 'MDB_CORRUPTED'
+
+class PanicError(Error):
+    """Update of meta page failed."""
+    MDB_NAME = 'MDB_PANIC'
+
+class VersionMismatchError(Error):
+    """Database environment version mismatch."""
+    MDB_NAME = 'MDB_VERSION_MISMATCH'
+
+class InvalidError(Error):
+    """File is not an MDB file."""
+    MDB_NAME = 'MDB_INVALID'
+
+class MapFullError(Error):
+    """Environment map_size= limit reached."""
+    MDB_NAME = 'MDB_MAP_FULL'
+    MDB_HINT = 'Please use a larger Environment(map_size=) parameter'
+
+class DbsFullError(Error):
+    """Environment max_dbs= limit reached."""
+    MDB_NAME = 'MDB_DBS_FULL'
+    MDB_HINT = 'Please use a larger Environment(max_dbs=) parameter'
+
+class ReadersFullError(Error):
+    """Environment max_readers= limit reached."""
+    MDB_NAME = 'MDB_READERS_FULL'
+    MDB_HINT = 'Please use a larger Environment(max_readers=) parameter'
+
+class TlsFullError(Error):
+    """Thread-local storage keys full - too many environments open."""
+    MDB_NAME = 'MDB_TLS_FULL'
+
+class TxnFullError(Error):
+    """Transaciton has too many dirty pages - transaction too big."""
+    MDB_NAME = 'MDB_TXN_FULL'
+    MDB_HINT = 'Please do less work within your transaction'
+
+class CursorFullError(Error):
+    """Internal error - cursor stack limit reached."""
+    MDB_NAME = 'MDB_CURSOR_FULL'
+
+class PageFullError(Error):
+    """Internal error - page has no more space."""
+    MDB_NAME = 'MDB_PAGE_FULL'
+
+class MapResizedError(Error):
+    """Database contents grew beyond environment map_size=."""
+    MDB_NAME = 'MDB_MAP_RESIZED'
+
+class IncompatibleError(Error):
+    """Operation and DB incompatible, or DB flags changed."""
+    MDB_NAME = 'MDB_INCOMPATIBLE'
+
+class BadRslotError(Error):
+    """Invalid reuse of reader locktable slot."""
+    MDB_NAME = 'MDB_BAD_RSLOT'
+
+class BadTxnError(Error):
+    """Transaction cannot recover - it must be aborted."""
+    MDB_NAME = 'MDB_BAD_TXN'
+
+class BadValsizeError(Error):
+    """Too big key/data, key is empty, or wrong DUPFIXED size."""
+    MDB_NAME = 'MDB_BAD_VALSIZE'
+
+class ReadonlyError(Error):
+    """An attempt was made to modify a read-only database."""
+    MDB_NAME = 'EACCES'
+
+class InvalidParameterError(Error):
+    """An invalid parameter was specified."""
+    MDB_NAME = 'EINVAL'
+
+class LockError(Error):
+    """The environment was locked by another process."""
+    MDB_NAME = 'EAGAIN'
+
+class MemoryError(Error):
+    """Out of memory."""
+    MDB_NAME = 'ENOMEM'
+
+class DiskError(Error):
+    """No more disk space."""
+    MDB_NAME = 'ENOSPC'
+
+# Prepare _error_map, a mapping of integer MDB_ERROR_CODE to exception class.
+_error_map = {}
+for obj in globals().values():
+    if getattr(obj, '__name__', '').endswith('Error'):
+        code = globals().get(getattr(obj, 'MDB_NAME', None))
+        _error_map[code] = obj
+del obj, code
+
+def _error(what, rc):
+    """Lookup and instantiate the correct exception class for the error code
+    `rc`, using :py:class:`Error` if no better class exists."""
+    return _error_map.get(rc, Error)(what, rc)
 
 def _kill_dependents(parent):
     """Notify all dependents of `parent` that `parent` is about to become
@@ -446,21 +559,21 @@ class Environment(object):
 
         rc = mdb_env_create(envpp)
         if rc:
-            raise Error("mdb_env_create", rc)
+            raise _error("mdb_env_create", rc)
         self._env = envpp[0]
         self._deps = {}
 
         rc = mdb_env_set_mapsize(self._env, map_size)
         if rc:
-            raise Error("mdb_env_set_mapsize", rc)
+            raise _error("mdb_env_set_mapsize", rc)
 
         rc = mdb_env_set_maxreaders(self._env, max_readers)
         if rc:
-            raise Error("mdb_env_set_maxreaders", rc)
+            raise _error("mdb_env_set_maxreaders", rc)
 
         rc = mdb_env_set_maxdbs(self._env, max_dbs)
         if rc:
-            raise Error("mdb_env_set_maxdbs", rc)
+            raise _error("mdb_env_set_maxdbs", rc)
 
         if create and subdir and not os.path.exists(path):
             os.mkdir(path)
@@ -485,7 +598,7 @@ class Environment(object):
 
         rc = mdb_env_open(self._env, path, flags, mode)
         if rc:
-            raise Error(path, rc)
+            raise _error(path, rc)
         with self.begin(db=object()) as txn:
             self._db = _Database(self, txn, None, False, False, True)
         self._dbs = {None: weakref.ref(self._db)}
@@ -515,7 +628,7 @@ class Environment(object):
         path = _ffi.new('char **')
         rc = mdb_env_get_path(self._env, path)
         if rc:
-            raise Error("mdb_env_get_path", rc)
+            raise _error("mdb_env_get_path", rc)
         return _ffi.string(path[0])
 
     def copy(self, path):
@@ -527,7 +640,7 @@ class Environment(object):
         """
         rc = mdb_env_copy(self._env, path)
         if rc:
-            raise Error("mdb_env_copy", rc)
+            raise _error("mdb_env_copy", rc)
 
     def copyfd(self, fd):
         """Copy a consistent version of the environment to file descriptor
@@ -538,7 +651,7 @@ class Environment(object):
         """
         rc = mdb_env_copyfd(self._env, fd)
         if rc:
-            raise Error("mdb_env_copyfd", rc)
+            raise _error("mdb_env_copyfd", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
@@ -558,7 +671,7 @@ class Environment(object):
         """
         rc = mdb_env_sync(self._env, force)
         if rc:
-            raise Error("mdb_env_sync", rc)
+            raise _error("mdb_env_sync", rc)
 
     def _convert_stat(self, st):
         """Convert a MDB_stat to a dict.
@@ -597,7 +710,7 @@ class Environment(object):
         st = _ffi.new('MDB_stat *')
         rc = mdb_env_stat(self._env, st)
         if rc:
-            raise Error("mdb_env_stat", rc)
+            raise _error("mdb_env_stat", rc)
         return self._convert_stat(st)
 
     def info(self):
@@ -623,7 +736,7 @@ class Environment(object):
         info = _ffi.new('MDB_envinfo *')
         rc = mdb_env_info(self._env, info)
         if rc:
-            raise Error("mdb_env_info", rc)
+            raise _error("mdb_env_info", rc)
         return {
             "map_size": info.me_mapsize,
             "last_pgno": info.me_last_pgno,
@@ -640,7 +753,7 @@ class Environment(object):
         try:
             rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
             if rc:
-                raise Error("mdb_reader_list", rc)
+                raise _error("mdb_reader_list", rc)
             return ''.join(_callbacks.msg_func)
         finally:
             del _callbacks.msg_func
@@ -652,7 +765,7 @@ class Environment(object):
         reaped = _ffi.new('int[]', 1)
         rc = mdb_reader_check(self._env, reaped)
         if rc:
-            raise Error('mdb_reader_check', rc)
+            raise _error('mdb_reader_check', rc)
         return reaped[0]
 
     def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
@@ -813,7 +926,7 @@ class _Database(object):
         self._dbi = None
         rc = mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
         if rc:
-            raise Error("mdb_dbi_open", rc)
+            raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
 
     def _invalidate(self):
@@ -883,7 +996,7 @@ class Transaction(object):
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
         if write and env.readonly:
-            raise Error('Cannot start write transaction with read-only env')
+            raise _error('Cannot start write transaction with read-only env')
         if write:
             flags = 0
         else:
@@ -897,7 +1010,7 @@ class Transaction(object):
             parent_txn = _ffi.NULL
         rc = mdb_txn_begin(self._env, parent_txn, flags, txnpp)
         if rc:
-            raise Error("mdb_txn_begin", rc)
+            raise _error("mdb_txn_begin", rc)
         self._txn = txnpp[0]
 
     def _invalidate(self):
@@ -926,7 +1039,7 @@ class Transaction(object):
         st = _ffi.new('MDB_stat *')
         rc = mdb_stat(self._txn, db._dbi, st)
         if rc:
-            raise Error('mdb_stat', rc)
+            raise _error('mdb_stat', rc)
         return self.env._convert_stat(st)
 
     def drop(self, db, delete=True):
@@ -940,7 +1053,7 @@ class Transaction(object):
         _kill_dependents(db)
         rc = mdb_drop(self._txn, db._dbi, delete)
         if rc:
-            raise Error("mdb_drop", rc)
+            raise _error("mdb_drop", rc)
 
     def commit(self):
         """Commit the pending transaction.
@@ -953,7 +1066,7 @@ class Transaction(object):
             rc = mdb_txn_commit(self._txn)
             self._txn = _invalid
             if rc:
-                raise Error("mdb_txn_commit", rc)
+                raise _error("mdb_txn_commit", rc)
 
     def abort(self):
         """Abort the pending transaction.
@@ -966,7 +1079,7 @@ class Transaction(object):
             rc = mdb_txn_abort(self._txn)
             self._txn = _invalid
             if rc:
-                raise Error("mdb_txn_abort", rc)
+                raise _error("mdb_txn_abort", rc)
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, returning `default` if `key`
@@ -981,7 +1094,7 @@ class Transaction(object):
         if rc:
             if rc == MDB_NOTFOUND:
                 return default
-            raise Error("mdb_cursor_get", rc)
+            raise _error("mdb_cursor_get", rc)
         return self._to_py(self._val)
 
     def put(self, key, value, dupdata=False, overwrite=True, append=False,
@@ -1024,7 +1137,7 @@ class Transaction(object):
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
-            raise Error("mdb_put", rc)
+            raise _error("mdb_put", rc)
         return True
 
     def delete(self, key, value='', db=None):
@@ -1048,7 +1161,7 @@ class Transaction(object):
         if rc:
             if rc == MDB_NOTFOUND:
                 return False
-            raise Error("mdb_del", rc)
+            raise _error("mdb_del", rc)
         return True
 
     def cursor(self, db=None):
@@ -1140,7 +1253,7 @@ class Cursor(object):
         self._cur = None
         rc = mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
-            raise Error("mdb_cursor_open", rc)
+            raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
 
     def _invalidate(self):
@@ -1184,7 +1297,7 @@ class Cursor(object):
             rc = mdb_cursor_get(cur, key, val, op)
             self._valid = not rc
             if rc and rc != MDB_NOTFOUND:
-                raise Error("mdb_cursor_get", rc)
+                raise _error("mdb_cursor_get", rc)
 
     def iternext(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
@@ -1226,7 +1339,7 @@ class Cursor(object):
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
-                    raise Error("mdb_cursor_get", rc)
+                    raise _error("mdb_cursor_get", rc)
         self._valid = v
         return v
 
@@ -1238,7 +1351,7 @@ class Cursor(object):
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
-                    raise Error("mdb_cursor_get", rc)
+                    raise _error("mdb_cursor_get", rc)
         self._valid = v
         return v
 
@@ -1333,7 +1446,7 @@ class Cursor(object):
         if v:
             rc = mdb_cursor_del(self._cur, 0)
             if rc:
-                raise Error("mdb_cursor_del", rc)
+                raise _error("mdb_cursor_del", rc)
             self._cursor_get(MDB_GET_CURRENT)
             v = rc == 0
         return v
@@ -1348,7 +1461,7 @@ class Cursor(object):
         countp = _ffi.new('size_t *')
         rc = mdb_cursor_count(self._cur, countp)
         if rc:
-            raise Error("mdb_cursor_count", rc)
+            raise _error("mdb_cursor_count", rc)
         return countp[0]
 
     def put(self, key, val, dupdata=False, overwrite=True, append=False):
@@ -1390,7 +1503,7 @@ class Cursor(object):
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
-            raise Error("mdb_cursor_put", rc)
+            raise _error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
         return True
 

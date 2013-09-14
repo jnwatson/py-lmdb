@@ -327,6 +327,30 @@ Exceptions
 ##########
 
 .. autoclass:: lmdb.Error
+.. autoclass:: lmdb.KeyExistsError
+.. autoclass:: lmdb.NotFoundError
+.. autoclass:: lmdb.PageNotFoundError
+.. autoclass:: lmdb.CorruptedError
+.. autoclass:: lmdb.PanicError
+.. autoclass:: lmdb.VersionMismatchError
+.. autoclass:: lmdb.InvalidError
+.. autoclass:: lmdb.MapFullError
+.. autoclass:: lmdb.DbsFullError
+.. autoclass:: lmdb.ReadersFullError
+.. autoclass:: lmdb.TlsFullError
+.. autoclass:: lmdb.TxnFullError
+.. autoclass:: lmdb.CursorFullError
+.. autoclass:: lmdb.PageFullError
+.. autoclass:: lmdb.MapResizedError
+.. autoclass:: lmdb.IncompatibleError
+.. autoclass:: lmdb.BadRslotError
+.. autoclass:: lmdb.BadTxnError
+.. autoclass:: lmdb.BadValsizeError
+.. autoclass:: lmdb.ReadonlyError
+.. autoclass:: lmdb.InvalidParameterError
+.. autoclass:: lmdb.LockError
+.. autoclass:: lmdb.MemoryError
+.. autoclass:: lmdb.DiskError
 
 
 Threading control
