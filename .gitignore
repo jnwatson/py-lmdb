@@ -1,9 +1,10 @@
-build
 MANIFEST
+__pycache__
+build
 dist
 docs/_build
-__pycache__
-lmdb.egg-info
-old
-lo.sh
 ll.sh
+lmdb.egg-info
+lmdb/_config.py
+lo.sh
+old
