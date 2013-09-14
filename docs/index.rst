@@ -42,7 +42,7 @@ Installation
 
 For convenience, a supported version of the LMDB library is bundled inline with
 the binding and built statically by default. If your system has an install of
-LMDB available, set the ``LMDB_USE_SYSTEM`` environment variable, and
+LMDB available, set the ``LMDB_FORCE_SYSTEM`` environment variable, and
 optionally ``LMDB_INCLUDEDIR`` and ``LMDB_LIBDIR`` prior to invoking
 ``setup.py``.
 
