@@ -49,15 +49,30 @@ if sys.version[:3] < '2.5':
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
     use_cpython = False
 
-if os.getenv('LMDB_USE_SYSTEM') is not None:
+
+#
+# Figure out which LMDB implementation to use.
+#
+
+if os.getenv('LMDB_INCLUDEDIR'):
+    extra_include_dirs = [os.getenv('LMDB_INCLUDEDIR')]
+else:
+    extra_include_dirs = []
+
+if os.getenv('LMDB_LIBDIR'):
+    extra_library_dirs = [os.getenv('LMDB_LIBDIR')]
+else:
+    extra_library_dirs = []
+
+if os.getenv('LMDB_FORCE_SYSTEM') is not None:
     print('py-lmdb: Using system version of liblmdb.')
     extra_sources = []
-    extra_include_dirs = []
+    extra_include_dirs += []
     libraries = ['lmdb']
 else:
     print('py-lmdb: Using bundled liblmdb; override with LMDB_FORCE_SYSTEM=1.')
     extra_sources = ['lib/mdb.c', 'lib/midl.c']
-    extra_include_dirs = ['lib']
+    extra_include_dirs += ['lib']
     libraries = []
 
 
@@ -68,6 +83,7 @@ else:
 with open('lmdb/_config.py', 'w') as fp:
     fp.write('CONFIG = %r\n\n' % ({
         'extra_sources': extra_sources,
+        'extra_library_dirs': extra_library_dirs,
         'extra_include_dirs': extra_include_dirs,
         'libraries': libraries
     },))

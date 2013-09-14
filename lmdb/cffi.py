@@ -263,17 +263,20 @@ if not lmdb._reading_docs():
     _config_vars = _config.CONFIG if _config else {
         'extra_sources': ['lib/mdb.c', 'lib/midl.c'],
         'extra_include_dirs': ['lib'],
+        'extra_library_dirs': [],
         'libraries': []
     }
 
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
     _lib = _ffi.verify(_CFFI_VERIFY,
+        modulename='lmdb_cffi',
         ext_package='lmdb',
         sources=_config_vars['extra_sources'],
         extra_compile_args=['-Wno-shorten-64-to-32'],
         include_dirs=_config_vars['extra_include_dirs'],
-        libraries=_config_vars['libraries'])
+        libraries=_config_vars['libraries'],
+        library_dirs=_config_vars['extra_library_dirs'])
 
     globals().update((k, getattr(_lib, k))
                      for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
