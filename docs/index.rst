@@ -230,6 +230,20 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
     their generating transaction has completed.
 
 
+Memsink Protocol
+++++++++++++++++
+
+If the ``memsink`` package is available during installation of the CPython
+extension, then the resulting module's :py:class:`Transaction` object will act
+as a `source` for the `Memsink Protocol
+<https://github.com/dw/acid/issues/23>`_. This is an experimental protocol to
+allow extension of LMDB's zero-copy design outward to other C types, without
+requiring explicit management by the user.
+
+This design is a work in progress; if you have an application that would
+benefit from it, please leave a comment on the ticket above.
+
+
 ``writemap`` mode
 +++++++++++++++++
 
