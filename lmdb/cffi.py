@@ -34,6 +34,11 @@ import warnings
 import weakref
 
 import lmdb
+try:
+    from lmdb import _config
+except ImportError:
+    _config = None
+
 
 __all__ = ['Environment', 'Cursor', 'Transaction', 'open', 'enable_drop_gil']
 __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
@@ -247,13 +252,24 @@ _CFFI_VERIFY = '''
 
 if not lmdb._reading_docs():
     import cffi
+
+    # Try to use distutils-bundled cffi configuration to avoid a recompile and
+    # potential compile errors during first module import.
+    _config_vars = _config.CONFIG if _config else {
+        'extra_sources': ['lib/mdb.c', 'lib/midl.c'],
+        'extra_include_dirs': ['lib'],
+        'libraries': []
+    }
+
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
     _lib = _ffi.verify(_CFFI_VERIFY,
         ext_package='lmdb',
-        sources=['lib/mdb.c', 'lib/midl.c'],
+        sources=_config_vars['extra_sources'],
         extra_compile_args=['-Wno-shorten-64-to-32'],
-        include_dirs=['lib'])
+        include_dirs=_config_vars['extra_include_dirs'],
+        libraries=_config_vars['libraries'])
+
     globals().update((k, getattr(_lib, k))
                      for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
     EACCES = _lib.EACCES

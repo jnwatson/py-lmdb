@@ -49,8 +49,32 @@ if sys.version[:3] < '2.5':
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
     use_cpython = False
 
+if os.getenv('LMDB_USE_SYSTEM') is not None:
+    print('py-lmdb: Using system version of liblmdb.')
+    extra_sources = []
+    extra_include_dirs = []
+    libraries = ['lmdb']
+else:
+    print('py-lmdb: Using bundled liblmdb; override with LMDB_FORCE_SYSTEM=1.')
+    extra_sources = ['lib/mdb.c', 'lib/midl.c']
+    extra_include_dirs = ['lib']
+    libraries = []
+
+
+# Capture setup.py configuration for later use by cffi, otherwise the
+# configuration may differ, forcing a recompile (and therefore likely compile
+# errors). This happens even when `use_cpython` since user might want to
+# LMDB_FORCE_CFFI=1 during testing.
+with open('lmdb/_config.py', 'w') as fp:
+    fp.write('CONFIG = %r\n\n' % ({
+        'extra_sources': extra_sources,
+        'extra_include_dirs': extra_include_dirs,
+        'libraries': libraries
+    },))
+
+
 if use_cpython:
-    print('Using custom CPython extension; set LMDB_FORCE_CFFI=1 to override.')
+    print('py-lmdb: Using CPython extension; override with LMDB_FORCE_CFFI=1.')
     install_requires = []
     extra_compile_args = ['-Wno-shorten-64-to-32']
     if memsink:
@@ -58,9 +82,10 @@ if use_cpython:
                                '-I' + os.path.dirname(memsink.__file__)]
     ext_modules = [Extension(
         name='cpython',
-        sources=['lmdb/cpython.c', 'lib/mdb.c', 'lib/midl.c'],
+        sources=['lmdb/cpython.c'] + extra_sources,
         extra_compile_args=extra_compile_args,
-        include_dirs=['lib']
+        libraries=libraries,
+        include_dirs=extra_include_dirs
     )]
 else:
     print('Using cffi extension.')
