@@ -438,6 +438,45 @@ static void invalidate(struct lmdb_object *parent)
 #define INVALIDATE(parent) invalidate((void *)parent);
 
 
+// ----------
+// Exceptions
+// ----------
+
+struct error_map {
+    int code;
+    const char *name;
+};
+
+/** Array of Error subclasses corresponding to `error_map'. */
+static PyObject **error_tbl;
+/** Mapping from LMDB error code to py-lmdb exception class. */
+static const struct error_map error_map[] = {
+    {MDB_KEYEXIST, "KeyExistsError"},
+    {MDB_NOTFOUND, "NotFoundError"},
+    {MDB_PAGE_NOTFOUND, "PageNotFoundError"},
+    {MDB_CORRUPTED, "CorruptedError"},
+    {MDB_PANIC, "PanicError"},
+    {MDB_VERSION_MISMATCH, "VersionMismatchError"},
+    {MDB_INVALID, "InvalidError"},
+    {MDB_MAP_FULL, "MapFullError"},
+    {MDB_DBS_FULL, "DbsFullError"},
+    {MDB_READERS_FULL, "ReadersFullError"},
+    {MDB_TLS_FULL, "TlsFullError"},
+    {MDB_TXN_FULL, "TxnFullError"},
+    {MDB_CURSOR_FULL, "CursorFullError"},
+    {MDB_PAGE_FULL, "PageFullError"},
+    {MDB_MAP_RESIZED, "MapResizedError"},
+    {MDB_INCOMPATIBLE, "IncompatibleError"},
+    {MDB_BAD_RSLOT, "BadRSlotError"},
+    {MDB_BAD_TXN, "BadTxnError"},
+    {MDB_BAD_VALSIZE, "BadValsizeError"},
+    {EACCES, "ReadonlyError"},
+    {EINVAL, "InvalidParameterError"},
+    {EAGAIN, "LockError"},
+    {ENOMEM, "MemoryError"},
+    {ENOSPC, "DiskError"}
+};
+
 // -------
 // Helpers
 // -------
@@ -613,10 +652,26 @@ static NOINLINE void restore_thread(PyThreadState *state)
 // Exceptions
 // ----------
 
+/**
+ * Raise an exception appropriate for the given `rc` MDB error code.
+ */
 static void * NOINLINE
 err_set(const char *what, int rc)
 {
-    PyErr_Format(Error, "%s: %s", what, mdb_strerror(rc));
+    size_t count = sizeof error_map / sizeof error_map[0];
+    PyObject *klass = Error;
+    size_t i;
+
+    if(rc) {
+        for(i = 0; i < count; i++) {
+            if(error_map[i].code == rc) {
+                klass = error_tbl[i];
+                break;
+            }
+        }
+    }
+
+    PyErr_Format(klass, "%s: %s", what, mdb_strerror(rc));
     return NULL;
 }
 
@@ -2826,6 +2881,47 @@ static int init_constants(PyObject *mod)
 }
 
 
+/**
+ * Create lmdb.Error exception class, and one subclass for each entry in
+ * `error_map`.
+ */
+static int init_errors(PyObject *mod)
+{
+    Error = PyErr_NewException("lmdb.Error", NULL, NULL);
+    if(! Error) {
+        return -1;
+    }
+    if(PyObject_SetAttrString(mod, "Error", Error)) {
+        return -1;
+    }
+
+    size_t count = (sizeof error_map / sizeof error_map[0]);
+    error_tbl = malloc(sizeof(PyObject *) * count);
+    if(! error_tbl) {
+        return -1;
+    }
+
+    int i;
+    char qualname[64];
+    for(i = 0; i < count; i++) {
+        const struct error_map *error = &error_map[i];
+        snprintf(qualname, sizeof qualname, "lmdb.%s", error->name);
+        qualname[sizeof qualname - 1] = '\0';
+
+        PyObject *klass = PyErr_NewException(qualname, Error, NULL);
+        if(! klass) {
+            return -1;
+        }
+
+        error_tbl[i] = klass;
+        if(PyObject_SetAttrString(mod, error->name, klass)) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
 PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
@@ -2855,12 +2951,7 @@ MODINIT_NAME(void)
     if(init_constants(mod)) {
         MOD_RETURN(NULL);
     }
-
-    Error = PyErr_NewException("lmdb.Error", NULL, NULL);
-    if(! Error) {
-        MOD_RETURN(NULL);
-    }
-    if(PyObject_SetAttrString(mod, "Error", Error)) {
+    if(init_errors(mod)) {
         MOD_RETURN(NULL);
     }
     if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
