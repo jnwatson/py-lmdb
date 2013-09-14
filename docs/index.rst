@@ -40,11 +40,10 @@ LMDB is a tiny database with some excellent properties:
 Installation
 ++++++++++++
 
-For convenience, a supported version of the LMDB library is bundled inline with
-the binding and built statically by default. If your system has an install of
-LMDB available, set the ``LMDB_FORCE_SYSTEM`` environment variable, and
-optionally ``LMDB_INCLUDEDIR`` and ``LMDB_LIBDIR`` prior to invoking
-``setup.py``.
+For convenience, a supported version of LMDB is bundled with the binding and
+built statically by default. If your system distribution includes LMDB, set the
+``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
+and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
 *Note:* on PyPy the wrapper depends on cffi which in turn depends on
 ``libffi``, so you may need to install the development package for it. Both
