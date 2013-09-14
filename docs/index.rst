@@ -11,10 +11,12 @@ lmdb
     :maxdepth: 2
 
 This is a universal Python binding for the `OpenLDAP MDB 'Lightning' Database
-<http://symas.com/mdb/>`_. Two versions are provided and automatically selected
-during installation: a `cffi <http://cffi.readthedocs.org/en/release-0.5/>`_
-version that supports `PyPy <http://www.pypy.org/>`_ and all versions of
-CPython >=2.6, and a custom module that supports CPython 2.5-2.7 and >=3.3.
+<http://symas.com/mdb/>`_. Two implementations are provided and automatically
+selected during installation, depending on host environment: a `cffi
+<http://cffi.readthedocs.org/en/release-0.5/>`_ implementation that supports
+`PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6, and a custom
+module that supports CPython 2.5-2.7 and >=3.3. Both implementations provide
+the same interface.
 
 MDB is a tiny database with some excellent properties:
 
