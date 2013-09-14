@@ -10,7 +10,7 @@ lmdb
     :hidden:
     :maxdepth: 2
 
-This is a universal Python binding for the `OpenLDAP MDB 'Lightning' Database
+This is a universal Python binding for the `OpenLDAP LMDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two implementations are provided and automatically
 selected during installation, depending on host environment: a `cffi
 <http://cffi.readthedocs.org/en/release-0.5/>`_ implementation that supports
@@ -18,7 +18,7 @@ selected during installation, depending on host environment: a `cffi
 module that supports CPython 2.5-2.7 and >=3.3. Both implementations provide
 the same interface.
 
-MDB is a tiny database with some excellent properties:
+LMDB is a tiny database with some excellent properties:
 
 * Ordered-map interface (keys are always sorted)
 * Reader/writer transactions: readers don't block writers and writers don't
@@ -32,7 +32,7 @@ MDB is a tiny database with some excellent properties:
 * Memory mapped, allowing for zero copy lookup and iteration. This is
   optionally exposed to Python using the :py:func:`buffer` interface.
 * Maintenance requires no external process or background threads.
-* No application-level caching is required: MDB relies entirely on the
+* No application-level caching is required: LMDB relies entirely on the
   operating system's buffer cache.
 * 32kb of object code and 6kLOC of C.
 
@@ -87,7 +87,7 @@ the environment as it is used to allocate resources kept in shared memory.
 
 .. caution::
 
-    MDB implements sub-databases by *storing a special descriptor key in the
+    LMDB implements sub-databases by *storing a special descriptor key in the
     main database*. All databases in an environment *share the same file*.
     Because a sub-database is just a key in the main database, attempts to
     create one will fail if this key already exists. Furthermore *the key is
@@ -120,10 +120,10 @@ management amongst users.
 Storage efficiency & limits
 +++++++++++++++++++++++++++
 
-MDB groups records in pages matching the operating system memory manager's page
-size which is usually 4096 bytes. In order to maintain its internal structure
-each page must contain a minimum of 2 records, in addition to 8 bytes per
-record and a 16 byte header. Due to this the engine is most space-efficient
+LMDB groups records in pages matching the operating system memory manager's
+page size which is usually 4096 bytes. In order to maintain its internal
+structure each page must contain a minimum of 2 records, in addition to 8 bytes
+per record and a 16 byte header. Due to this the engine is most space-efficient
 when the combined size of any (8+key+value) combination does not exceed 2040
 bytes.
 
@@ -155,8 +155,8 @@ adjusted by rebuilding the library.
 Buffers
 +++++++
 
-Since MDB is memory mapped it is possible to access record data without keys or
-values ever being copied by the kernel, database library, or application. To
+Since LMDB is memory mapped it is possible to access record data without keys
+or values ever being copied by the kernel, database library, or application. To
 exploit this the library can be instructed to return :py:func:`buffer` objects
 instead of strings by passing `buffers=True` to :py:meth:`Environment.begin` or
 :py:class:`Transaction`.
