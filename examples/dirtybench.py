@@ -8,7 +8,7 @@ import random
 import lmdb
 
 MAP_SIZE = 1048576 * 400
-DB_PATH = 'testdb'
+DB_PATH = '/ram/testdb'
 
 
 def x():
