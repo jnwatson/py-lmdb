@@ -52,16 +52,10 @@
 // Inlining control for compatible compilers.
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #   define NOINLINE __attribute__((noinline))
-#   define likely(x) __builtin_expect(!!(x), 1)
-#   define unlikely(x) __builtin_expect(!!(x), 0)
 #elif defined(_MSC_VER)
 #   define NOINLINE __declspec(noinline)
-#   define likely(x) x
-#   define unlikely(x) x
 #else
 #   define NOINLINE
-#   define likely(x) x
-#   define unlikely(x) x
 #endif
 
 
@@ -519,7 +513,7 @@ static PyObject *
 dict_from_fields(void *o, const struct dict_field *fields)
 {
     PyObject *dict = PyDict_New();
-    if(unlikely(! dict)) {
+    if(! dict) {
         return NULL;
     }
 
@@ -535,12 +529,12 @@ dict_from_fields(void *o, const struct dict_field *fields)
         }
 
         PyObject *lo = PyLong_FromUnsignedLongLong(l);
-        if(unlikely(! lo)) {
+        if(! lo) {
             Py_DECREF(dict);
             return NULL;
         }
 
-        if(unlikely(PyDict_SetItemString(dict, fields->name, lo))) {
+        if(PyDict_SetItemString(dict, fields->name, lo)) {
             Py_DECREF(lo);
             Py_DECREF(dict);
             return NULL;
@@ -564,7 +558,7 @@ buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
     BUFFER_TYPE *buf = *bufp;
     if(! buf) {
         buf = (BUFFER_TYPE *) MAKE_BUFFER();
-        if(unlikely(! buf)) {
+        if(! buf) {
             return NULL;
         }
         *bufp = buf;
@@ -606,7 +600,7 @@ val_from_buffer(MDB_val *val, PyObject *buf)
     if(PyUnicode_CheckExact(buf)) {
         char *data;
         Py_ssize_t size;
-        if(unlikely(! (data = PyUnicode_AsUTF8AndSize(buf, &size)))) {
+        if(! (data = PyUnicode_AsUTF8AndSize(buf, &size))) {
             return -1;
         }
         val->mv_data = data;
@@ -730,16 +724,16 @@ static int NOINLINE
 parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
 {
     int rc = PyObject_RichCompareBool(obj, py_zero, Py_GE);
-    if(unlikely(rc == -1)) {
+    if(rc == -1) {
         return -1;
-    } else if(unlikely(! rc)) {
+    } else if(! rc) {
         type_error("Integer argument must be >= 0");
         return -1;
     }
     rc = PyObject_RichCompareBool(obj, max, Py_LE);
-    if(unlikely(rc == -1)) {
+    if(rc == -1) {
         return -1;
-    } else if(unlikely(! rc)) {
+    } else if(! rc) {
         type_error("Integer argument exceeds limit.");
         return -1;
     }
@@ -764,7 +758,7 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
         case ARG_DB:
         case ARG_TRANS:
         case ARG_ENV:
-            if(unlikely(val->ob_type != type_tbl[spec->type])) {
+            if(val->ob_type != type_tbl[spec->type]) {
                 type_error("invalid type");
                 return -1;
             }
@@ -780,18 +774,18 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
             break;
         case ARG_STR: {
             MDB_val mv;
-            if(likely(! (ret = val_from_buffer(&mv, val)))) {
+            if(! (ret = val_from_buffer(&mv, val))) {
                 *((char **) dst) = mv.mv_data;
             }
             break;
         }
         case ARG_INT:
-            if(likely(! (ret = parse_ulong(val, &l, py_int_max)))) {
+            if(! (ret = parse_ulong(val, &l, py_int_max))) {
                 *((int *) dst) = l;
             }
             break;
         case ARG_SIZE:
-            if(likely(! (ret = parse_ulong(val, &l, py_size_max)))) {
+            if(! (ret = parse_ulong(val, &l, py_size_max))) {
                 *((size_t *) dst) = l;
             }
             break;
@@ -809,22 +803,22 @@ static int NOINLINE
 parse_args(int valid, int specsize, const struct argspec *argspec,
            PyObject *args, PyObject *kwds, void *out)
 {
-    if(unlikely(! valid)) {
+    if(! valid) {
         err_invalid();
         return -1;
     }
 
     unsigned set = 0;
     unsigned i;
-    if(likely(args)) {
+    if(args) {
         int size = PyTuple_GET_SIZE(args);
-        if(unlikely(size > specsize)) {
+        if(size > specsize) {
             type_error("too many positional arguments.");
             return -1;
         }
         size = fmin(specsize, size);
         for(i = 0; i < size; i++) {
-            if(unlikely(parse_arg(argspec + i, PyTuple_GET_ITEM(args, i), out))) {
+            if(parse_arg(argspec + i, PyTuple_GET_ITEM(args, i), out)) {
                 return -1;
             }
             set |= 1 << i;
@@ -840,19 +834,19 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
             PyObject *kwd = string_tbl[spec->string_id];
             PyObject *val = PyDict_GetItem(kwds, kwd);
             if(val) {
-                if(unlikely(set & (1 << i))) {
+                if(set & (1 << i)) {
                     PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
                                  PyBytes_AS_STRING(kwd));
                     return -1;
                 }
-                if(unlikely(parse_arg(spec, val, out))) {
+                if(parse_arg(spec, val, out)) {
                     return -1;
                 }
                 c++;
             }
         }
 
-        if(unlikely(c != size)) {
+        if(c != size) {
             type_error("unrecognized keyword argument");
             return -1;
         }
@@ -882,11 +876,11 @@ generic_get(int valid, MDB_txn *txn, DbObject *db, int buffers,
         {ARG_DB, DB_S, OFFSET(generic_get, db)}
     };
 
-    if(unlikely(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.key.mv_data)) {
+    if(! arg.key.mv_data) {
         return type_error("key must be given.");
     }
 
@@ -894,7 +888,7 @@ generic_get(int valid, MDB_txn *txn, DbObject *db, int buffers,
     int rc;
     UNLOCKED(rc, mdb_get(txn, arg.db->dbi, &arg.key, &val));
     if(rc) {
-        if(likely(rc == MDB_NOTFOUND)) {
+        if(rc == MDB_NOTFOUND) {
             Py_INCREF(arg.default_);
             return arg.default_;
         }
@@ -928,7 +922,7 @@ generic_put(int valid, MDB_txn *txn, DbObject *db,
         {ARG_DB, DB_S, OFFSET(generic_put, db)}
     };
 
-    if(unlikely(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -951,7 +945,7 @@ generic_put(int valid, MDB_txn *txn, DbObject *db,
 
     int rc;
     UNLOCKED(rc, mdb_put(txn, (arg.db)->dbi, &arg.key, &arg.value, flags));
-    if(unlikely(rc)) {
+    if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
         }
@@ -976,7 +970,7 @@ generic_delete(int valid, MDB_txn *txn, DbObject *db,
         {ARG_DB, DB_S, OFFSET(generic_delete, db)}
     };
 
-    if(unlikely(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
     MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
@@ -1007,7 +1001,7 @@ generic_finish(TransObject *trans, PyObject *ret)
         rett = trans_abort(trans);
     }
     Py_DECREF(trans);
-    if(unlikely(! rett)) {
+    if(! rett) {
         Py_CLEAR(ret);
         return NULL;
     }
@@ -1020,7 +1014,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 {
     DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
         env, parent, write, buffers)
-    if(unlikely(! env->valid)) {
+    if(! env->valid) {
         return err_invalid();
     }
 
@@ -1030,28 +1024,28 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 
     MDB_txn *parent_txn = NULL;
     if(parent) {
-        if(unlikely(parent->flags & TRANS_RDONLY)) {
+        if(parent->flags & TRANS_RDONLY) {
             return err_set("Read-only transactions cannot be nested.", 0);
         }
-        if(unlikely(! parent->valid)) {
+        if(! parent->valid) {
             return err_invalid();
         }
         parent_txn = parent->txn;
     }
 
-    if(unlikely(write && env->readonly)) {
+    if(write && env->readonly) {
         return err_set("Cannot start write transaction with read-only env", 0);
     }
 
     TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
-    if(unlikely(! self)) {
+    if(! self) {
         return NULL;
     }
 
     int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
     int rc;
     UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
-    if(unlikely(rc)) {
+    if(rc) {
         PyObject_Del(self);
         return err_set("mdb_txn_begin", rc);
     }
@@ -1080,7 +1074,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 static PyObject *
 make_cursor(DbObject *db, TransObject *trans)
 {
-    if(unlikely(! trans->valid)) {
+    if(! trans->valid) {
         return err_invalid();
     }
     if(! db) {
@@ -1090,7 +1084,7 @@ make_cursor(DbObject *db, TransObject *trans)
     CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
     int rc;
     UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &self->curs));
-    if(unlikely(rc)) {
+    if(rc) {
         PyObject_Del(self);
         return err_set("mdb_cursor_open", rc);
     }
@@ -1122,13 +1116,13 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     int rc;
 
     UNLOCKED(rc, mdb_dbi_open(txn, name, flags, &dbi));
-    if(unlikely(rc)) {
+    if(rc) {
         err_set("mdb_dbi_open", rc);
         return NULL;
     }
 
     DbObject *dbo = PyObject_New(DbObject, &PyDatabase_Type);
-    if(unlikely(! dbo)) {
+    if(! dbo) {
         return NULL;
     }
 
@@ -1150,13 +1144,13 @@ txn_db_from_name(EnvObject *env, const char *name,
 
     int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
     UNLOCKED(rc, mdb_txn_begin(env->env, NULL, begin_flags, &txn));
-    if(unlikely(rc)) {
+    if(rc) {
         err_set("mdb_txn_begin", rc);
         return NULL;
     }
 
     DbObject *dbo = db_from_name(env, txn, name, flags);
-    if(unlikely(! dbo)) {
+    if(! dbo) {
         DROP_GIL
         mdb_txn_abort(txn);
         LOCK_GIL
@@ -1164,7 +1158,7 @@ txn_db_from_name(EnvObject *env, const char *name,
     }
 
     UNLOCKED(rc, mdb_txn_commit(txn));
-    if(unlikely(rc)) {
+    if(rc) {
         Py_DECREF(dbo);
         return err_set("mdb_txn_commit", rc);
     }
@@ -1268,16 +1262,16 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)}
     };
 
-    if(unlikely(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.path)) {
+    if(! arg.path) {
         return type_error("'path' argument required");
     }
 
     EnvObject *self = PyObject_New(EnvObject, type);
-    if(unlikely(! self)) {
+    if(! self) {
         return NULL;
     }
 
@@ -1287,22 +1281,22 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->env = NULL;
 
     int rc;
-    if(unlikely((rc = mdb_env_create(&self->env)))) {
+    if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
         goto fail;
     }
 
-    if(unlikely((rc = mdb_env_set_mapsize(self->env, arg.map_size)))) {
+    if((rc = mdb_env_set_mapsize(self->env, arg.map_size))) {
         err_set("mdb_env_set_mapsize", rc);
         goto fail;
     }
 
-    if(unlikely((rc = mdb_env_set_maxreaders(self->env, arg.max_readers)))) {
+    if((rc = mdb_env_set_maxreaders(self->env, arg.max_readers))) {
         err_set("mdb_env_set_maxreaders", rc);
         goto fail;
     }
 
-    if(unlikely((rc = mdb_env_set_maxdbs(self->env, arg.max_dbs)))) {
+    if((rc = mdb_env_set_maxdbs(self->env, arg.max_dbs))) {
         err_set("mdb_env_set_maxdbs", rc);
         goto fail;
     }
@@ -1312,7 +1306,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         errno = 0;
         stat(arg.path, &st);
         if(errno == ENOENT) {
-            if(unlikely(mkdir(arg.path, 0700))) {
+            if(mkdir(arg.path, 0700)) {
                 PyErr_SetFromErrnoWithFilename(PyExc_OSError, arg.path);
                 goto fail;
             }
@@ -1342,13 +1336,13 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, arg.mode)
     UNLOCKED(rc, mdb_env_open(self->env, arg.path, flags, arg.mode));
-    if(unlikely(rc)) {
+    if(rc) {
         err_set(arg.path, rc);
         goto fail;
     }
 
     self->main_db = txn_db_from_name(self, NULL, 0);
-    if(likely(self->main_db)) {
+    if(self->main_db) {
         self->valid = 1;
         DEBUG("EnvObject '%s' opened at %p", arg.path, self)
         return (PyObject *) self;
@@ -1379,7 +1373,7 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
@@ -1411,15 +1405,15 @@ env_copy(EnvObject *self, PyObject *args)
         {ARG_STR, PATH_S, OFFSET(env_copy, path)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
-    if(unlikely(! arg.path)) {
+    if(! arg.path) {
         return type_error("path argument required");
     }
     int rc;
     UNLOCKED(rc, mdb_env_copy(self->env, arg.path));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_env_copy", rc);
     }
     Py_RETURN_NONE;
@@ -1436,15 +1430,15 @@ env_copyfd(EnvObject *self, PyObject *args)
         {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
-    if(unlikely(arg.fd == -1)) {
+    if(arg.fd == -1) {
         return type_error("fd argument required");
     }
     int rc;
     UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_env_copyfd", rc);
     }
     Py_RETURN_NONE;
@@ -1463,14 +1457,14 @@ env_info(EnvObject *self)
         {TYPE_EOF, NULL, 0}
     };
 
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     MDB_envinfo info;
     int rc;
     UNLOCKED(rc, mdb_env_info(self->env, &info));
-    if(unlikely(rc)) {
+    if(rc) {
         err_set("mdb_env_info", rc);
         return NULL;
     }
@@ -1496,7 +1490,7 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, CREATE_S, OFFSET(env_open_db, create)},
     };
 
-    if(unlikely(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1521,13 +1515,13 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_path(EnvObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     const char *path;
     int rc;
-    if(unlikely((rc = mdb_env_get_path(self->env, &path)))) {
+    if((rc = mdb_env_get_path(self->env, &path))) {
         return err_set("mdb_env_get_path", rc);
     }
     return PyUnicode_FromString(path);
@@ -1546,14 +1540,14 @@ static const struct dict_field mdb_stat_fields[] = {
 static PyObject *
 env_stat(EnvObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     MDB_stat st;
     int rc;
     UNLOCKED(rc, mdb_env_stat(self->env, &st));
-    if(unlikely(rc)) {
+    if(rc) {
         err_set("mdb_env_stat", rc);
         return NULL;
     }
@@ -1566,7 +1560,7 @@ static int env_readers_callback(const char *msg, void *str_)
     int old_size = PyString_GET_SIZE(*str);
     int chunk_size = strlen(msg);
 
-    if(unlikely(_PyString_Resize(str, old_size + chunk_size))) {
+    if(_PyString_Resize(str, old_size + chunk_size)) {
         return -1;
     }
     memcpy(PyString_AS_STRING(*str) + old_size, msg, chunk_size);
@@ -1576,12 +1570,12 @@ static int env_readers_callback(const char *msg, void *str_)
 static PyObject *
 env_readers(EnvObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     PyObject *str = PyString_FromStringAndSize(NULL, 20);
-    if(unlikely(! str)) {
+    if(! str) {
         return NULL;
     }
 
@@ -1595,13 +1589,13 @@ env_readers(EnvObject *self)
 static PyObject *
 env_reader_check(EnvObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     int dead;
     int rc = mdb_reader_check(self->env, &dead);
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_reader_check", rc);
     }
     return PyInt_FromLong(dead);
@@ -1618,13 +1612,13 @@ env_sync(EnvObject *self, PyObject *args)
         {ARG_BOOL, FORCE_S, OFFSET(env_sync, force)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
 
     int rc;
     UNLOCKED(rc, mdb_env_sync(self->env, arg.force));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_env_sync", rc);
     }
     Py_RETURN_NONE;
@@ -1634,7 +1628,7 @@ static PyObject *
 env_get(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 0, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         return NULL;
     }
 
@@ -1656,27 +1650,27 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(env_gets, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.keys)) {
+    if(! arg.keys) {
         return type_error("keys must be given");
     }
 
     PyObject *iter = PyObject_GetIter(arg.keys);
-    if(unlikely(! iter)) {
+    if(! iter) {
         return NULL;
     }
 
     PyObject *dict = PyDict_New();
-    if(unlikely(! dict)) {
+    if(! dict) {
         Py_DECREF(iter);
         return NULL;
     }
 
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 0, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(dict);
         return NULL;
@@ -1687,7 +1681,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
     MDB_val val;
 
     while((key_obj = PyIter_Next(iter)) != NULL) {
-        if(unlikely(val_from_buffer(&key, key_obj))) {
+        if(val_from_buffer(&key, key_obj)) {
             break;
         }
 
@@ -1695,7 +1689,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
         UNLOCKED(rc, mdb_get(trans->txn, arg.db->dbi, &key, &val));
         if(rc == 0) {
             PyObject *val_obj = string_from_val(&val);
-            if(unlikely(! val_obj)) {
+            if(! val_obj) {
                 break;
             }
             rc = PyDict_SetItem(dict, key_obj, val_obj);
@@ -1703,7 +1697,7 @@ env_gets(EnvObject *self, PyObject *args, PyObject *kwds)
             if(rc) {
                 break;
             }
-        } else if(unlikely(rc != MDB_NOTFOUND)) {
+        } else if(rc != MDB_NOTFOUND) {
             err_set("mdb_get", rc);
             break;
         }
@@ -1723,7 +1717,7 @@ static PyObject *
 env_put(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         return NULL;
     }
 
@@ -1750,11 +1744,11 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(env_puts, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.items)) {
+    if(! arg.items) {
         return type_error("items must be given");
     }
 
@@ -1765,18 +1759,18 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
     } else {
         iter = PyObject_GetIter(arg.items);
     }
-    if(unlikely(! iter)) {
+    if(! iter) {
         return NULL;
     }
 
     PyObject *list = PyList_New(0);
-    if(unlikely(! list)) {
+    if(! list) {
         Py_DECREF(iter);
         return NULL;
     }
 
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         Py_DECREF(iter);
         Py_DECREF(list);
         return NULL;
@@ -1798,7 +1792,7 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
     MDB_val val;
 
     while((item = PyIter_Next(iter)) != NULL) {
-        if(unlikely(! (PyTuple_Check(item) && PyTuple_GET_SIZE(item) == 2))) {
+        if(! (PyTuple_Check(item) && PyTuple_GET_SIZE(item) == 2)) {
             Py_DECREF(item);
             type_error("puts() element type must be a 2-tuple.");
             break;
@@ -1841,7 +1835,7 @@ static PyObject *
 env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         return NULL;
     }
 
@@ -1862,27 +1856,27 @@ env_deletes(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(env_deletes, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.keys)) {
+    if(! arg.keys) {
         return type_error("keys must be given");
     }
 
     PyObject *iter = PyObject_GetIter(arg.keys);
-    if(unlikely(! iter)) {
+    if(! iter) {
         return NULL;
     }
 
     PyObject *list = PyList_New(0);
-    if(unlikely(! list)) {
+    if(! list) {
         Py_DECREF(iter);
         return NULL;
     }
 
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
-    if(unlikely(! trans)) {
+    if(! trans) {
         return NULL;
     }
 
@@ -1928,12 +1922,12 @@ env_cursor(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(env_cursor, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
     PyObject *trans = make_trans(self, NULL, NULL, 0, arg.buffers);
-    if(unlikely(! trans)) {
+    if(! trans) {
         return NULL;
     }
 
@@ -2029,11 +2023,11 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_TRANS, TXN_S, OFFSET(cursor_new, trans)}
     };
 
-    if(unlikely(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! (arg.db && arg.trans))) {
+    if(! (arg.db && arg.trans)) {
         return type_error("db and transaction parameters required.");
     }
     return make_cursor(arg.db, arg.trans);
@@ -2042,14 +2036,14 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static PyObject *
 cursor_count(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
     size_t count;
     int rc;
     UNLOCKED(rc, mdb_cursor_count(self->curs, &count));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_cursor_count", rc);
     }
     return PyLong_FromUnsignedLongLong(count);
@@ -2066,7 +2060,7 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
         self->key.mv_size = 0;
         self->val.mv_size = 0;
         if(rc != MDB_NOTFOUND) {
-            if(unlikely(! (rc == EINVAL && op == MDB_GET_CURRENT))) {
+            if(! (rc == EINVAL && op == MDB_GET_CURRENT)) {
                 err_set("mdb_cursor_get", rc);
                 return -1;
             }
@@ -2079,7 +2073,7 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 static PyObject *
 _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 {
-    if(unlikely(_cursor_get_c(self, op))) {
+    if(_cursor_get_c(self, op)) {
         return NULL;
     }
     PyObject *res = self->positioned ? Py_True : Py_False;
@@ -2091,7 +2085,7 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 static PyObject *
 cursor_delete(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     PyObject *ret = Py_False;
@@ -2101,7 +2095,7 @@ cursor_delete(CursorObject *self)
               (char*) self->key.mv_data)
         int rc;
         UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
-        if(unlikely(rc)) {
+        if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
         ret = Py_True;
@@ -2115,7 +2109,7 @@ cursor_delete(CursorObject *self)
 static PyObject *
 cursor_first(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_FIRST);
@@ -2129,7 +2123,7 @@ cursor_value(CursorObject *self);
 static PyObject *
 cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
 
@@ -2143,16 +2137,16 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) ){
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    if(unlikely(! arg.key.mv_data)) {
+    if(! arg.key.mv_data) {
         return type_error("key must be given.");
     }
 
     self->key = arg.key;
-    if(unlikely(_cursor_get_c(self, MDB_SET_KEY)) ){
+    if(_cursor_get_c(self, MDB_SET_KEY)) {
         return NULL;
     }
     if(! self->positioned) {
@@ -2166,20 +2160,20 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 cursor_item(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->flags & TRANS_BUFFERS) {
-        if(unlikely(! buffer_from_val(&self->key_buf, &self->key))) {
+        if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
-        if(unlikely(! buffer_from_val(&self->val_buf, &self->val))) {
+        if(! buffer_from_val(&self->val_buf, &self->val)) {
             return NULL;
         }
-        if(unlikely(! self->item_tup)) {
+        if(! self->item_tup) {
             self->item_tup = PyTuple_Pack(2, self->key_buf, self->val_buf);
         }
-        if(unlikely(! self->item_tup)) {
+        if(! self->item_tup) {
             return NULL;
         }
         Py_INCREF(self->item_tup);
@@ -2187,16 +2181,16 @@ cursor_item(CursorObject *self)
     }
 
     PyObject *key = string_from_val(&self->key);
-    if(unlikely(! key)) {
+    if(! key) {
         return NULL;
     }
     PyObject *val = string_from_val(&self->val);
-    if(unlikely(! val)) {
+    if(! val) {
         Py_DECREF(key);
         return NULL;
     }
     PyObject *tup = PyTuple_New(2);
-    if(unlikely(! tup)) {
+    if(! tup) {
         Py_DECREF(key);
         Py_DECREF(val);
         return NULL;
@@ -2209,11 +2203,11 @@ cursor_item(CursorObject *self)
 static PyObject *
 cursor_key(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->flags & TRANS_BUFFERS) {
-        if(unlikely(! buffer_from_val(&self->key_buf, &self->key))) {
+        if(! buffer_from_val(&self->key_buf, &self->key)) {
             return NULL;
         }
         Py_INCREF(self->key_buf);
@@ -2225,7 +2219,7 @@ cursor_key(CursorObject *self)
 static PyObject *
 cursor_last(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_LAST);
@@ -2234,7 +2228,7 @@ cursor_last(CursorObject *self)
 static PyObject *
 cursor_next(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_NEXT);
@@ -2243,7 +2237,7 @@ cursor_next(CursorObject *self)
 static PyObject *
 cursor_prev(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     return _cursor_get(self, MDB_PREV);
@@ -2268,7 +2262,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2285,7 +2279,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 
     int rc;
     UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
-    if(unlikely(rc)) {
+    if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
         }
@@ -2298,10 +2292,10 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
-    if(unlikely(val_from_buffer(&self->key, arg))) {
+    if(val_from_buffer(&self->key, arg)) {
         return NULL;
     }
     return _cursor_get(self, MDB_SET_KEY);
@@ -2310,10 +2304,10 @@ cursor_set_key(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_set_range(CursorObject *self, PyObject *arg)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
-    if(unlikely(val_from_buffer(&self->key, arg))) {
+    if(val_from_buffer(&self->key, arg)) {
         return NULL;
     }
     if(self->key.mv_size) {
@@ -2325,11 +2319,11 @@ cursor_set_range(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_value(CursorObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(self->trans->flags & TRANS_BUFFERS) {
-        if(unlikely(! buffer_from_val(&self->val_buf, &self->val))) {
+        if(! buffer_from_val(&self->val_buf, &self->val)) {
             return NULL;
         }
         Py_INCREF(self->val_buf);
@@ -2352,18 +2346,18 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         {ARG_BOOL, VALUES_S, OFFSET(iter_from_args, values)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
     if(! self->positioned) {
-        if(unlikely(_cursor_get_c(self, pos_op))) {
+        if(_cursor_get_c(self, pos_op)) {
             return NULL;
         }
     }
 
     IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
-    if(unlikely(! iter)) {
+    if(! iter) {
         return NULL;
     }
 
@@ -2413,7 +2407,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
         {ARG_BOOL, REVERSE_S, OFFSET(cursor_iter_from, reverse)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
 
@@ -2425,7 +2419,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
         rc = _cursor_get_c(self, MDB_SET_RANGE);
     }
 
-    if(unlikely(rc)) {
+    if(rc) {
         return NULL;
     }
 
@@ -2433,7 +2427,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     if(arg.reverse) {
         op = MDB_PREV;
         if(! self->positioned) {
-            if(unlikely(_cursor_get_c(self, MDB_LAST))) {
+            if(_cursor_get_c(self, MDB_LAST)) {
                 return NULL;
             }
         }
@@ -2507,14 +2501,14 @@ iter_iter(IterObject *self)
 static PyObject *
 iter_next(IterObject *self)
 {
-    if(unlikely(! self->curs->valid)) {
+    if(! self->curs->valid) {
         return err_invalid();
     }
     if(! self->curs->positioned) {
         return NULL;
     }
     if(self->started) {
-        if(unlikely(_cursor_get_c(self->curs, self->op))) {
+        if(_cursor_get_c(self->curs, self->op)) {
             return NULL;
         }
         if(! self->curs->positioned) {
@@ -2599,10 +2593,10 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
     };
 
-    if(unlikely(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
-    if(unlikely(! arg.env)) {
+    if(! arg.env) {
         return type_error("'env' argument required");
     }
     return make_trans(arg.env, arg.db, arg.parent, arg.write, arg.buffers);
@@ -2612,7 +2606,7 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_abort(TransObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     DEBUG("aborting")
@@ -2631,7 +2625,7 @@ trans_abort(TransObject *self)
 static PyObject *
 trans_commit(TransObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     DEBUG("committing")
@@ -2643,7 +2637,7 @@ trans_commit(TransObject *self)
     UNLOCKED(rc, mdb_txn_commit(self->txn));
     self->txn = NULL;
     self->valid = 0;
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_txn_commit", rc);
     }
     Py_RETURN_NONE;
@@ -2661,7 +2655,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
     return make_cursor(arg.db, self);
@@ -2688,16 +2682,16 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, DELETE_S, OFFSET(trans_drop, delete)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
-    if(unlikely(! arg.db)) {
+    if(! arg.db) {
         return type_error("'db' argument required.");
     }
 
     int rc;
     UNLOCKED(rc, mdb_drop(self->txn, arg.db->dbi, arg.delete));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_drop", rc);
     }
     Py_RETURN_NONE;
@@ -2719,7 +2713,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 
 static PyObject *trans_enter(TransObject *self)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     Py_INCREF(self);
@@ -2728,7 +2722,7 @@ static PyObject *trans_enter(TransObject *self)
 
 static PyObject *trans_exit(TransObject *self, PyObject *args)
 {
-    if(unlikely(! self->valid)) {
+    if(! self->valid) {
         return err_invalid();
     }
     if(PyTuple_GET_ITEM(args, 0) == Py_None) {
@@ -2750,14 +2744,14 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(trans_stat, db)}
     };
 
-    if(unlikely(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg))) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
     MDB_stat st;
     int rc;
     UNLOCKED(rc, mdb_stat(self->txn, arg.db->dbi, &st));
-    if(unlikely(rc)) {
+    if(rc) {
         return err_set("mdb_stat", rc);
     }
     return dict_from_fields(&st, mdb_stat_fields);
