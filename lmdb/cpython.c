@@ -697,15 +697,15 @@ type_error(const char *what)
 #define OFFSET(k, y) offsetof(struct k, y)
 #define SPECSIZE() (sizeof(argspec) / sizeof(argspec[0]))
 enum arg_type {
-    ARG_DB,
-    ARG_TRANS,
-    ARG_ENV,
-    ARG_OBJ,
-    ARG_BOOL,
-    ARG_BUF,
-    ARG_STR,
-    ARG_INT,
-    ARG_SIZE
+    ARG_DB,     /** DbObject*               */
+    ARG_TRANS,  /** TransObject*            */
+    ARG_ENV,    /** EnvObject*              */
+    ARG_OBJ,    /** PyObject*               */
+    ARG_BOOL,   /** int                     */
+    ARG_BUF,    /** MDB_val                 */
+    ARG_STR,    /** char*                   */
+    ARG_INT,    /** int                     */
+    ARG_SIZE    /** size_t                  */
 };
 struct argspec {
     unsigned char type;
@@ -762,7 +762,7 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
                 type_error("invalid type");
                 return -1;
             }
-            /** fallthrough */
+            /* fallthrough */
         case ARG_OBJ:
             *((PyObject **) dst) = val;
             break;
