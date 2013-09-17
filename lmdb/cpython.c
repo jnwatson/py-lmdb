@@ -346,6 +346,9 @@ struct CursorObject {
     MDB_val val;
 };
 
+
+typedef PyObject *(*IterValFunc)(CursorObject *);
+
 /** lmdb.Iterator
  *
  * This is separate from Cursor since we want to define Cursor.next() to mean
@@ -360,7 +363,7 @@ struct IterObject {
     /** Operation used to advance cursor. */
     MDB_cursor_op op;
     /** Iterator value function, should be item(), key(), or value(). */
-    PyObject *(*val_func)(CursorObject *);
+    IterValFunc val_func;
 };
 
 
@@ -2333,6 +2336,20 @@ cursor_value(CursorObject *self)
 }
 
 static PyObject *
+new_iterator(CursorObject *cursor, IterValFunc val_func, MDB_cursor_op op)
+{
+    IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
+    if(iter) {
+        iter->val_func = val_func;
+        iter->curs = cursor;
+        Py_INCREF(cursor);
+        iter->started = 0;
+        iter->op = op;
+    }
+    return (PyObject *) iter;
+}
+
+static PyObject *
 iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
                enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
 {
@@ -2356,24 +2373,15 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         }
     }
 
-    IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
-    if(! iter) {
-        return NULL;
-    }
-
+    void *val_func;
     if(! arg.values) {
-        iter->val_func = (void *)cursor_key;
+        val_func = cursor_key;
     } else if(! arg.keys) {
-        iter->val_func = (void *)cursor_value;
+        val_func = cursor_value;
     } else {
-        iter->val_func = (void *)cursor_item;
+        val_func = cursor_item;
     }
-
-    iter->curs = self;
-    Py_INCREF(self);
-    iter->started = 0;
-    iter->op = op;
-    return (PyObject *) iter;
+    return new_iterator(self, val_func, op);
 }
 
 static PyObject *
@@ -2434,15 +2442,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     }
 
     DEBUG("positioned? %d", self->positioned)
-    IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
-    if(iter) {
-        iter->val_func = (void *)cursor_item;
-        iter->curs = self;
-        Py_INCREF(self);
-        iter->started = 0;
-        iter->op = op;
-    }
-    return (PyObject *) iter;
+    return new_iterator(self, (void *)cursor_item, op);
 }
 
 static struct PyMethodDef cursor_methods[] = {
