@@ -123,7 +123,7 @@ def grep_version():
 setup(
     name = 'lmdb',
     version = grep_version(),
-    description = "cffi/CPython native wrapper for OpenLDAP MDB 'Lightning Database' library",
+    description = "Universal Python binding for the LMDB 'Lightning' Database",
     author = 'David Wilson',
     license = 'OpenLDAP BSD',
     url = 'http://github.com/dw/py-lmdb/',
