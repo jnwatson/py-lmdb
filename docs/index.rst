@@ -36,6 +36,11 @@ LMDB is a tiny database with some excellent properties:
   operating system's buffer cache.
 * 32kb of object code and 6kLOC of C.
 
+Significant effort has been made to ensure the binding is as user-friendly as
+possible, in particular by raising exceptions instead of crashing when
+impossible operations are attempted, such as iterating a cursor when its
+transaction has been aborted, or deleting a key when the environment has been
+closed.
 
 Installation
 ++++++++++++
