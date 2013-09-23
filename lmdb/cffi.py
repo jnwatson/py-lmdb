@@ -890,7 +890,7 @@ class Environment(object):
         """Use a temporary write transaction to invoke
         :py:meth:`Transaction.put`."""
         with Transaction(self, write=True) as txn:
-            txn.put(key, value, dupdata, overwrite, append, db)
+            return txn.put(key, value, dupdata, overwrite, append, db)
 
     def puts(self, items, dupdata=False, overwrite=True, append=False,
              db=None):
