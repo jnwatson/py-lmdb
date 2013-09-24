@@ -902,9 +902,9 @@ class Environment(object):
 
     def replace(self, key, value, db=None):
         """Use a temporary write transaction to invoke
-        :py:meth:`Transaction.replace`."""
+        :py:meth:`Cursor.replace`."""
         with Transaction(self, write=True) as txn:
-            return txn.replace(key, value, db)
+            return Cursor(db, txn).replace(key, value)
 
     def puts(self, items, dupdata=False, overwrite=True, append=False,
              db=None):
@@ -1191,20 +1191,13 @@ class Transaction(object):
         return True
 
     def replace(self, key, value, db=None):
-        """Store a record, returning its previous value if one existed. Returns
-        ``None`` if no previous value existed.
+        """Use a temporary cursor to invoke :py:meth:`Cursor.replace`.
 
-        `key`:
-            String key to store.
-
-        `value`:
-            String value to store.
-
-        `db`:
-            Named database to operate on. If unspecified, defaults to the
-            database given to the :py:class:`Transaction` constructor.
+            `db`:
+                Named database to operate on. If unspecified, defaults to the
+                database given to the :py:class:`Transaction` constructor.
         """
-        return self.cursor(db).replace(key, value)
+        return Cursor(db or self._db, self).replace(key, value)
 
     def delete(self, key, value='', db=None):
         """Delete a key from the database.
