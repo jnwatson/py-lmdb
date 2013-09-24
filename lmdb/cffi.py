@@ -904,7 +904,7 @@ class Environment(object):
         """Use a temporary write transaction to invoke
         :py:meth:`Cursor.replace`."""
         with Transaction(self, write=True) as txn:
-            return Cursor(db, txn).replace(key, value)
+            return Cursor(db or self._db, txn).replace(key, value)
 
     def puts(self, items, dupdata=False, overwrite=True, append=False,
              db=None):
