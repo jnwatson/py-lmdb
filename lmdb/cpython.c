@@ -958,6 +958,62 @@ generic_put(int valid, MDB_txn *txn, DbObject *db,
 }
 
 static PyObject *
+make_cursor(DbObject *db, TransObject *trans);
+
+static PyObject *
+generic_replace(int valid, TransObject *trans, DbObject *db,
+            PyObject *args, PyObject *kwds)
+{
+    struct generic_replace {
+        MDB_val key;
+        MDB_val value;
+        DbObject *db;
+    } arg = {{0, 0}, {0, 0}, db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(generic_replace, key)},
+        {ARG_BUF, VALUE_S, OFFSET(generic_replace, value)},
+        {ARG_DB, DB_S, OFFSET(generic_replace, db)}
+    };
+
+    if(parse_args(valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    CursorObject *cursor = (CursorObject *) make_cursor(arg.db, trans);
+    if(! cursor) {
+        return NULL;
+    }
+
+    /* arg.val is updated if MDB_KEYEXIST. */
+    MDB_val newval = arg.value;
+    int flags = MDB_NOOVERWRITE;
+    int rc;
+    UNLOCKED(rc, mdb_cursor_put(cursor->curs, &arg.key, &arg.value, flags));
+    if(! rc) {
+        Py_DECREF((PyObject *) cursor);
+        Py_RETURN_NONE;
+    } else if(rc != MDB_KEYEXIST) {
+        Py_DECREF((PyObject *) cursor);
+        return err_set("mdb_put", rc);
+    }
+
+    PyObject *old = string_from_val(&arg.value);
+    if(! old) {
+        Py_DECREF((PyObject *) cursor);
+        return NULL;
+    }
+
+    UNLOCKED(rc, mdb_cursor_put(cursor->curs, &arg.key, &newval, 0));
+    Py_DECREF((PyObject *) cursor);
+    if(rc) {
+        Py_DECREF(old);
+        return err_set("mdb_put", rc);
+    }
+    return old;
+}
+
+static PyObject *
 generic_delete(int valid, MDB_txn *txn, DbObject *db,
                PyObject *args, PyObject *kwds)
 {
@@ -1835,6 +1891,18 @@ env_puts(EnvObject *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject *
+env_replace(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
+    if(! trans) {
+        return NULL;
+    }
+
+    PyObject *ret = generic_replace(1, trans, self->main_db, args, kwds);
+    return generic_finish(trans, ret);
+}
+
+static PyObject *
 env_delete(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     TransObject *trans = (TransObject *) make_trans(self, NULL, NULL, 1, 0);
@@ -1955,6 +2023,7 @@ static struct PyMethodDef env_methods[] = {
     {"gets", (PyCFunction)env_gets, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)env_put, METH_VARARGS|METH_KEYWORDS},
     {"puts", (PyCFunction)env_puts, METH_VARARGS|METH_KEYWORDS},
+    {"replace", (PyCFunction)env_replace, METH_VARARGS|METH_KEYWORDS},
     {"delete", (PyCFunction)env_delete, METH_VARARGS|METH_KEYWORDS},
     {"deletes", (PyCFunction)env_deletes, METH_VARARGS|METH_KEYWORDS},
     {"cursor", (PyCFunction)env_cursor, METH_VARARGS|METH_KEYWORDS},
@@ -2291,6 +2360,47 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_TRUE;
 }
 
+static PyObject *
+cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_replace {
+        MDB_val key;
+        MDB_val val;
+    } arg = {{0, 0}, {0, 0}};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_replace, key)},
+        {ARG_BUF, VALUE_S, OFFSET(cursor_replace, val)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    /* arg.val is updated if MDB_KEYEXIST. */
+    MDB_val newval = arg.val;
+    int flags = MDB_NOOVERWRITE;
+    int rc;
+    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
+    if(! rc) {
+        Py_RETURN_NONE;
+    } else if(rc != MDB_KEYEXIST) {
+        return err_set("mdb_put", rc);
+    }
+
+    PyObject *old = string_from_val(&arg.val);
+    if(! old) {
+        return NULL;
+    }
+
+    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &newval, 0));
+    if(rc) {
+        Py_DECREF(old);
+        return err_set("mdb_put", rc);
+    }
+
+    return old;
+}
 
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
@@ -2458,6 +2568,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"next", (PyCFunction)cursor_next, METH_NOARGS},
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
+    {"replace", (PyCFunction)cursor_replace, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
@@ -2711,6 +2822,12 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     return generic_put(self->valid, self->txn, self->db, args, kwds);
 }
 
+static PyObject *
+trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
+{
+    return generic_replace(self->valid, self, self->db, args, kwds);
+}
+
 static PyObject *trans_enter(TransObject *self)
 {
     if(! self->valid) {
@@ -2768,6 +2885,7 @@ static struct PyMethodDef trans_methods[] = {
     {"drop", (PyCFunction)trans_drop, METH_VARARGS|METH_KEYWORDS},
     {"get", (PyCFunction)trans_get, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)trans_put, METH_VARARGS|METH_KEYWORDS},
+    {"replace", (PyCFunction)trans_replace, METH_VARARGS|METH_KEYWORDS},
     {"stat", (PyCFunction)trans_stat, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
