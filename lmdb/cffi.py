@@ -900,6 +900,12 @@ class Environment(object):
         with Transaction(self, write=True) as txn:
             return txn.put(key, value, dupdata, overwrite, append, db)
 
+    def replace(self, key, value, db=None):
+        """Use a temporary write transaction to invoke
+        :py:meth:`Transaction.replace`."""
+        with Transaction(self, write=True) as txn:
+            return txn.replace(key, value, db)
+
     def puts(self, items, dupdata=False, overwrite=True, append=False,
              db=None):
         """Use a temporary write transaction to invoke
@@ -1183,6 +1189,22 @@ class Transaction(object):
                 return False
             raise _error("mdb_put", rc)
         return True
+
+    def replace(self, key, value, db=None):
+        """Store a record, returning its previous value if one existed. Returns
+        ``None`` if no previous value existed.
+
+        `key`:
+            String key to store.
+
+        `value`:
+            String value to store.
+
+        `db`:
+            Named database to operate on. If unspecified, defaults to the
+            database given to the :py:class:`Transaction` constructor.
+        """
+        return self.cursor(db).replace(key, value)
 
     def delete(self, key, value='', db=None):
         """Delete a key from the database.
@@ -1550,6 +1572,35 @@ class Cursor(object):
             raise _error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
         return True
+
+    def replace(self, key, val):
+        """Store a record, returning its previous value if one existed. Returns
+        ``None`` if no previous value existed.
+
+        This uses the best available mechanism to minimize the cost of a
+        `set-and-return-previous` operation.
+
+            `key`:
+                String key to store.
+
+            `value`:
+                String value to store.
+        """
+        flags = MDB_NOOVERWRITE
+        keylen = len(key)
+        rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        if not rc:
+            return
+        if rc != MDB_KEYEXIST:
+            raise _error("mdb_cursor_put", rc)
+
+        self._cursor_get(MDB_GET_CURRENT)
+        old = _mvstr(self._val)
+        rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        if rc:
+            raise _error("mdb_cursor_put", rc)
+        self._cursor_get(MDB_GET_CURRENT)
+        return old
 
     def _iter_from(self, k, reverse):
         """Helper for centidb. Please do not rely on this interface, it may be
