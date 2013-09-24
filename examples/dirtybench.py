@@ -8,7 +8,7 @@ import random
 import lmdb
 
 MAP_SIZE = 1048576 * 400
-DB_PATH = 'testdb'
+DB_PATH = '/ram/testdb'
 
 
 def x():
@@ -22,7 +22,7 @@ def x():
     words.update([w.upper() for w in words])
     words.update([w[::-1] for w in words])
     words.update([w[::-1].upper() for w in words])
-    words.update(['-'.join(w) for w in words])
+    #words.update(['-'.join(w) for w in words])
     #words.update(['+'.join(w) for w in words])
     #words.update(['/'.join(w) for w in words])
     words = list(words)
@@ -123,6 +123,63 @@ def x():
         lst = sum(1 for _ in txn.cursor())
         t1 = now()
         print 'enum %d (key, value) buffers took %.2f sec' % ((lst), t1-t0)
+
+
+
+
+    #
+    # get+put
+    #
+
+    getword = iter(sorted(words)).next
+    run = True
+    t0 = now()
+    last = t0
+    while run:
+        with env.begin(write=True) as txn:
+            try:
+                for _ in xrange(50000):
+                    word = getword()
+                    old = txn.get(word)
+                    txn.put(word, word)
+            except StopIteration:
+                run = False
+
+        t1 = now()
+        if (t1 - last) > 2:
+            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+            last = t1
+
+    t1 = now()
+    print 'get+put all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+    last = t1
+
+
+    #
+    # REPLACE
+    #
+
+    getword = iter(sorted(words)).next
+    run = True
+    t0 = now()
+    last = t0
+    while run:
+        with env.begin(write=True) as txn:
+            try:
+                for _ in xrange(50000):
+                    word = getword()
+                    old = txn.replace(word, word)
+            except StopIteration:
+                run = False
+
+        t1 = now()
+        if (t1 - last) > 2:
+            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+            last = t1
+
+    t1 = now()
+    print 'replace all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+    last = t1
 
 
     print
