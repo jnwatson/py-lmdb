@@ -433,8 +433,10 @@ def _kill_dependents(parent):
 
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     """We need this because cffi on PyPy treats None as cffi.NULL, instead of
-    throwing an exception it feeds MDB null pointers. We use a weird name to
-    make exceptions more obvious."""
+    throwing an exception it feeds MDB null pointers. That means simply
+    replacing native handles with None will lead to NULL pointer derefences.
+    Instead we use this class, and its weird name to make cause a TypeError,
+    with a very obvious string appearing in the exception text."""
     def __nonzero__(self):
         return 0
     def __repr__(self):
