@@ -829,7 +829,7 @@ class Environment(object):
 
             `name`:
                 Database name. If ``None``, indicates the main database should
-                be returned, otherwise indicates a sub-database should be
+                be returned, otherwise indicates a named database should be
                 created inside the main database. In other words, **a key
                 representing the database will be visible in the main database,
                 and the database name cannot conflict with any existing key**
@@ -1003,9 +1003,9 @@ class Transaction(object):
             Environment the transaction should be on.
 
         `db`:
-            Default sub-database to operate on. If unspecified, defaults to the
-            environment's main database. Can be overridden on a per-call basis
-            below.
+            Default named database to operate on. If unspecified, defaults to
+            the environment's main database. Can be overridden on a per-call
+            basis below.
 
         `parent`:
             ``None``, or a parent transaction (see lmdb.h).
@@ -1083,8 +1083,8 @@ class Transaction(object):
         return self.env._convert_stat(st)
 
     def drop(self, db, delete=True):
-        """Delete all keys in a sub-database, and optionally delete the
-        sub-database itself. Deleting the sub-database causes it to become
+        """Delete all keys in a named database and optionally delete the named
+        database itself. Deleting the named database causes it to become
         unavailable, and invalidates existing cursors.
 
         Equivalent to `mdb_drop()
@@ -1163,6 +1163,10 @@ class Transaction(object):
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will cause corruption.
+
+            `db`:
+                Named database to operate on. If unspecified, defaults to the
+                database given to the :py:class:`Transaction` constructor.
         """
         flags = 0
         if not dupdata:

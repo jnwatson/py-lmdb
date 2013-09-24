@@ -27,8 +27,8 @@ LMDB is a tiny database with some excellent properties:
 * Environments may be opened by multiple processes on the same host, making it
   ideal for working around Python's `GIL
   <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
-* Multiple sub-databases may be created with transactions covering all
-  sub-databases.
+* Multiple named databases may be created with transactions covering all
+  named databases.
 * Memory mapped, allowing for zero copy lookup and iteration. This is
   optionally exposed to Python using the :py:func:`buffer` interface.
 * Maintenance requires no external process or background threads.
@@ -81,23 +81,23 @@ module import with an existing installation:
         >>> import lmdb
 
 
-Sub-databases
-+++++++++++++
+Named Databases
++++++++++++++++
 
-To use the sub-database feature you must call :py:func:`lmdb.open` or
+To use the named database feature you must call :py:func:`lmdb.open` or
 :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
 databases required. This must be done by the first process or thread opening
 the environment as it is used to allocate resources kept in shared memory.
 
 .. caution::
 
-    LMDB implements sub-databases by *storing a special descriptor key in the
+    LMDB implements named databases by *storing a special descriptor key in the
     main database*. All databases in an environment *share the same file*.
-    Because a sub-database is just a key in the main database, attempts to
+    Because a named database is just a key in the main database, attempts to
     create one will fail if this key already exists. Furthermore *the key is
     visible to lookups and enumerations*. If your main database keyspace
-    conflicts with the names you are using for sub-databases then consider
-    moving the contents of your main database to another sub-database.
+    conflicts with the names you are using for named databases then consider
+    moving the contents of your main database to another named database.
 
     ::
 
@@ -108,7 +108,7 @@ the environment as it is used to allocate resources kept in shared memory.
         >>> # Error: database cannot share name of existing key!
         >>> subdb = env.open_db('somename')
 
-When a sub-database has been opened with :py:meth:`Environment.open_db` the
+When a named database has been opened with :py:meth:`Environment.open_db` the
 resulting handle is shared with all environment users. In particular this means
 any user calling :py:meth:`Environment.close_db` will invalidate the handle for
 all users. For this reason databases are never closed automatically, you must
@@ -403,7 +403,7 @@ These functions are useful for e.g. backup jobs.
         copyfd: Consistent high speed backup an environment to stdout.
             python -mlmdb copyfd -e source.lmdb > target.lmdb/data.mdb
 
-        drop: Delete one or more sub-databases.
+        drop: Delete one or more named databases.
             python -mlmdb drop db1
 
         dump: Dump one or more databases to disk in 'cdbmake' format.
