@@ -543,12 +543,12 @@ lists that tracks dependencies for all binding objects. Prior to ``abort()`` or
 ``close()``, the object's corresponding list of weakrefs is walked to notify
 each dependent object that the resource is about to disappear.
 
-Each object may either store an explicit ``_invalid`` attribute, and checking
-it prior to every single operation, or rely on some other mechanism to avoid
-the crash. Instead of performing these explicit tests continuously, on `cffi`
-we instead use a magic ``Some_LMDB_Resource_That_Was_Deleted_Or_Closed``
-object. During invalidation, all native handles for an object are replaced with
-an instance of this magic object. Since `cffi` does not know how to convert the
+Each object may either store an explicit ``_invalid`` attribute and check it
+prior to every single operation, or rely on some other mechanism to avoid the
+crash. Instead of performing these explicit tests continuously, on `cffi` we
+instead use a magic ``Some_LMDB_Resource_That_Was_Deleted_Or_Closed`` object.
+During invalidation, all native handles for an object are replaced with an
+instance of this magic object. Since `cffi` does not know how to convert the
 magical object into a C object, any attempt to make a native call will raise a
 ``TypeError``, with a nice descriptive type name indicating the problem. Hacky
 but efficient, and mission accomplished.
