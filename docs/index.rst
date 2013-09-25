@@ -482,8 +482,8 @@ Implementation Notes
 ++++++++++++++++++++
 
 
-Implementation technology
-#########################
+Technology
+##########
 
 For CPython there is the choice between writing a custom extension, using
 Cython, using `ctypes`, or using `cffi`. For PyPy either `ctypes` or `cffi` is
@@ -522,8 +522,8 @@ wrapping it an inefficient binding for use as the primary storage engine in a
 Python program.
 
 
-cffi invalidation lists
-#######################
+Invalidation lists
+##################
 
 A great deal of work has been put into ensuring that crashes are avoided
 wherever possible. This means that when some 'parent' object is invalidated,
@@ -554,8 +554,8 @@ magical object into a C object, any attempt to make a native call will raise a
 but efficient, and mission accomplished.
 
 
-CPython argument parsing
-########################
+Argument parsing
+################
 
 To anyone familiar with the CPython API, `parse_args()` may look "special", at
 best. The alternative `PyArg_ParseTupleAndKeywords` performs continuous heap
@@ -566,8 +566,8 @@ The 10k/sec slowdown could potentially disappear given a sufficiently large
 application, so this decision needs revisited at some stage.
 
 
-CPython buffer object reuse
-###########################
+Buffer mutation
+###############
 
 This violates the CPython API, and it really is a huge hack. Since the buffer
 objects never change, the 2-tuple wrapping those objects for
