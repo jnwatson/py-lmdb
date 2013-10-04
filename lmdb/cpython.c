@@ -33,6 +33,7 @@
 #include "structmember.h"
 
 #ifdef HAVE_MEMSINK
+#define USING_MEMSINK
 #include "memsink.h"
 #endif
 
