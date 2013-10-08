@@ -59,7 +59,7 @@ unsigned mdb_midl_search( MDB_IDL ids, MDB_ID id )
 			return cursor;
 		}
 	}
-	
+
 	if( val > 0 ) {
 		++cursor;
 	}
@@ -89,7 +89,7 @@ int mdb_midl_insert( MDB_IDL ids, MDB_ID id )
 		/* no room */
 		--ids[0];
 		return -2;
-	
+
 	} else {
 		/* insert id */
 		for (i=ids[0]; i>x; i--)
@@ -203,7 +203,7 @@ int mdb_midl_append_range( MDB_IDL *idp, MDB_ID id, unsigned n )
 /* Quicksort + Insertion sort for small arrays */
 
 #define SMALL	8
-#define	SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
+#define	MIDL_SWAP(a,b)	{ itmp=(a); (a)=(b); (b)=itmp; }
 
 void
 mdb_midl_sort( MDB_IDL ids )
@@ -231,15 +231,15 @@ mdb_midl_sort( MDB_IDL ids )
 			l = istack[jstack--];
 		} else {
 			k = (l + ir) >> 1;	/* Choose median of left, center, right */
-			SWAP(ids[k], ids[l+1]);
+			MIDL_SWAP(ids[k], ids[l+1]);
 			if (ids[l] < ids[ir]) {
-				SWAP(ids[l], ids[ir]);
+				MIDL_SWAP(ids[l], ids[ir]);
 			}
 			if (ids[l+1] < ids[ir]) {
-				SWAP(ids[l+1], ids[ir]);
+				MIDL_SWAP(ids[l+1], ids[ir]);
 			}
 			if (ids[l] < ids[l+1]) {
-				SWAP(ids[l], ids[l+1]);
+				MIDL_SWAP(ids[l], ids[l+1]);
 			}
 			i = l+1;
 			j = ir;
@@ -248,7 +248,7 @@ mdb_midl_sort( MDB_IDL ids )
 				do i++; while(ids[i] > a);
 				do j--; while(ids[j] < a);
 				if (j < i) break;
-				SWAP(ids[i],ids[j]);
+				MIDL_SWAP(ids[i],ids[j]);
 			}
 			ids[l+1] = ids[j];
 			ids[j] = a;
