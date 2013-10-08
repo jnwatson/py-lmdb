@@ -1058,6 +1058,9 @@ class Transaction(object):
         if rc:
             raise _error("mdb_txn_begin", rc)
         self._txn = txnpp[0]
+        # Number of mutations occurred since start of transaction. Required to
+        # know when Cursor key/value must be refreshed.
+        self._mutations = 0
 
     def _invalidate(self):
         self.abort()
@@ -1098,6 +1101,7 @@ class Transaction(object):
         """
         _kill_dependents(db)
         rc = mdb_drop(self._txn, db._dbi, delete)
+        self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
 
@@ -1184,6 +1188,7 @@ class Transaction(object):
 
         rc = pymdb_put(self._txn, (db or self._db)._dbi,
                        key, len(key), value, len(value), flags)
+        self._mutations += 1
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
@@ -1217,6 +1222,7 @@ class Transaction(object):
         """
         rc = pymdb_del(self._txn, (db or self._db)._dbi,
                        key, len(key), value, len(value))
+        self._mutations += 1
         if rc:
             if rc == MDB_NOTFOUND:
                 return False
@@ -1314,6 +1320,9 @@ class Cursor(object):
         if rc:
             raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
+        # If Transaction.mutations!=last_mutation, must MDB_GET_CURRENT to
+        # refresh `key' and `val'.
+        self._last_mutation = txn._mutations
 
     def _invalidate(self):
         if self._cur:
@@ -1330,14 +1339,23 @@ class Cursor(object):
 
     def key(self):
         """Return the current key."""
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(MDB_GET_CURRENT)
         return self._to_py(self._key)
 
     def value(self):
         """Return the current value."""
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(MDB_GET_CURRENT)
         return self._to_py(self._val)
 
     def item(self):
         """Return the current `(key, value)` pair."""
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(MDB_GET_CURRENT)
         return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, op, keys, values):
@@ -1504,6 +1522,7 @@ class Cursor(object):
         v = self._valid
         if v:
             rc = mdb_cursor_del(self._cur, 0)
+            self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
             self._cursor_get(MDB_GET_CURRENT)
@@ -1559,6 +1578,7 @@ class Cursor(object):
             flags |= MDB_APPEND
 
         rc = pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+        self.txn._mutations += 1
         if rc:
             if rc == MDB_KEYEXIST:
                 return False
@@ -1582,6 +1602,7 @@ class Cursor(object):
         flags = MDB_NOOVERWRITE
         keylen = len(key)
         rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        self.txn._mutations += 1
         if not rc:
             return
         if rc != MDB_KEYEXIST:
@@ -1590,6 +1611,7 @@ class Cursor(object):
         self._cursor_get(MDB_GET_CURRENT)
         old = _mvstr(self._val)
         rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
