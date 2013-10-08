@@ -1,3 +1,7 @@
+#
+# This is not a test suite! More like a collection of triggers for previously
+# observed crashes. Want to contribute to py-lmdb? Please write a test suite!
+#
 
 import operator
 import os
@@ -238,6 +242,28 @@ class BigReverseTest(EnvMixin, unittest.TestCase):
             txn.put(k, k, append=True)
         assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
 
+
+class MultiCursorDeleteTest(EnvMixin, unittest.TestCase):
+    def test1(self):
+        """Ensure MDB_NEXT is ignored on `c1' when it was previously positioned
+        on the key that `c2' just deleted."""
+        txn = self.env.begin(write=True)
+        cur = txn.cursor()
+        while cur.first():
+            print 'Deleting', cur.key()
+            cur.delete()
+
+        for i in xrange(1, 10):
+            cur.put(chr(ord('a') + i) * i, '')
+
+        c1 = txn.cursor()
+        c1f = c1.iternext(values=False)
+        while next(c1f) != 'ddd':
+            pass
+        c2 = txn.cursor()
+        assert c2.set_key('ddd')
+        c2.delete()
+        assert next(c1f) == 'eeee'
 
 
 if __name__ == '__main__':
