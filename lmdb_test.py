@@ -7,6 +7,7 @@ import operator
 import os
 import shutil
 import unittest
+import random
 
 import lmdb
 
@@ -264,6 +265,30 @@ class MultiCursorDeleteTest(EnvMixin, unittest.TestCase):
         assert c2.set_key('ddd')
         c2.delete()
         assert next(c1f) == 'eeee'
+
+
+    def test_monster(self):
+        # Generate predictable sequence of sizes.
+        rand = random.Random()
+        rand.seed(0)
+
+        txn = self.env.begin(write=True)
+        keys = []
+        for i in xrange(20000):
+            key = '%06x' % i
+            val = 'x' * rand.randint(76, 350)
+            assert txn.put(key, val)
+            keys.append(key)
+
+        deleted = 0
+        for key in txn.cursor().iternext(values=False):
+            #print 'got key', key, 'deleting..'
+            print repr(key), deleted
+            assert txn.delete(key), key
+            deleted += 1
+
+        assert deleted == len(keys), deleted
+
 
 
 if __name__ == '__main__':
