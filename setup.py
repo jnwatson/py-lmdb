@@ -89,10 +89,14 @@ with open('lmdb/_config.py', 'w') as fp:
     },))
 
 
+# distutils perplexingly forces NDEBUG for package code!
+extra_compile_args = ['-UNDEBUG']
+
+
 if use_cpython:
     print('py-lmdb: Using CPython extension; override with LMDB_FORCE_CFFI=1.')
     install_requires = []
-    extra_compile_args = ['-Wno-shorten-64-to-32']
+    extra_compile_args += ['-Wno-shorten-64-to-32']
     if memsink:
         extra_compile_args += ['-DHAVE_MEMSINK',
                                '-I' + os.path.dirname(memsink.__file__)]
