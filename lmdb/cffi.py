@@ -1264,12 +1264,6 @@ class Cursor(object):
     meaning strange behavior results when multiple iterators exist on the same
     cursor.
 
-        ::
-
-            >>> with env.begin() as txn:
-            ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
-            ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
-
     Both :py:meth:`iternext` and :py:meth:`iterprev` accept `keys` and `values`
     arguments. If both are ``True``, then the value of :py:meth:`item` is
     yielded on each iteration. If only `keys` is ``True``, :py:meth:`key` is
@@ -1403,6 +1397,12 @@ class Cursor(object):
 
         If the cursor was not yet positioned, it is moved to the last record in
         the database, otherwise iteration proceeds from the current position.
+
+        ::
+
+            >>> with env.begin() as txn:
+            ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
+            ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
         """
         if not self._valid:
             self.last()
