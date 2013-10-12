@@ -917,14 +917,14 @@ class Environment(object):
 
             .. code-block:: python
 
-                a_existed, b_existed = env.puts(overwrite=False, items={
-                    'a': '1',
-                    'b': '2'
-                })
+                a_written, b_written = env.puts(overwrite=False, items=[
+                    ('a', '1'),
+                    ('b', '2')
+                ])
 
-                if a_existed:
+                if not a_written:
                     print 'Did not overwrite a, it already existed.'
-                if b_existed:
+                if not b_written:
                     print 'Did not overwrite b, it already existed.'
         """
         if type(items) is dict:
