@@ -571,7 +571,7 @@ Buffer mutation
 
 This violates the CPython API, and it really is a huge hack. Since the buffer
 objects never change, the 2-tuple wrapping those objects for
-:py:meth:`Cursor.items` need not change either, so a good deal of heap churn
+:py:meth:`Cursor.item` need not change either, so a good deal of heap churn
 can be avoided via the hack. The efficiency benefit of this hack may be
 negligable at best.
 
@@ -582,6 +582,13 @@ and become surprised at its content, or the resulting crash.
 
 Still it really is candidate for eventual removal, after the effects of the
 removal are tested.
+
+
+ChangeLog
++++++++++
+
+.. include:: ../ChangeLog
+    :literal:
 
 
 .. raw:: html
@@ -600,4 +607,3 @@ removal are tested.
       })();
     </script>
     <noscript><p><img src="http://37.187.23.96/tr/ep?idsite=2" style="border:0" alt="" /></p></noscript>
-
