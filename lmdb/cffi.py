@@ -446,7 +446,7 @@ class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     def __nonzero__(self):
         return 0
     def __repr__(self):
-        return "<This used a resource that was deleted or closed>"
+        return "<This used to be a LMDB resource but it was deleted or closed>"
 _invalid = Some_LMDB_Resource_That_Was_Deleted_Or_Closed()
 
 def _depend(parent, child):
