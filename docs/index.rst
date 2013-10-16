@@ -269,17 +269,6 @@ overwrite the map, resulting in database corruption.
 Transaction management
 ++++++++++++++++++++++
 
-On CPython the :py:class:`Environment` :py:meth:`get <Environment.get>`,
-:py:meth:`gets <Environment.gets>`, :py:meth:`put <Environment.put>`,
-:py:meth:`puts <Environment.puts>`, :py:meth:`delete <Environment.delete>`,
-:py:meth:`deletes <Environment.deletes>`, and :py:meth:`cursor
-<Environment.cursor>` methods are implemented so that no temporary
-:py:class:`Transaction` is constructed, improving performance in a common case.
-Since the begin/do/commit is implemented in C, for simple operations they are
-faster than equivalent Python code using :py:class:`Transaction` or
-:py:meth:`Environment.begin`, and writes hold an exclusive lock for a shorter
-period. Currently CFFI uses a more obvious implementation of these methods.
-
 ``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
 freely migrate across threads and for a single thread to maintain multiple read
 transactions. This enables mostly care-free use of read transactions, for
