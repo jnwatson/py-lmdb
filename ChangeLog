@@ -6,3 +6,9 @@
   or item(). Mutations are now explicitly tracked and cause the cursor's
   data to be refreshed in this case.
 
+* setup.py was adjusted to ensure the distutils default of '-DNDEBUG' is never
+  defined while building LMDB. This caused many important checks in the engine
+  to be disabled.
+
+* The old 'transactionless' API was removed. A future version may support the
+  same API, but the implementation will be different.
