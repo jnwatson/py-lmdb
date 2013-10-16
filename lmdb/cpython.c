@@ -864,6 +864,22 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
     return 0;
 }
 
+/**
+ * Return 1 if `db` is associated with the given `env`, otherwise raise an
+ * exception. Used to prevent DBIs from unrelated envs from being mixed
+ * together (which in future, would cause one env to access another's cursor
+ * pointers).
+ */
+static int
+db_owner_check(DbObject *db, EnvObject *env)
+{
+    if(db->env != env) {
+        err_set("Database handle belongs to another environment.", 0);
+        return 0;
+    }
+    return 1;
+}
+
 
 // --------------------------------------------------------
 // Functionality shared between Transaction and Environment
@@ -880,6 +896,8 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 
     if(! db) {
         db = env->main_db;
+    } else if(! db_owner_check(db, env)) {
+        return NULL;
     }
 
     MDB_txn *parent_txn = NULL;
@@ -940,6 +958,8 @@ make_cursor(DbObject *db, TransObject *trans)
     }
     if(! db) {
         db = trans->env->main_db;
+    } else if(! db_owner_check(db, trans->env)) {
+        return NULL;
     }
 
     CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
@@ -2280,6 +2300,9 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
+    if(! db_owner_check(arg.db, self->env)) {
+        return NULL;
+    }
     MDB_val *val_ptr = arg.val.mv_size ? &arg.val : NULL;
     self->mutations++;
     int rc;
@@ -2312,6 +2335,8 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     }
     if(! arg.db) {
         return type_error("'db' argument required.");
+    } else if(! db_owner_check(arg.db, self->env)) {
+        return NULL;
     }
 
     int rc;
@@ -2339,6 +2364,9 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! db_owner_check(arg.db, self->env)) {
         return NULL;
     }
 
@@ -2384,6 +2412,9 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! db_owner_check(arg.db, self->env)) {
         return NULL;
     }
 
@@ -2436,6 +2467,9 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! db_owner_check(arg.db, self->env)) {
         return NULL;
     }
 
@@ -2507,6 +2541,9 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! db_owner_check(arg.db, self->env)) {
         return NULL;
     }
 
