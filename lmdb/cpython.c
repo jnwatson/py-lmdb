@@ -491,7 +491,9 @@ static const struct error_map error_map[] = {
 // Helpers
 // -------
 
-/** Describes the type of a struct field. */
+/**
+ * Describes the type of a struct field.
+ */
 enum field_type {
     /** Last field in set, stop converting. */
     TYPE_EOF,
@@ -503,8 +505,9 @@ enum field_type {
     TYPE_ADDR
 };
 
-
-/** Describes a struct field. */
+/**
+ * Describes a struct field.
+ */
 struct dict_field {
     /** Field type. */
     enum field_type type;
@@ -514,8 +517,7 @@ struct dict_field {
     int offset;
 };
 
-
-/*
+/**
  * Convert the structure `o` described by `fields` to a dict and return the new
  * dict.
  */
@@ -555,7 +557,6 @@ dict_from_fields(void *o, const struct dict_field *fields)
     return dict;
 }
 
-
 /**
  * Given an MDB_val `val`, create a new buffer object to describe it, storing
  * the result in `bufp`. If `*bufp` is not NULL, then it is assumed to already
@@ -579,7 +580,6 @@ buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
     return (PyObject *) buf;
 }
 
-
 /**
  * Given an MDB_val `val`, convert it to a Python string or bytes object,
  * depending on the Python version. Returns a new reference to the object on
@@ -590,7 +590,6 @@ string_from_val(MDB_val *val)
 {
     return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
 }
-
 
 /**
  * Given some Python object, try to get at its raw data. For string or bytes
@@ -755,7 +754,10 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
     return 0;
 }
 
-
+/**
+ * Parse a single argument specified by `spec` into `out`, returning 0 on
+ * success or setting an exception and returning -1 on error.
+ */
 static int
 parse_arg(const struct argspec *spec, PyObject *val, void *out)
 {
@@ -803,7 +805,6 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
     }
     return ret;
 }
-
 
 /**
  * Like PyArg_ParseTupleAndKeywords except types are specialized for this
@@ -985,6 +986,7 @@ make_cursor(DbObject *db, TransObject *trans)
     return (PyObject *) self;
 }
 
+
 // --------
 // Database
 // --------
@@ -1015,7 +1017,10 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     return dbo;
 }
 
-
+/**
+ * Use a temporary transaction to manufacture a new _Database object for
+ * `name`.
+ */
 static DbObject *
 txn_db_from_name(EnvObject *env, const char *name,
                  unsigned int flags)
@@ -1057,6 +1062,9 @@ db_clear(DbObject *self)
     return 0;
 }
 
+/**
+ * _Database.__del__()
+ */
 static void
 db_dealloc(DbObject *self)
 {
@@ -1096,6 +1104,9 @@ env_clear(EnvObject *self)
     return 0;
 }
 
+/**
+ * Environment.__del__()
+ */
 static void
 env_dealloc(EnvObject *self)
 {
@@ -1103,7 +1114,9 @@ env_dealloc(EnvObject *self)
     PyObject_Del(self);
 }
 
-
+/**
+ * Environment() -> new object.
+ */
 static PyObject *
 env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -1237,6 +1250,9 @@ fail:
     return NULL;
 }
 
+/**
+ * Environment.begin()
+ */
 static PyObject *
 env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1260,6 +1276,9 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
 }
 
+/**
+ * Environment.close()
+ */
 static PyObject *
 env_close(EnvObject *self)
 {
@@ -1275,6 +1294,9 @@ env_close(EnvObject *self)
     Py_RETURN_NONE;
 }
 
+/**
+ * Environment.copy()
+ */
 static PyObject *
 env_copy(EnvObject *self, PyObject *args)
 {
@@ -1300,6 +1322,9 @@ env_copy(EnvObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/**
+ * Environment.copyfd(fd)
+ */
 static PyObject *
 env_copyfd(EnvObject *self, PyObject *args)
 {
@@ -1325,6 +1350,9 @@ env_copyfd(EnvObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/**
+ * Environment.info() -> dict
+ */
 static PyObject *
 env_info(EnvObject *self)
 {
@@ -1352,6 +1380,9 @@ env_info(EnvObject *self)
     return dict_from_fields(&info, fields);
 }
 
+/**
+ * Environment.open_db() -> handle
+ */
 static PyObject *
 env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1393,6 +1424,9 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 }
 
+/**
+ * Environment.path() -> Unicode
+ */
 static PyObject *
 env_path(EnvObject *self)
 {
@@ -1418,6 +1452,9 @@ static const struct dict_field mdb_stat_fields[] = {
     {TYPE_EOF, NULL, 0}
 };
 
+/**
+ * Environment.stat() -> dict
+ */
 static PyObject *
 env_stat(EnvObject *self)
 {
@@ -1435,6 +1472,10 @@ env_stat(EnvObject *self)
     return dict_from_fields(&st, mdb_stat_fields);
 }
 
+/**
+ * Callback to receive string result for env_readers(). Return 0 on success or
+ * -1 on error.
+ */
 static int env_readers_callback(const char *msg, void *str_)
 {
     PyObject **str = str_;
@@ -1448,6 +1489,9 @@ static int env_readers_callback(const char *msg, void *str_)
     return 0;
 }
 
+/**
+ * Environment.readers() -> string
+ */
 static PyObject *
 env_readers(EnvObject *self)
 {
@@ -1467,6 +1511,9 @@ env_readers(EnvObject *self)
     return str;
 }
 
+/**
+ * Environment.reader_check() -> int
+ */
 static PyObject *
 env_reader_check(EnvObject *self)
 {
@@ -1482,6 +1529,9 @@ env_reader_check(EnvObject *self)
     return PyInt_FromLong(dead);
 }
 
+/**
+ * Environment.sync()
+ */
 static PyObject *
 env_sync(EnvObject *self, PyObject *args)
 {
@@ -1505,7 +1555,6 @@ env_sync(EnvObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-
 static struct PyMethodDef env_methods[] = {
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
@@ -1520,7 +1569,6 @@ static struct PyMethodDef env_methods[] = {
     {"sync", (PyCFunction)env_sync, METH_VARARGS},
     {NULL, NULL}
 };
-
 
 static PyTypeObject PyEnvironment_Type = {
     PyObject_HEAD_INIT(0)
@@ -1565,6 +1613,9 @@ cursor_clear(CursorObject *self)
     return 0;
 }
 
+/**
+ * Cursor.__del__()
+ */
 static void
 cursor_dealloc(CursorObject *self)
 {
@@ -1573,6 +1624,9 @@ cursor_dealloc(CursorObject *self)
     PyObject_Del(self);
 }
 
+/**
+ * Environment.Cursor(db, trans) -> new instance.
+ */
 static PyObject *
 cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -1596,6 +1650,9 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return make_cursor(arg.db, arg.trans);
 }
 
+/**
+ * Cursor.count() -> long
+ */
 static PyObject *
 cursor_count(CursorObject *self)
 {
@@ -1612,7 +1669,13 @@ cursor_count(CursorObject *self)
     return PyLong_FromUnsignedLongLong(count);
 }
 
-
+/**
+ * Apply `op` to the cursor using the Cursor instance's `key` and `val`
+ * MDB_vals. On completion, check for an error and if one occurred, set the
+ * cursor to the unpositioned state. Finally record the containing
+ * transaction's last mutation count, so we know if `key` and `val` become
+ * invalid before the next attempt to read them.
+ */
 static int
 _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 {
@@ -1633,7 +1696,10 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
     return 0;
 }
 
-
+/**
+ * Wrap _cursor_get_c() to return True or False depending on whether the
+ * Cursor's final state is positioned.
+ */
 static PyObject *
 _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 {
@@ -1645,7 +1711,9 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
     return res;
 }
 
-
+/**
+ * Cursor.delete() -> bool
+ */
 static PyObject *
 cursor_delete(CursorObject *self)
 {
@@ -1670,7 +1738,9 @@ cursor_delete(CursorObject *self)
     return ret;
 }
 
-
+/**
+ * Cursor.first() -> bool
+ */
 static PyObject *
 cursor_first(CursorObject *self)
 {
@@ -1680,11 +1750,12 @@ cursor_first(CursorObject *self)
     return _cursor_get(self, MDB_FIRST);
 }
 
-
 static PyObject *
 cursor_value(CursorObject *self);
 
-
+/**
+ * Cursor.get() -> result
+ */
 static PyObject *
 cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1721,7 +1792,9 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
     return cursor_value(self);
 }
 
-
+/**
+ * Cursor.item() -> (key, value)
+ */
 static PyObject *
 cursor_item(CursorObject *self)
 {
@@ -1770,6 +1843,9 @@ cursor_item(CursorObject *self)
     return tup;
 }
 
+/**
+ * Cursor.key() -> result
+ */
 static PyObject *
 cursor_key(CursorObject *self)
 {
@@ -1791,6 +1867,9 @@ cursor_key(CursorObject *self)
     return string_from_val(&self->key);
 }
 
+/**
+ * Cursor.last() -> bool
+ */
 static PyObject *
 cursor_last(CursorObject *self)
 {
@@ -1800,6 +1879,9 @@ cursor_last(CursorObject *self)
     return _cursor_get(self, MDB_LAST);
 }
 
+/**
+ * Cursor.next() -> bool
+ */
 static PyObject *
 cursor_next(CursorObject *self)
 {
@@ -1809,6 +1891,9 @@ cursor_next(CursorObject *self)
     return _cursor_get(self, MDB_NEXT);
 }
 
+/**
+ * Cursor.prev() -> bool
+ */
 static PyObject *
 cursor_prev(CursorObject *self)
 {
@@ -1818,6 +1903,9 @@ cursor_prev(CursorObject *self)
     return _cursor_get(self, MDB_PREV);
 }
 
+/**
+ * Cursor.put() -> bool
+ */
 static PyObject *
 cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1864,6 +1952,9 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_TRUE;
 }
 
+/**
+ * Cursor.replace() -> None|result
+ */
 static PyObject *
 cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1907,6 +1998,9 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
     return old;
 }
 
+/**
+ * Cursor.set_key() -> bool
+ */
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
 {
@@ -1919,6 +2013,9 @@ cursor_set_key(CursorObject *self, PyObject *arg)
     return _cursor_get(self, MDB_SET_KEY);
 }
 
+/**
+ * Cursor.set_range() -> bool
+ */
 static PyObject *
 cursor_set_range(CursorObject *self, PyObject *arg)
 {
@@ -1934,6 +2031,9 @@ cursor_set_range(CursorObject *self, PyObject *arg)
     return _cursor_get(self, MDB_FIRST);
 }
 
+/**
+ * Cursor.value() -> result
+ */
 static PyObject *
 cursor_value(CursorObject *self)
 {
@@ -2010,18 +2110,27 @@ cursor_iter(CursorObject *self)
     return iter_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT);
 }
 
+/**
+ * Cursor.iternext() -> Iterator
+ */
 static PyObject *
 cursor_iternext(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
     return iter_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
 }
 
+/**
+ * Cursor.iterprev() -> Iterator
+ */
 static PyObject *
 cursor_iterprev(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
     return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
 }
 
+/**
+ * Cursor._iter_from() -> Iterator
+ */
 static PyObject *
 cursor_iter_from(CursorObject *self, PyObject *args)
 {
@@ -2103,6 +2212,10 @@ static PyTypeObject PyCursor_Type = {
 // Iterators
 // ---------
 
+
+/**
+ * Iterator.__del__()
+ */
 static void
 iter_dealloc(IterObject *self)
 {
@@ -2111,7 +2224,9 @@ iter_dealloc(IterObject *self)
     PyObject_Del(self);
 }
 
-
+/**
+ * Iterator.__iter__() -> self
+ */
 static PyObject *
 iter_iter(IterObject *self)
 {
@@ -2119,6 +2234,9 @@ iter_iter(IterObject *self)
     return (PyObject *)self;
 }
 
+/**
+ * Iterator.next() -> result
+ */
 static PyObject *
 iter_next(IterObject *self)
 {
@@ -2185,7 +2303,9 @@ trans_clear(TransObject *self)
     return 0;
 }
 
-
+/**
+ * Transaction.__del__()
+ */
 static void
 trans_dealloc(TransObject *self)
 {
@@ -2194,7 +2314,9 @@ trans_dealloc(TransObject *self)
     PyObject_Del(self);
 }
 
-
+/**
+ * Transaction(env, db) -> new instance.
+ */
 static PyObject *
 trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -2223,7 +2345,9 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return make_trans(arg.env, arg.db, arg.parent, arg.write, arg.buffers);
 }
 
-
+/**
+ * Transaction.abort()
+ */
 static PyObject *
 trans_abort(TransObject *self)
 {
@@ -2243,6 +2367,9 @@ trans_abort(TransObject *self)
     Py_RETURN_NONE;
 }
 
+/**
+ * Transaction.commit()
+ */
 static PyObject *
 trans_commit(TransObject *self)
 {
@@ -2264,7 +2391,9 @@ trans_commit(TransObject *self)
     Py_RETURN_NONE;
 }
 
-
+/**
+ * Transaction.cursor() -> Cursor
+ */
 static PyObject *
 trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2282,6 +2411,9 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     return make_cursor(arg.db, self);
 }
 
+/**
+ * Transaction.delete() -> bool
+ */
 static PyObject *
 trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2316,7 +2448,9 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_TRUE;
 }
 
-
+/**
+ * Transaction.drop(db)
+ */
 static PyObject *
 trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2348,6 +2482,9 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     Py_RETURN_NONE;
 }
 
+/**
+ * Transaction.get() -> result
+ */
 static PyObject *
 trans_get(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2390,6 +2527,9 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     return string_from_val(&val);
 }
 
+/**
+ * Transaction.put() -> bool
+ */
 static PyObject *
 trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2451,6 +2591,9 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 make_cursor(DbObject *db, TransObject *trans);
 
+/**
+ * Transaction.replace() -> None|result
+ */
 static PyObject *
 trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2507,6 +2650,9 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     return old;
 }
 
+/**
+ * Transaction.__enter__()
+ */
 static PyObject *trans_enter(TransObject *self)
 {
     if(! self->valid) {
@@ -2516,6 +2662,9 @@ static PyObject *trans_enter(TransObject *self)
     return (PyObject *)self;
 }
 
+/**
+ * Transaction.__exit__()
+ */
 static PyObject *trans_exit(TransObject *self, PyObject *args)
 {
     if(! self->valid) {
@@ -2528,7 +2677,9 @@ static PyObject *trans_exit(TransObject *self, PyObject *args)
     }
 }
 
-
+/**
+ * Transaction.stat() -> dict
+ */
 static PyObject *
 trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
 {
@@ -2556,7 +2707,6 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     return dict_from_fields(&st, mdb_stat_fields);
 }
 
-
 static struct PyMethodDef trans_methods[] = {
     {"__enter__", (PyCFunction)trans_enter, METH_NOARGS},
     {"__exit__", (PyCFunction)trans_exit, METH_VARARGS},
@@ -2583,7 +2733,9 @@ static PyTypeObject PyTransaction_Type = {
     .tp_new = trans_new,
 };
 
-
+/**
+ * lmdb.enable_drop_gil()
+ */
 static PyObject *
 enable_drop_gil(void)
 {
@@ -2591,7 +2743,9 @@ enable_drop_gil(void)
     Py_RETURN_NONE;
 }
 
-
+/**
+ * lmdb.get_version() -> tuple
+ */
 static PyObject *
 get_version(void)
 {
@@ -2599,13 +2753,11 @@ get_version(void)
         MDB_VERSION_MINOR, MDB_VERSION_PATCH);
 }
 
-
 static struct PyMethodDef module_methods[] = {
     {"enable_drop_gil", (PyCFunction) enable_drop_gil, METH_NOARGS, ""},
     {"version", (PyCFunction) get_version, METH_NOARGS, ""},
     {0, 0, 0, 0}
 };
-
 
 #if PY_MAJOR_VERSION >= 3
 static struct PyModuleDef moduledef = {
@@ -2620,7 +2772,6 @@ static struct PyModuleDef moduledef = {
     NULL
 };
 #endif
-
 
 /**
  * Initialize and publish the LMDB built-in types.
@@ -2649,7 +2800,6 @@ static int init_types(PyObject *mod)
     return 0;
 }
 
-
 /**
  * Produce `string_tbl' array of PyObjects from `strings'.
  */
@@ -2671,7 +2821,6 @@ static int init_strings(PyObject *mod)
     return 0;
 }
 
-
 /**
  * Initialize a bunch of constants used to ease number compares.
  */
@@ -2688,7 +2837,6 @@ static int init_constants(PyObject *mod)
     }
     return 0;
 }
-
 
 /**
  * Create lmdb.Error exception class, and one subclass for each entry in
@@ -2730,7 +2878,9 @@ static int init_errors(PyObject *mod)
     return 0;
 }
 
-
+/**
+ * Do all required to initialize the lmdb.cpython module.
+ */
 PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
