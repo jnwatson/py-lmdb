@@ -1126,6 +1126,15 @@ class Transaction(object):
         """
         return Cursor(db or self._db, self).replace(key, value)
 
+    def pop(self, key, db=None):
+        """Use a temporary cursor to invoke :py:meth:`Cursor.pop`.
+
+            `db`:
+                Named database to operate on. If unspecified, defaults to the
+                database given to the :py:class:`Transaction` constructor.
+        """
+        return Cursor(db or self._db, self).pop(key)
+
     def delete(self, key, value='', db=None):
         """Delete a key from the database.
 
@@ -1538,6 +1547,25 @@ class Cursor(object):
             raise _error("mdb_cursor_put", rc)
         self._cursor_get(MDB_GET_CURRENT)
         return old
+
+    def pop(self, key):
+        """Fetch a record's value then delete it. Returns ``None`` if no
+        previous value existed.
+
+        This uses the best available mechanism to minimize the cost of a
+        `delete-and-return-previous` operation.
+
+            `key`:
+                String key to store.
+        """
+        if self._cursor_get_key(MDB_SET_KEY, key):
+            old = _mvstr(self._val)
+            rc = mdb_cursor_del(self._cur, 0)
+            self.txn._mutations += 1
+            if rc:
+                raise _error("mdb_cursor_del", rc)
+            self._cursor_get(MDB_GET_CURRENT)
+            return old
 
     def _iter_from(self, k, reverse):
         """Helper for centidb. Please do not rely on this interface, it may be
