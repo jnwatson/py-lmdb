@@ -1556,7 +1556,7 @@ class Cursor(object):
         `delete-and-return-previous` operation.
 
             `key`:
-                String key to store.
+                String key to delete.
         """
         if self._cursor_get_key(MDB_SET_KEY, key):
             old = _mvstr(self._val)
