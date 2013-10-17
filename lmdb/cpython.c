@@ -1999,6 +1999,46 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
 }
 
 /**
+ * Cursor.pop() -> None|result
+ */
+static PyObject *
+cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_pop {
+        MDB_val key;
+    } arg = {{0, 0}};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_pop, key)},
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    self->key = arg.key;
+    if(_cursor_get_c(self, MDB_SET_KEY)) {
+        return NULL;
+    }
+    if(! self->positioned) {
+        Py_RETURN_NONE;
+    }
+    PyObject *old = string_from_val(&self->val);
+    if(! old) {
+        return NULL;
+    }
+
+    int rc;
+    UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
+    self->trans->mutations++;
+    if(rc) {
+        Py_DECREF(old);
+        return err_set("mdb_cursor_del", rc);
+    }
+    return old;
+}
+
+/**
  * Cursor.set_key() -> bool
  */
 static PyObject *
@@ -2188,6 +2228,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)cursor_replace, METH_VARARGS|METH_KEYWORDS},
+    {"pop", (PyCFunction)cursor_pop, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
@@ -2650,6 +2691,63 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     return old;
 }
 
+static int
+_cursor_get_c(CursorObject *self, enum MDB_cursor_op op);
+
+/**
+ * Transaction.pop() -> None|result
+ */
+static PyObject *
+trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
+{
+    struct trans_pop {
+        MDB_val key;
+        DbObject *db;
+    } arg = {{0, 0}, self->db};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(trans_pop, key)},
+        {ARG_DB, DB_S, OFFSET(trans_pop, db)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! db_owner_check(arg.db, self->env)) {
+        return NULL;
+    }
+
+    CursorObject *cursor = (CursorObject *) make_cursor(arg.db, self);
+    if(! cursor) {
+        return NULL;
+    }
+
+    cursor->key = arg.key;
+    if(_cursor_get_c(cursor, MDB_SET_KEY)) {
+        Py_DECREF((PyObject *)cursor);
+        return NULL;
+    }
+    if(! cursor->positioned) {
+        Py_DECREF((PyObject *)cursor);
+        Py_RETURN_NONE;
+    }
+    PyObject *old = string_from_val(&cursor->val);
+    if(! old) {
+        Py_DECREF((PyObject *)cursor);
+        return NULL;
+    }
+
+    int rc;
+    UNLOCKED(rc, mdb_cursor_del(cursor->curs, 0));
+    Py_DECREF((PyObject *)cursor);
+    self->mutations++;
+    if(rc) {
+        Py_DECREF(old);
+        return err_set("mdb_cursor_del", rc);
+    }
+    return old;
+}
+
 /**
  * Transaction.__enter__()
  */
@@ -2718,6 +2816,7 @@ static struct PyMethodDef trans_methods[] = {
     {"get", (PyCFunction)trans_get, METH_VARARGS|METH_KEYWORDS},
     {"put", (PyCFunction)trans_put, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)trans_replace, METH_VARARGS|METH_KEYWORDS},
+    {"pop", (PyCFunction)trans_pop, METH_VARARGS|METH_KEYWORDS},
     {"stat", (PyCFunction)trans_stat, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
