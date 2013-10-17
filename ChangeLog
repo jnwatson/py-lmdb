@@ -12,3 +12,6 @@
 
 * The old 'transactionless' API was removed. A future version may support the
   same API, but the implementation will be different.
+
+* Transaction.pop() and Cursor.pop() helpers added, to complement
+  Transaction.replace() and Cursor.replace().
