@@ -43,7 +43,7 @@ if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
 
 if sys.version[:3] < '2.5':
-    print >> sys.stderr, 'Error: py-lmdb requires at least CPython 2.5'
+    sys.stderr.write('Error: py-lmdb requires at least CPython 2.5\n')
     raise SystemExit(1)
 
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
@@ -114,7 +114,7 @@ else:
         import lmdb.cffi
         ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
     except ImportError:
-        print >> sys.stderr, 'Could not import lmdb; ensure "cffi" is installed!'
+        sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
         ext_modules = []
 
 def grep_version():
