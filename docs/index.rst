@@ -84,20 +84,21 @@ module import with an existing installation:
 Named Databases
 +++++++++++++++
 
-To use the named database feature you must call :py:func:`lmdb.open` or
+To use named databases you must call :py:func:`lmdb.open` or
 :py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
 databases required. This must be done by the first process or thread opening
 the environment as it is used to allocate resources kept in shared memory.
 
 .. caution::
 
-    LMDB implements named databases by *storing a special descriptor key in the
+    Named databases are implemented by *storing a special descriptor in the
     main database*. All databases in an environment *share the same file*.
-    Because a named database is just a key in the main database, attempts to
-    create one will fail if this key already exists. Furthermore *the key is
-    visible to lookups and enumerations*. If your main database keyspace
-    conflicts with the names you are using for named databases then consider
-    moving the contents of your main database to another named database.
+    Because the descriptor is present in the main database, attempts to create
+    a named database will fail if this key matching the database's name already
+    exists. Furthermore *the key is visible to lookups and enumerations*. If
+    your main database keyspace conflicts with the names you use for named
+    databases, then you should move the contents of your main database to
+    another named database.
 
     ::
 
@@ -109,16 +110,15 @@ the environment as it is used to allocate resources kept in shared memory.
         >>> subdb = env.open_db('somename')
 
 When a named database has been opened with :py:meth:`Environment.open_db` the
-resulting handle is shared with all environment users. In particular this means
-any user calling :py:meth:`Environment.close_db` will invalidate the handle for
-all users. For this reason databases are never closed automatically, you must
-do it explicitly.
+resulting handle is shared with all environment users. While LMDB supports
+closing such handles, this is not exposed to Python, as doing so requires
+careful coordination among all database users, to ensure the handle is no
+longer in use.
 
-There is little reason to close a handle: open handles only consume slots in
-the shared environment and repeated calls to :py:meth:`Environment.open_db` for
-the same name return the same handle. Simply setting `max_dbs=` higher than the
-maximum number of handles required will alleviate any need to coordinate
-management amongst users.
+There is little reason to close a handle: open handles only consume small slots
+in the shared environment, and repeated calls to :py:meth:`Environment.open_db`
+for the same name will return the same handle. Simply set `max_dbs=` higher
+than the maximum number of handles required to alleviate any issue here.
 
 
 Storage efficiency & limits
@@ -237,20 +237,6 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
     their generating transaction has completed.
 
 
-Memsink Protocol
-++++++++++++++++
-
-If the ``memsink`` package is available during installation of the CPython
-extension, then the resulting module's :py:class:`Transaction` object will act
-as a `source` for the `Memsink Protocol
-<https://github.com/dw/acid/issues/23>`_. This is an experimental protocol to
-allow extension of LMDB's zero-copy design outward to other C types, without
-requiring explicit management by the user.
-
-This design is a work in progress; if you have an application that would
-benefit from it, please leave a comment on the ticket above.
-
-
 ``writemap`` mode
 +++++++++++++++++
 
@@ -311,7 +297,6 @@ Interface
 .. py:function:: lmdb.open(path, **kwargs)
    
    Shortcut for :py:class:`Environment` constructor.
-
 
 .. autofunction:: lmdb.version
 
@@ -471,88 +456,110 @@ Implementation Notes
 ++++++++++++++++++++
 
 
+Iterators
+#########
+
+It was tempting to make :py:class:`Cursor` directly act as an iterator, however
+that would require overloading its `next()` method to mean something other than
+the natural definition of `next()` on an LMDB cursor. It would additionally
+introduce unintuitive state tied to the cursor that does not exist in LMDB:
+such as iteration direction and the type of value yielded.
+
+Instead a separate iterator is produced by `__iter__()`, `iternext()`, and
+`iterprev()`, with easily described semantics regarding how they interact with
+the cursor.
+
+
+Memsink Protocol
+################
+
+If the ``memsink`` package is available during installation of the CPython
+extension, then the resulting module's :py:class:`Transaction` object will act
+as a `source` for the `Memsink Protocol
+<https://github.com/dw/acid/issues/23>`_. This is an experimental protocol to
+allow extension of LMDB's zero-copy design outward to other C types, without
+requiring explicit management by the user.
+
+This design is a work in progress; if you have an application that would
+benefit from it, please leave a comment on the ticket above.
+
+
+Deviations from LMDB API
+########################
+
+`mdb_dbi_close()`:
+    This is not exposed since its use is perilous at best. Any user must ensure
+    all writers and readers cease activity and close the relevant handle.
+    Failure to do so could result in the DBI's slot becoming reused, resulting
+    in operations being serviced by the wrong DBI. Leaving handles open wastes
+    a tiny amount of memory, which seems a good price to ensure a subtle data
+    corruption bug is avoided.
+
+:py:meth:`lmdb.Cursor.replace`, :py:meth:`lmdb.Cursor.pop`:
+    There are no native equivalents to these calls, they just implement common
+    operations in C to avoid a chunk of error prone, boilerplate Python from
+    having to do the same.
+
+
 Technology
 ##########
 
-For CPython there is the choice between writing a custom extension, using
-Cython, using `ctypes`, or using `cffi`. For PyPy either `ctypes` or `cffi` is
-available. An initial implementation was attempted using Cython, however I
-found its automatic memory management hard to reason about, in the face of
-ensuring dependent objects were correctly invalidated e.g. during a transaction
-abort.
+The binding is implemented twice: once using `cffi`, and once as native C
+extension. This is since a `cffi` binding is necessary for PyPy, but its
+performance on CPython is very poor. For good performance on CPython, only
+Cython and a native extension are viable options. Initially Cython was used,
+however this was abandoned due to the effort and relative mismatch involved
+compared to writing a native extension.
 
-Furthermore Cython offered no lightweight ability to track object dependencies.
-The only primitives available are the standard Python primitives, and so the
-best that could be done is managing a dict/list of weakrefs. While it is
-technically possible to maintain inline lists with Cython, the result is
-incredibly unnatural, and much of the original benefit of Cython is lost.
+Cython offers no lightweight ability to track object dependencies, and so the
+best method to ensure crash-safety is managing a dict/list of weakrefs. While
+it is technically possible to maintain inline lists with Cython, the result is
+unnatural and much of the original benefit of Cython is lost.
 
-Another problem with Cython is that to get good performance most things must
-be statically typed, and frequent visits to the autogenerated C files are
-required to figure out a performance problem. Optimizing Cython code is of
-comparable complexity to simply writing the module in C to begin with.
-
-Finally, in various places Cython made it difficult to avoid heavyweight
-conversions resulting in heap allocations, even though the CPython API provided
-macros for direct memory access on the original object. Again the choice is
-writing a custom extension from scratch, or intermixing Cython code with chunks
-of CPython API calls.
-
-Since neither Cython or the custom extension can be used with PyPy, a prototype
-binding using cffi was created. The resulting performance on PyPy was
-excellent, however on CPython it was terrrible. No single binding would be able
-to achieve worthwhile performance on both platforms, so both a cffi and custom
-extension implementation are maintained.
-
-`ctypes` was briefly experimented with early on, but discarded since its
-maintainability and performance are generally poor. As performance is the
-primary reason for becoming interested in LMDB, there is little attraction to
-wrapping it an inefficient binding for use as the primary storage engine in a
-Python program.
+Another problem with Cython is that good performance requires static typing,
+and frequent visits to the autogenerated C files to figure out a performance
+problem. In some places Cython makes it difficult to avoid conversions that
+produce new objects, even though CPython provides macros for conversion-free
+access. The choice is paying a needless performance cost, or intermixing Cython
+code with chunks of C/Python API calls.
 
 
 Invalidation lists
 ##################
 
-A great deal of work has been put into ensuring that crashes are avoided
-wherever possible. This means that when some 'parent' object is invalidated,
-either due to :py:meth:`Environment.close` or :py:meth:`Transaction.abort`,
-etc., then any child objects (such as iterators) need to be updated to ensure
-they don't try to access memory of the no-longer-existent resource, which could
-potentially lead to database corruption.
+Much effort has gone into avoiding crashes: when some object is invalidated
+(e.g. due to :py:meth:`Transaction.abort`), child objects are updated to ensure
+they don't access memory of the no-longer-existent resource, and that they
+correspondingly free their own resources. On CPython this is accomplished by
+weaving a linked list into all ``PyObject`` structures. This avoids the need to
+maintain a separate heap-allocated structure, or produce excess ``weakref``
+objects (which internally simply manage their own lists).
 
-On CPython this is accomplished by interweaving a doubly linked list into all
-py-lmdb's ``PyObject`` structures, managed during construction and destruction.
-This avoids the need to maintain a separate heap-allocated structure, or
-produce excess heap allocations in the form of ``weakref`` objects (which
-internally simply manage their own linked lists).
+On `cffi` this isn't possible. Instead each object has a ``_deps`` dict that
+maps dependent object IDs to corresponding weakrefs. Prior to invalidation
+``_deps`` is walked to notify each dependent that the resource is about to
+disappear.
 
-On cffi none of this is possible, so instead there is a single global dict of
-lists that tracks dependencies for all binding objects. Prior to ``abort()`` or
-``close()``, the object's corresponding list of weakrefs is walked to notify
-each dependent object that the resource is about to disappear.
-
-Each object may either store an explicit ``_invalid`` attribute and check it
-prior to every single operation, or rely on some other mechanism to avoid the
-crash. Instead of performing these explicit tests continuously, on `cffi` we
-instead use a magic ``Some_LMDB_Resource_That_Was_Deleted_Or_Closed`` object.
-During invalidation, all native handles for an object are replaced with an
-instance of this magic object. Since `cffi` does not know how to convert the
-magical object into a C object, any attempt to make a native call will raise a
-``TypeError``, with a nice descriptive type name indicating the problem. Hacky
-but efficient, and mission accomplished.
+Finally, each object may either store an explicit ``_invalid`` attribute and
+check it prior to every operation, or rely on another mechanism to avoid the
+crash resulting from using an invalidated resource. Instead of performing these
+explicit tests continuously, on `cffi` a magic
+``Some_LMDB_Resource_That_Was_Deleted_Or_Closed`` object is used. During
+invalidation, all native handles are replaced with an instance of this object.
+Since `cffi` cannot convert the magical object to a C type, any attempt to make
+a native call will raise ``TypeError`` with a nice descriptive type name
+indicating the problem. Hacky but efficient, and mission accomplished.
 
 
 Argument parsing
 ################
 
-To anyone familiar with the CPython API, `parse_args()` may look "special", at
-best. The alternative `PyArg_ParseTupleAndKeywords` performs continuous heap
-allocations and string copies, resulting in a difference of 10,000 lookups/sec
-slowdown in a particular microbenchmark.
-
-The 10k/sec slowdown could potentially disappear given a sufficiently large
-application, so this decision needs revisited at some stage.
+The CPython module `parse_args()` may look "special", at best. The alternative
+`PyArg_ParseTupleAndKeywords` performs continuous heap allocations and string
+copies, resulting in a difference of 10,000 lookups/sec slowdown in a
+particular microbenchmark. The 10k/sec slowdown could potentially disappear
+given a sufficiently large application, so this decision needs revisited at
+some stage.
 
 
 Buffer mutation
