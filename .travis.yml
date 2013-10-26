@@ -1,32 +1,32 @@
 language: python
 python: 2.7
 env:
-    - TOX_ENV=pypy_cffi
-    - TOX_ENV=py26_cffi
-    - TOX_ENV=py27_cffi
-    - TOX_ENV=py30_cffi
-    - TOX_ENV=py31_cffi
-    - TOX_ENV=py32_cffi
-    - TOX_ENV=py33_cffi
-    - TOX_ENV=py34_cffi
-    - TOX_ENV=py25_c
-    - TOX_ENV=py26_c
-    - TOX_ENV=py27_c
-    - TOX_ENV=py33_c
-    - TOX_ENV=py34_c
+    - ENV=pypy_cffi
+    - ENV=py26_cffi
+    - ENV=py27_cffi
+    - ENV=py30_cffi
+    - ENV=py31_cffi
+    - ENV=py32_cffi
+    - ENV=py33_cffi
+    - ENV=py34_cffi
+    - ENV=py25_c
+    - ENV=py26_c
+    - ENV=py27_c
+    - ENV=py33_c
+    - ENV=py34_c
 
 install:
     - sudo apt-get install libffi-dev
     - pip install tox --use-mirrors
     - pip install -e .
-    - "[[ ${TOX_ENV} == pypy ]] && sudo add-apt-repository -y ppa:pypy/ppa || true"
-    - "[[ ${TOX_ENV} == pypy ]] && sudo apt-get -y update && sudo apt-get -y install pypy || true"
+    - "[[ ${ENV:0:4} == pypy ]] && sudo add-apt-repository -y ppa:pypy/ppa || true"
+    - "[[ ${ENV:0:4} == pypy ]] && sudo apt-get -y update && sudo apt-get -y install pypy || true"
     # This is required because we need to get rid of the Travis installed PyPy
     # or it'll take precedence over the PPA installed one.
-    - "[[ ${TOX_ENV} == pypy ]] && sudo rm -rf /usr/local/pypy/bin || true"
+    - "[[ ${ENV:0:4} == pypy ]] && sudo rm -rf /usr/local/pypy/bin || true"
 
 script:
-    - tox -e $TOX_ENV
+    - tox -e $ENV
 
 notifications:
   email: false
