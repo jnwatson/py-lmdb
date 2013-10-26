@@ -108,17 +108,6 @@ the environment as it is used to allocate resources kept in shared memory.
         >>> # Error: database cannot share name of existing key!
         >>> subdb = env.open_db('somename')
 
-When a named database has been opened with :py:meth:`Environment.open_db` the
-resulting handle is shared with all environment users. While LMDB supports
-closing such handles, this is not exposed to Python, as doing so requires
-careful coordination among all database users, to ensure the handle is no
-longer in use.
-
-There is little reason to close a handle: open handles only consume small slots
-in the shared environment, and repeated calls to :py:meth:`Environment.open_db`
-for the same name will return the same handle. Simply set `max_dbs=` higher
-than the maximum number of handles required to alleviate any issue here.
-
 
 Storage efficiency & limits
 +++++++++++++++++++++++++++
