@@ -93,11 +93,11 @@ the environment as it is used to allocate resources kept in shared memory.
     Named databases are implemented by *storing a special descriptor in the
     main database*. All databases in an environment *share the same file*.
     Because the descriptor is present in the main database, attempts to create
-    a named database will fail if this key matching the database's name already
+    a named database will fail if a key matching the database's name already
     exists. Furthermore *the key is visible to lookups and enumerations*. If
     your main database keyspace conflicts with the names you use for named
-    databases, then you should move the contents of your main database to
-    another named database.
+    databases, then move the contents of your main database to another named
+    database.
 
     ::
 
