@@ -6,7 +6,9 @@ python:
 
 
 install:
-  - pip install -e .
+  - sudo apt-get install libffi-dev
+  - pip install cffi --use-mirrors
+  - pip install -e . --use-mirrors
 
 script: ./runtests.sh
 
