@@ -410,7 +410,7 @@ class DiskError(Error):
 
 # Prepare _error_map, a mapping of integer MDB_ERROR_CODE to exception class.
 _error_map = {}
-for obj in globals().values():
+for obj in list(globals().values()):
     if getattr(obj, '__name__', '').endswith('Error'):
         code = globals().get(getattr(obj, 'MDB_NAME', None))
         _error_map[code] = obj
