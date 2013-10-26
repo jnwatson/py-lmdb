@@ -8,3 +8,4 @@ lmdb.egg-info
 lmdb/_config.py
 lo.sh
 old
+.tox/
