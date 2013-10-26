@@ -1,37 +1,49 @@
 #
+# Copyright 2013 The py-lmdb authors, all rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted only as authorized by the OpenLDAP
+# Public License.
+#
+# A copy of this license is available in the file LICENSE in the
+# top-level directory of the distribution or, alternatively, at
+# <http://www.OpenLDAP.org/license.html>.
+#
+# OpenLDAP is a registered trademark of the OpenLDAP Foundation.
+#
+# Individual files and/or contributed packages may be copyright by
+# other parties and/or subject to additional restrictions.
+#
+# This work also contains materials derived from public sources.
+#
+# Additional information about OpenLDAP can be obtained at
+# <http://www.openldap.org/>.
+#
+
 # This is not a test suite! More like a collection of triggers for previously
 # observed crashes. Want to contribute to py-lmdb? Please write a test suite!
 #
 # what happens when empty keys/ values passed to various funcs
 # incorrect types
 # try to break cpython arg parsing - too many/few/incorrect args
+#
 
-import atexit
+from __future__ import absolute_import
+from __future__ import with_statement
+
 import os
 import random
-import shutil
-import tempfile
 import unittest
 
 import lmdb
+import testlib
 
 
-class EnvMixin:
-    def setUp(self):
-        self.path = tempfile.mkdtemp(prefix='lmdb_test')
-        atexit.register(shutil.rmtree, self.path, ignore_errors=True)
-        self.env = lmdb.open(self.path, max_dbs=10)
-
-    def tearDown(self):
-        self.env.close()
-        del self.env
-
-
-class CrashTest(EnvMixin, unittest.TestCase):
+class CrashTest(testlib.EnvMixin, unittest.TestCase):
     # Various efforts to cause segfaults.
 
     def setUp(self):
-        EnvMixin.setUp(self)
+        testlib.EnvMixin.setUp(self)
         with self.env.begin(write=True) as txn:
             txn.put('dave', '')
             txn.put('dave2', '')
@@ -67,109 +79,14 @@ class CrashTest(EnvMixin, unittest.TestCase):
         self.assertRaises(Exception, (lambda: list(it)))
 
 
-class LeakTest(EnvMixin, unittest.TestCase):
+class LeakTest(testlib.EnvMixin, unittest.TestCase):
     # Various efforts to cause Python-level leaks.
     pass
 
 
-
-KEYS = 'a', 'b', 'baa', 'd'
-ITEMS = [(k, '') for k in KEYS]
-REV_ITEMS = ITEMS[::-1]
-VALUES = ['' for k in KEYS]
-
-def putData(t, db=None):
-    for k, v in ITEMS:
-        if db:
-            t.put(k, v, db=db)
-        else:
-            t.put(k, v)
-
-
-class CursorTest(EnvMixin, unittest.TestCase):
+class IteratorTest(testlib.EnvMixin, unittest.TestCase):
     def setUp(self):
-        EnvMixin.setUp(self)
-        self.txn = self.env.begin(write=True)
-        self.c = self.txn.cursor()
-
-    def testKeyValueItemEmpty(self):
-        self.assertEqual('', self.c.key())
-        self.assertEqual('', self.c.value())
-        self.assertEqual(('', ''), self.c.item())
-
-    def testFirstLastEmpty(self):
-        self.assertEqual(False, self.c.first())
-        self.assertEqual(False, self.c.last())
-
-    def testFirstFilled(self):
-        putData(self.txn)
-        self.assertEqual(True, self.c.first())
-        self.assertEqual(ITEMS[0], self.c.item())
-
-    def testLastFilled(self):
-        putData(self.txn)
-        self.assertEqual(True, self.c.last())
-        self.assertEqual(ITEMS[-1], self.c.item())
-
-    def testSetKey(self):
-        self.assertRaises(Exception, (lambda: self.c.set_key('')))
-        self.assertEqual(False, self.c.set_key('missing'))
-        putData(self.txn)
-        self.assertEqual(True, self.c.set_key('b'))
-        self.assertEqual(False, self.c.set_key('ba'))
-
-    def testSetRange(self):
-        self.assertEqual(False, self.c.set_range('x'))
-        putData(self.txn)
-        self.assertEqual(False, self.c.set_range('x'))
-        self.assertEqual(True, self.c.set_range('a'))
-        self.assertEqual('a', self.c.key())
-        self.assertEqual(True, self.c.set_range('ba'))
-        self.assertEqual('baa', self.c.key())
-        self.c.set_range('')
-        self.assertEqual('a', self.c.key())
-
-    def testDeleteEmpty(self):
-        self.assertEqual(False, self.c.delete())
-
-    def testDeleteFirst(self):
-        putData(self.txn)
-        self.assertEqual(False, self.c.delete())
-        self.c.first()
-        self.assertEqual(('a', ''), self.c.item())
-        self.assertEqual(True, self.c.delete())
-        self.assertEqual(('b', ''), self.c.item())
-        self.assertEqual(True, self.c.delete())
-        self.assertEqual(('baa', ''), self.c.item())
-        self.assertEqual(True, self.c.delete())
-        self.assertEqual(('d', ''), self.c.item())
-        self.assertEqual(True, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
-        self.assertEqual(False, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
-
-    def testDeleteLast(self):
-        putData(self.txn)
-        self.assertEqual(True, self.c.last())
-        self.assertEqual(('d', ''), self.c.item())
-        self.assertEqual(True, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
-        self.assertEqual(False, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
-
-    def testCount(self):
-        self.assertRaises(Exception, (lambda: self.c.count()))
-        putData(self.txn)
-        self.c.first()
-        # TODO: complete dup key support.
-        #self.assertEqual(1, self.c.count())
-
-    def testPut(self):
-        pass
-
-class IteratorTest(EnvMixin, unittest.TestCase):
-    def setUp(self):
-        EnvMixin.setUp(self)
+        testlib.EnvMixin.setUp(self)
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
@@ -179,32 +96,32 @@ class IteratorTest(EnvMixin, unittest.TestCase):
         self.assertEqual([], list(self.c.iterprev()))
 
     def testFilled(self):
-        putData(self.txn)
-        self.assertEqual(ITEMS, list(self.c))
-        self.assertEqual(ITEMS, list(self.c))
-        self.assertEqual(ITEMS, list(self.c.iternext()))
-        self.assertEqual(ITEMS[::-1], list(self.txn.cursor().iterprev()))
-        self.assertEqual(ITEMS[::-1], list(self.c.iterprev()))
-        self.assertEqual(ITEMS, list(self.c))
+        testlib.putData(self.txn)
+        self.assertEqual(testlib.testlib.ITEMS, list(self.c))
+        self.assertEqual(testlib.ITEMS, list(self.c))
+        self.assertEqual(testlib.ITEMS, list(self.c.iternext()))
+        self.assertEqual(testlib.ITEMS[::-1], list(self.txn.cursor().iterprev()))
+        self.assertEqual(testlib.ITEMS[::-1], list(self.c.iterprev()))
+        self.assertEqual(testlib.ITEMS, list(self.c))
 
     def testFilledSkipForward(self):
-        putData(self.txn)
+        testlib.putData(self.txn)
         self.c.set_range('b')
-        self.assertEqual(ITEMS[1:], list(self.c))
+        self.assertEqual(testlib.ITEMS[1:], list(self.c))
 
     def testFilledSkipReverse(self):
-        putData(self.txn)
+        testlib.putData(self.txn)
         self.c.set_range('b')
-        self.assertEqual(REV_ITEMS[-2:], list(self.c.iterprev()))
+        self.assertEqual(testlib.REV_ITEMS[-2:], list(self.c.iterprev()))
 
     def testFilledSkipEof(self):
-        putData(self.txn)
+        testlib.putData(self.txn)
         self.assertEqual(False, self.c.set_range('z'))
-        self.assertEqual(REV_ITEMS, list(self.c.iterprev()))
+        self.assertEqual(testlib.REV_ITEMS, list(self.c.iterprev()))
 
 
 
-class BigReverseTest(EnvMixin, unittest.TestCase):
+class BigReverseTest(testlib.EnvMixin, unittest.TestCase):
     # Test for issue with MDB_LAST+MDB_PREV skipping chunks of database.
     def test_big_reverse(self):
         txn = self.env.begin(write=True)
@@ -214,7 +131,7 @@ class BigReverseTest(EnvMixin, unittest.TestCase):
         assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
 
 
-class MultiCursorDeleteTest(EnvMixin, unittest.TestCase):
+class MultiCursorDeleteTest(testlib.EnvMixin, unittest.TestCase):
     def test1(self):
         """Ensure MDB_NEXT is ignored on `c1' when it was previously positioned
         on the key that `c2' just deleted."""
