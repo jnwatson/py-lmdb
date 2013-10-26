@@ -208,7 +208,7 @@ class BigReverseTest(EnvMixin, unittest.TestCase):
     # Test for issue with MDB_LAST+MDB_PREV skipping chunks of database.
     def test_big_reverse(self):
         txn = self.env.begin(write=True)
-        keys = ['%05d' % i for i in xrange(0xffff)]
+        keys = ['%05d' % i for i in range(0xffff)]
         for k in keys:
             txn.put(k, k, append=True)
         assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
@@ -223,7 +223,7 @@ class MultiCursorDeleteTest(EnvMixin, unittest.TestCase):
         while cur.first():
             cur.delete()
 
-        for i in xrange(1, 10):
+        for i in range(1, 10):
             cur.put(chr(ord('a') + i) * i, '')
 
         c1 = txn.cursor()
@@ -243,7 +243,7 @@ class MultiCursorDeleteTest(EnvMixin, unittest.TestCase):
 
         txn = self.env.begin(write=True)
         keys = []
-        for i in xrange(20000):
+        for i in range(20000):
             key = '%06x' % i
             val = 'x' * rand.randint(76, 350)
             assert txn.put(key, val)
