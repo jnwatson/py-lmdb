@@ -97,7 +97,7 @@ class IteratorTest(testlib.EnvMixin, unittest.TestCase):
 
     def testFilled(self):
         testlib.putData(self.txn)
-        self.assertEqual(testlib.testlib.ITEMS, list(self.c))
+        self.assertEqual(testlib.ITEMS, list(self.c))
         self.assertEqual(testlib.ITEMS, list(self.c))
         self.assertEqual(testlib.ITEMS, list(self.c.iternext()))
         self.assertEqual(testlib.ITEMS[::-1], list(self.txn.cursor().iterprev()))
