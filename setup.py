@@ -1,3 +1,4 @@
+#
 # Copyright 2013 The py-lmdb authors, all rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without
@@ -17,6 +18,7 @@
 # 
 # Additional information about OpenLDAP can be obtained at
 # <http://www.openldap.org/>.
+#
 
 from __future__ import absolute_import
 from __future__ import with_statement
