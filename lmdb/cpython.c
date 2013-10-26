@@ -1505,7 +1505,7 @@ env_readers(EnvObject *self)
         return NULL;
     }
 
-    Py_SIZE(str) = 0;
+    PyBytes_GET_SIZE(str) = 0;
     if(mdb_reader_list(self->env, env_readers_callback, &str)) {
         Py_CLEAR(str);
     }
