@@ -27,11 +27,8 @@ Please see http://lmdb.readthedocs.org/
 from __future__ import absolute_import
 
 import os
-import shutil
 import sys
-import tempfile
 import threading
-import warnings
 import weakref
 
 import lmdb
