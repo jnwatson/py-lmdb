@@ -222,6 +222,7 @@ typedef struct {
 #   define PyBytes_GET_SIZE PyString_GET_SIZE
 #   define PyBytes_CheckExact PyString_CheckExact
 #   define PyBytes_FromStringAndSize PyString_FromStringAndSize
+#   define _PyBytes_Resize _PyString_Resize
 #   define MOD_RETURN(mod) return
 #   define MODINIT_NAME initcpython
 #   define BUFFER_TYPE PyBufferObject
@@ -1479,13 +1480,13 @@ env_stat(EnvObject *self)
 static int env_readers_callback(const char *msg, void *str_)
 {
     PyObject **str = str_;
-    int old_size = PyString_GET_SIZE(*str);
+    int old_size = PyBytes_GET_SIZE(*str);
     int chunk_size = strlen(msg);
 
-    if(_PyString_Resize(str, old_size + chunk_size)) {
+    if(_PyBytes_Resize(str, old_size + chunk_size)) {
         return -1;
     }
-    memcpy(PyString_AS_STRING(*str) + old_size, msg, chunk_size);
+    memcpy(PyBytes_AS_STRING(*str) + old_size, msg, chunk_size);
     return 0;
 }
 
@@ -1499,7 +1500,7 @@ env_readers(EnvObject *self)
         return err_invalid();
     }
 
-    PyObject *str = PyString_FromStringAndSize(NULL, 20);
+    PyObject *str = PyBytes_FromStringAndSize(NULL, 20);
     if(! str) {
         return NULL;
     }
@@ -1526,7 +1527,7 @@ env_reader_check(EnvObject *self)
     if(rc) {
         return err_set("mdb_reader_check", rc);
     }
-    return PyInt_FromLong(dead);
+    return PyLong_FromLongLong(dead);
 }
 
 /**
@@ -2915,7 +2916,7 @@ static int init_strings(PyObject *mod)
         if(! ((string_tbl[i] = PyUnicode_InternFromString(cur)))) {
             return -1;
         }
-        cur += PyString_GET_SIZE(string_tbl[i]) + 1;
+        cur += PyUnicode_GET_SIZE(string_tbl[i]) + 1;
     }
     return 0;
 }

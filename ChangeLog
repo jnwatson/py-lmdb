@@ -1,6 +1,8 @@
 
 2013-10-08 v0.76
 
+* Numerous 3.x fixes to the native extension were made.
+
 * When multiple cursors exist, and one cursor performs a mutation,
   remaining cursors may have returned corrupt results via key(), value(),
   or item(). Mutations are now explicitly tracked and cause the cursor's
