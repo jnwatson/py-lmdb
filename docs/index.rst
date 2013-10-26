@@ -23,7 +23,7 @@ LMDB is a tiny database with some excellent properties:
 * Ordered-map interface (keys are always sorted)
 * Reader/writer transactions: readers don't block writers and writers don't
   block readers. Each environment supports one concurrent write transaction.
-* Read transactions are extremely cheap: under 400 nanoseconds on CPython.
+* Read transactions are extremely cheap.
 * Environments may be opened by multiple processes on the same host, making it
   ideal for working around Python's `GIL
   <http://wiki.python.org/moin/GlobalInterpreterLock>`_.
@@ -34,7 +34,6 @@ LMDB is a tiny database with some excellent properties:
 * Maintenance requires no external process or background threads.
 * No application-level caching is required: LMDB relies entirely on the
   operating system's buffer cache.
-* 32kb of object code and 6kLOC of C.
 
 Significant effort has been made to ensure the binding is as user-friendly as
 possible, in particular by raising exceptions instead of crashing when
