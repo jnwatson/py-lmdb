@@ -50,6 +50,12 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
             'BadTxnError', 'BadValsizeError', 'ReadonlyError',
             'InvalidParameterError', 'LockError', 'MemoryError', 'DiskError']
 
+
+# Handle moronic Python >=3.0 <3.3.
+UnicodeType = type('')
+if UnicodeType is bytes:
+    UnicodeType = str
+
 # Used to track context across cffi callbcks.
 _callbacks = threading.local()
 
@@ -633,7 +639,7 @@ class Environment(object):
         if writemap:
             flags |= MDB_WRITEMAP
 
-        if isinstance(path, type(u'')):
+        if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
 
         rc = mdb_env_open(self._env, path, flags, mode)
