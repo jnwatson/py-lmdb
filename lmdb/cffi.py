@@ -1146,7 +1146,7 @@ class Transaction(object):
         """
         return Cursor(db or self._db, self).pop(key)
 
-    def delete(self, key, value='', db=None):
+    def delete(self, key, value=b'', db=None):
         """Delete a key from the database.
 
         Equivalent to `mdb_del()
