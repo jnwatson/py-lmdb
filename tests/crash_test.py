@@ -43,8 +43,9 @@ from testlib import B
 from testlib import O
 
 
-# Python2.5.
-if not hasattr(__builtins__, 'next'):
+try:
+    next(iter([1]))
+except NameError: # Python2.5.
     def next(it):
         return it.next()
 
