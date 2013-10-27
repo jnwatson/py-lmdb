@@ -5,14 +5,14 @@
 ENV="$1"
 PKGS="$PKGS libffi-dev"
 
-[[ "$ENV" == *'31'* ]] && {
+#[[ "$ENV" == *'31'* ]] && {
     # pip 1.4.1 broken with Python3.1, need the dev version in this case.
-    echo "Replacing pip with dev version.."
-    pip install -U 'https://github.com/pypa/pip/archive/02fff2b7a00a71ce8c8a98b671a5127490770093.zip#egg=pip'
-    hash -r
-    REPOS="$REPOS ppa:fkrull/deadsnakes"
-    PKGS="$PKGS python3.1 python3.1-dev"
-}
+ #   echo "Replacing pip with dev version.."
+ #   pip install -U 'https://github.com/pypa/pip/archive/02fff2b7a00a71ce8c8a98b671a5127490770093.zip#egg=pip'
+ #   hash -r
+ #   REPOS="$REPOS ppa:fkrull/deadsnakes"
+ #   PKGS="$PKGS python3.1 python3.1-dev"
+#}
 
 [[ "$ENV" == *'pypy'* ]] && {
     REPOS="$REPOS ppa:pypy/ppa"
@@ -22,13 +22,11 @@ PKGS="$PKGS libffi-dev"
 }
 
 [ "$REPOS" ] && {
-    apt-get -qq install apt-transport-https
+    for repo in $REPOS; do 
+        echo "Add repository $REPOS..."
+        add-apt-repository -y $repo
+    done
 }
-
-for repo in $REPOS; do 
-    echo "Add repository $REPOS..."
-    add-apt-repository -y $repo
-done
 
 [ "$PKGS" ] && {
     echo "apt-get update..."
@@ -37,4 +35,5 @@ done
     apt-get --force-yes -qq install $PKGS
 }
 
+pip install -U pip
 pip install tox
