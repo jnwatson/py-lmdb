@@ -41,10 +41,27 @@ def temp_env(max_dbs=10, **kwargs):
     return path, env
 
 
-KEYS = 'a', 'b', 'baa', 'd'
-ITEMS = [(k, '') for k in KEYS]
+# B(ascii 'string') -> bytes
+try:
+    bytes('')     # Python>=2.6, alias for str().
+    B = lambda s: s
+except TypeError: # Python3.x, requires encoding parameter.
+    B = lambda s: bytes(s, 'ascii')
+except NameError: # Python<=2.5.
+    B = lambda s: s
+
+# BL('s1', 's2') -> ['bytes1', 'bytes2']
+BL = lambda *args: map(B, args)
+# TS('s1', 's2') -> ('bytes1', 'bytes2')
+BT = lambda *args: tuple(B(s) for s in args)
+# O(int) -> length-1 bytes
+O = lambda arg: B(chr(arg))
+
+
+KEYS = BL('a', 'b', 'baa', 'd')
+ITEMS = [(k, B('')) for k in KEYS]
 REV_ITEMS = ITEMS[::-1]
-VALUES = ['' for k in KEYS]
+VALUES = [B('') for k in KEYS]
 
 def putData(t, db=None):
     for k, v in ITEMS:

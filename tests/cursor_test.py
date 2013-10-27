@@ -25,6 +25,8 @@ from __future__ import with_statement
 import unittest
 
 import testlib
+from testlib import B
+from testlib import BT
 
 
 class CursorTest(unittest.TestCase):
@@ -34,9 +36,9 @@ class CursorTest(unittest.TestCase):
         self.c = self.txn.cursor()
 
     def testKeyValueItemEmpty(self):
-        self.assertEqual('', self.c.key())
-        self.assertEqual('', self.c.value())
-        self.assertEqual(('', ''), self.c.item())
+        self.assertEqual(B(''), self.c.key())
+        self.assertEqual(B(''), self.c.value())
+        self.assertEqual(BT('', ''), self.c.item())
 
     def testFirstLastEmpty(self):
         self.assertEqual(False, self.c.first())
@@ -53,22 +55,22 @@ class CursorTest(unittest.TestCase):
         self.assertEqual(testlib.ITEMS[-1], self.c.item())
 
     def testSetKey(self):
-        self.assertRaises(Exception, (lambda: self.c.set_key('')))
-        self.assertEqual(False, self.c.set_key('missing'))
+        self.assertRaises(Exception, (lambda: self.c.set_key(B(''))))
+        self.assertEqual(False, self.c.set_key(B('missing')))
         testlib.putData(self.txn)
-        self.assertEqual(True, self.c.set_key('b'))
-        self.assertEqual(False, self.c.set_key('ba'))
+        self.assertEqual(True, self.c.set_key(B('b')))
+        self.assertEqual(False, self.c.set_key(B('ba')))
 
     def testSetRange(self):
-        self.assertEqual(False, self.c.set_range('x'))
+        self.assertEqual(False, self.c.set_range(B('x')))
         testlib.putData(self.txn)
-        self.assertEqual(False, self.c.set_range('x'))
-        self.assertEqual(True, self.c.set_range('a'))
-        self.assertEqual('a', self.c.key())
-        self.assertEqual(True, self.c.set_range('ba'))
-        self.assertEqual('baa', self.c.key())
-        self.c.set_range('')
-        self.assertEqual('a', self.c.key())
+        self.assertEqual(False, self.c.set_range(B('x')))
+        self.assertEqual(True, self.c.set_range(B('a')))
+        self.assertEqual(B('a'), self.c.key())
+        self.assertEqual(True, self.c.set_range(B('ba')))
+        self.assertEqual(B('baa'), self.c.key())
+        self.c.set_range(B(''))
+        self.assertEqual(B('a'), self.c.key())
 
     def testDeleteEmpty(self):
         self.assertEqual(False, self.c.delete())
@@ -77,26 +79,26 @@ class CursorTest(unittest.TestCase):
         testlib.putData(self.txn)
         self.assertEqual(False, self.c.delete())
         self.c.first()
-        self.assertEqual(('a', ''), self.c.item())
+        self.assertEqual(BT('a', ''), self.c.item())
         self.assertEqual(True, self.c.delete())
-        self.assertEqual(('b', ''), self.c.item())
+        self.assertEqual(BT('b', ''), self.c.item())
         self.assertEqual(True, self.c.delete())
-        self.assertEqual(('baa', ''), self.c.item())
+        self.assertEqual(BT('baa', ''), self.c.item())
         self.assertEqual(True, self.c.delete())
-        self.assertEqual(('d', ''), self.c.item())
+        self.assertEqual(BT('d', ''), self.c.item())
         self.assertEqual(True, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
+        self.assertEqual(BT('', ''), self.c.item())
         self.assertEqual(False, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
+        self.assertEqual(BT('', ''), self.c.item())
 
     def testDeleteLast(self):
         testlib.putData(self.txn)
         self.assertEqual(True, self.c.last())
-        self.assertEqual(('d', ''), self.c.item())
+        self.assertEqual(BT('d', ''), self.c.item())
         self.assertEqual(True, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
+        self.assertEqual(BT('', ''), self.c.item())
         self.assertEqual(False, self.c.delete())
-        self.assertEqual(('', ''), self.c.item())
+        self.assertEqual(BT('', ''), self.c.item())
 
     def testCount(self):
         self.assertRaises(Exception, (lambda: self.c.count()))

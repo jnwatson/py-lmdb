@@ -39,8 +39,12 @@ import unittest
 import lmdb
 import testlib
 
+from testlib import B
+from testlib import O
 
-if 'next' not in globals():
+
+# Python2.5.
+if not hasattr(__builtins__, 'next'):
     def next(it):
         return it.next()
 
@@ -51,8 +55,8 @@ class CrashTest(unittest.TestCase):
     def setUp(self):
         self.path, self.env = testlib.temp_env()
         with self.env.begin(write=True) as txn:
-            txn.put('dave', '')
-            txn.put('dave2', '')
+            txn.put(B('dave'), B(''))
+            txn.put(B('dave2'), B(''))
 
     def testOldCrash(self):
         txn = self.env.begin()
@@ -80,7 +84,7 @@ class CrashTest(unittest.TestCase):
     def testDbCloseActiveIter(self):
         db = self.env.open_db(name='dave3')
         with self.env.begin(write=True) as txn:
-            txn.put('a', 'b', db=db)
+            txn.put(B('a'), B('b'), db=db)
             it = txn.cursor(db=db).iternext()
         self.assertRaises(Exception, (lambda: list(it)))
 
@@ -107,17 +111,17 @@ class IteratorTest(unittest.TestCase):
 
     def testFilledSkipForward(self):
         testlib.putData(self.txn)
-        self.c.set_range('b')
+        self.c.set_range(B('b'))
         self.assertEqual(testlib.ITEMS[1:], list(self.c))
 
     def testFilledSkipReverse(self):
         testlib.putData(self.txn)
-        self.c.set_range('b')
+        self.c.set_range(B('b'))
         self.assertEqual(testlib.REV_ITEMS[-2:], list(self.c.iterprev()))
 
     def testFilledSkipEof(self):
         testlib.putData(self.txn)
-        self.assertEqual(False, self.c.set_range('z'))
+        self.assertEqual(False, self.c.set_range(B('z')))
         self.assertEqual(testlib.REV_ITEMS, list(self.c.iterprev()))
 
 
@@ -126,7 +130,7 @@ class BigReverseTest(unittest.TestCase):
     def test_big_reverse(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
-        keys = ['%05d' % i for i in range(0xffff)]
+        keys = [B('%05d' % i) for i in range(0xffff)]
         for k in keys:
             txn.put(k, k, append=True)
         assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
@@ -145,28 +149,27 @@ class MultiCursorDeleteTest(unittest.TestCase):
             cur.delete()
 
         for i in range(1, 10):
-            cur.put(chr(ord('a') + i) * i, '')
+            cur.put(O(ord('a') + i) * i, B(''))
 
         c1 = txn.cursor()
         c1f = c1.iternext(values=False)
-        while next(c1f) != 'ddd':
+        while next(c1f) != B('ddd'):
             pass
         c2 = txn.cursor()
-        assert c2.set_key('ddd')
+        assert c2.set_key(B('ddd'))
         c2.delete()
-        assert next(c1f) == 'eeee'
-
+        assert next(c1f) == B('eeee')
 
     def test_monster(self):
-        # Generate predictable sself.assertEqualuence of sizes.
+        # Generate predictable sequence of sizes.
         rand = random.Random()
         rand.seed(0)
 
         txn = self.env.begin(write=True)
         keys = []
         for i in range(20000):
-            key = '%06x' % i
-            val = 'x' * rand.randint(76, 350)
+            key = B('%06x' % i)
+            val = B('x' * rand.randint(76, 350))
             assert txn.put(key, val)
             keys.append(key)
 
