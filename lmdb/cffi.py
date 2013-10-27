@@ -296,7 +296,7 @@ if not lmdb._reading_docs():
     def _msg_func(s, _):
         """mdb_msg_func() callback. Appends `s` to _callbacks.msg_func list.
         """
-        _callbacks.msg_func.append(_ffi.string(s))
+        _callbacks.msg_func.append(_ffi.string(s).decode())
         return 0
 
 class Error(Exception):
@@ -800,7 +800,7 @@ class Environment(object):
             rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
             if rc:
                 raise _error("mdb_reader_list", rc)
-            return ''.join(_callbacks.msg_func)
+            return UnicodeType().join(_callbacks.msg_func)
         finally:
             del _callbacks.msg_func
 

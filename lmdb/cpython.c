@@ -1480,13 +1480,16 @@ env_stat(EnvObject *self)
 static int env_readers_callback(const char *msg, void *str_)
 {
     PyObject **str = str_;
-    int old_size = PyBytes_GET_SIZE(*str);
-    int chunk_size = strlen(msg);
-
-    if(_PyBytes_Resize(str, old_size + chunk_size)) {
+    PyObject *s = PyUnicode_FromString(msg);
+    if(! s) {
         return -1;
     }
-    memcpy(PyBytes_AS_STRING(*str) + old_size, msg, chunk_size);
+    PyObject *new = PyUnicode_Concat(*str, s);
+    Py_CLEAR(*str);
+    *str = new;
+    if(! new) {
+        return -1;
+    }
     return 0;
 }
 
@@ -1500,12 +1503,11 @@ env_readers(EnvObject *self)
         return err_invalid();
     }
 
-    PyObject *str = PyBytes_FromStringAndSize(NULL, 20);
+    PyObject *str = PyUnicode_FromString("");
     if(! str) {
         return NULL;
     }
 
-    PyBytes_GET_SIZE(str) = 0;
     if(mdb_reader_list(self->env, env_readers_callback, &str)) {
         Py_CLEAR(str);
     }
