@@ -476,12 +476,12 @@ Deviations from LMDB API
 ########################
 
 `mdb_dbi_close()`:
-    This is not exposed since its use is perilous at best. Any user must ensure
-    all writers and readers cease activity and close the relevant handle.
-    Failure to do so could result in the DBI's slot becoming reused, resulting
-    in operations being serviced by the wrong DBI. Leaving handles open wastes
-    a tiny amount of memory, which seems a good price to ensure a subtle data
-    corruption bug is avoided.
+    This is not exposed since its use is perilous at best. Users must ensure
+    all activity on the DBI has ceased in all processes before closing the
+    handle. Failure to do this could result in "impossible" errors, or the
+    DBI slot becoming reused, resulting in operations being serviced by the
+    wrong named database. Leaving handles open wastes a tiny amount of memory,
+    which seems a good price to avoid subtle data corruption.
 
 :py:meth:`lmdb.Cursor.replace`, :py:meth:`lmdb.Cursor.pop`:
     There are no native equivalents to these calls, they just implement common
