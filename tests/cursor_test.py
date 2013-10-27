@@ -27,9 +27,9 @@ import unittest
 import testlib
 
 
-class CursorTest(testlib.EnvMixin, unittest.TestCase):
+class CursorTest(unittest.TestCase):
     def setUp(self):
-        testlib.EnvMixin.setUp(self)
+        self.path, self.env = testlib.temp_env()
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 

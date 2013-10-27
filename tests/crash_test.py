@@ -26,6 +26,7 @@
 # what happens when empty keys/ values passed to various funcs
 # incorrect types
 # try to break cpython arg parsing - too many/few/incorrect args
+# Various efforts to cause Python-level leaks.
 #
 
 from __future__ import absolute_import
@@ -44,11 +45,11 @@ if 'next' not in globals():
         return it.next()
 
 
-class CrashTest(testlib.EnvMixin, unittest.TestCase):
+class CrashTest(unittest.TestCase):
     # Various efforts to cause segfaults.
 
     def setUp(self):
-        testlib.EnvMixin.setUp(self)
+        self.path, self.env = testlib.temp_env()
         with self.env.begin(write=True) as txn:
             txn.put('dave', '')
             txn.put('dave2', '')
@@ -84,14 +85,9 @@ class CrashTest(testlib.EnvMixin, unittest.TestCase):
         self.assertRaises(Exception, (lambda: list(it)))
 
 
-class LeakTest(testlib.EnvMixin, unittest.TestCase):
-    # Various efforts to cause Python-level leaks.
-    pass
-
-
-class IteratorTest(testlib.EnvMixin, unittest.TestCase):
+class IteratorTest(unittest.TestCase):
     def setUp(self):
-        testlib.EnvMixin.setUp(self)
+        self.path, self.env = testlib.temp_env()
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
@@ -125,17 +121,21 @@ class IteratorTest(testlib.EnvMixin, unittest.TestCase):
         self.assertEqual(testlib.REV_ITEMS, list(self.c.iterprev()))
 
 
-class BigReverseTest(testlib.EnvMixin, unittest.TestCase):
+class BigReverseTest(unittest.TestCase):
     # Test for issue with MDB_LAST+MDB_PREV skipping chunks of database.
     def test_big_reverse(self):
-        txn = self.env.begin(write=True)
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
         keys = ['%05d' % i for i in range(0xffff)]
         for k in keys:
             txn.put(k, k, append=True)
         assert list(txn.cursor().iterprev(values=False)) == list(reversed(keys))
 
 
-class MultiCursorDeleteTest(testlib.EnvMixin, unittest.TestCase):
+class MultiCursorDeleteTest(unittest.TestCase):
+    def setUp(self):
+        self.path, self.env = testlib.temp_env()
+
     def test1(self):
         """Ensure MDB_NEXT is ignored on `c1' when it was previously positioned
         on the key that `c2' just deleted."""

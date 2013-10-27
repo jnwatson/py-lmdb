@@ -21,6 +21,7 @@
 #
 
 from __future__ import absolute_import
+import contextlib
 import tempfile
 import shutil
 import atexit
@@ -28,15 +29,16 @@ import atexit
 import lmdb
 
 
-class EnvMixin:
-    def setUp(self):
-        self.path = tempfile.mkdtemp(prefix='lmdb_test')
-        atexit.register(shutil.rmtree, self.path, ignore_errors=True)
-        self.env = lmdb.open(self.path, max_dbs=10)
+def temp_dir():
+    path = tempfile.mkdtemp(prefix='lmdb_test')
+    atexit.register(shutil.rmtree, path, ignore_errors=True)
+    return path
 
-    def tearDown(self):
-        self.env.close()
-        del self.env
+
+def temp_env(max_dbs=10, **kwargs):
+    path = temp_dir()
+    env = lmdb.open(path, max_dbs=max_dbs, **kwargs)
+    return path, env
 
 
 KEYS = 'a', 'b', 'baa', 'd'
