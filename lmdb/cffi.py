@@ -865,6 +865,9 @@ class Environment(object):
                 If ``True``, create the database if it doesn't exist, otherwise
                 raise an exception.
         """
+        if isinstance(name, UnicodeType):
+            name = name.encode(sys.getfilesystemencoding())
+
         ref = self._dbs.get(name)
         if ref:
             db = ref()
