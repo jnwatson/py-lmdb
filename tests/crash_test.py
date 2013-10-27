@@ -39,6 +39,11 @@ import lmdb
 import testlib
 
 
+if 'next' not in globals():
+    def next(it):
+        return it.next()
+
+
 class CrashTest(testlib.EnvMixin, unittest.TestCase):
     # Various efforts to cause segfaults.
 
@@ -118,7 +123,6 @@ class IteratorTest(testlib.EnvMixin, unittest.TestCase):
         testlib.putData(self.txn)
         self.assertEqual(False, self.c.set_range('z'))
         self.assertEqual(testlib.REV_ITEMS, list(self.c.iterprev()))
-
 
 
 class BigReverseTest(testlib.EnvMixin, unittest.TestCase):
