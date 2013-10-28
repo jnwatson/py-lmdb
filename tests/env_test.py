@@ -139,7 +139,7 @@ class OpenTest(unittest.TestCase):
     def test_mode_subdir_create(self):
         oldmask = os.umask(0)
         try:
-            for mode in 0777, 0755, 0700:
+            for mode in OCT('777'), OCT('755'), OCT('700'):
                 path = testlib.temp_dir(create=False)
                 env = lmdb.open(path, subdir=True, create=True, mode=mode)
                 fmode = mode & ~OCT('111')
@@ -152,7 +152,7 @@ class OpenTest(unittest.TestCase):
     def test_mode_subdir_nocreate(self):
         oldmask = os.umask(0)
         try:
-            for mode in 0777, 0755, 0700:
+            for mode in OCT('777'), OCT('755'), OCT('700'):
                 path = testlib.temp_dir()
                 env = lmdb.open(path, subdir=True, create=False, mode=mode)
                 fmode = mode & ~OCT('111')
