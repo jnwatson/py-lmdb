@@ -99,6 +99,7 @@ enum string_id {
     OVERWRITE_S,
     PARENT_S,
     PATH_S,
+    READAHEAD_S,
     READONLY_S,
     REVERSE_S,
     REVERSE_KEY_S,
@@ -148,6 +149,7 @@ static const char *strings = (
     "overwrite\0"
     "parent\0"
     "path\0"
+    "readahead\0"
     "readonly\0"
     "reverse\0"
     "reverse_key\0"
@@ -1131,13 +1133,14 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int map_async;
         int mode;
         int create;
+        int readahead;
         int writemap;
         int max_readers;
         int max_dbs;
         ssize_t max_spare_txns;
         ssize_t max_spare_cursors;
         ssize_t max_spare_iters;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 0, 126, 0, 1, 32, 32};
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 1, 0, 126, 0, 1, 32, 32};
 
     static const struct argspec argspec[] = {
         {ARG_STR, PATH_S, OFFSET(env_new, path)},
@@ -1149,6 +1152,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, MAP_ASYNC_S, OFFSET(env_new, map_async)},
         {ARG_INT, MODE_S, OFFSET(env_new, mode)},
         {ARG_BOOL, CREATE_S, OFFSET(env_new, create)},
+        {ARG_BOOL, READAHEAD_S, OFFSET(env_new, readahead)},
         {ARG_BOOL, WRITEMAP_S, OFFSET(env_new, writemap)},
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
@@ -1224,6 +1228,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
     if(arg.map_async) {
         flags |= MDB_MAPASYNC;
+    }
+    if(! arg.readahead) {
+        flags |= MDB_NORDAHEAD;
     }
     if(arg.writemap) {
         flags |= MDB_WRITEMAP;
