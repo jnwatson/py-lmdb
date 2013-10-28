@@ -622,7 +622,7 @@ class Environment(object):
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
-            mode=0o644, create=True, readahead=True, writemap=False,
+            mode=0o755, create=True, readahead=True, writemap=False,
             max_readers=126, max_dbs=0, max_spare_txns=1, max_spare_cursors=32,
             max_spare_iters=32):
         envpp = _ffi.new('MDB_env **')
@@ -646,7 +646,7 @@ class Environment(object):
             raise _error("mdb_env_set_maxdbs", rc)
 
         if create and subdir and not (os.path.exists(path) or readonly):
-            os.mkdir(path)
+            os.mkdir(path, mode)
 
         flags = MDB_NOTLS
         if not subdir:
@@ -668,7 +668,7 @@ class Environment(object):
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
 
-        rc = mdb_env_open(self._env, path, flags, mode)
+        rc = mdb_env_open(self._env, path, flags, mode & ~0o111)
         if rc:
             raise _error(path, rc)
         with self.begin(db=object()) as txn:

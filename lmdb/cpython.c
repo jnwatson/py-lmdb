@@ -1153,7 +1153,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         ssize_t max_spare_txns;
         ssize_t max_spare_cursors;
         ssize_t max_spare_iters;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0644, 1, 1, 0, 126, 0, 1, 32, 32};
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 126, 0, 1, 32, 32};
 
     static const struct argspec argspec[] = {
         {ARG_STR, PATH_S, OFFSET(env_new, path)},
@@ -1218,7 +1218,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         errno = 0;
         stat(arg.path, &st);
         if(errno == ENOENT) {
-            if(mkdir(arg.path, 0700)) {
+            if(mkdir(arg.path, arg.mode)) {
                 PyErr_SetFromErrnoWithFilename(PyExc_OSError, arg.path);
                 goto fail;
             }
@@ -1249,8 +1249,11 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         flags |= MDB_WRITEMAP;
     }
 
-    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, arg.mode)
-    UNLOCKED(rc, mdb_env_open(self->env, arg.path, flags, arg.mode));
+    // Strip +x.
+    int mode = arg.mode & ~0111;
+
+    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, mode)
+    UNLOCKED(rc, mdb_env_open(self->env, arg.path, flags, mode));
     if(rc) {
         err_set(arg.path, rc);
         goto fail;
