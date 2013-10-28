@@ -703,7 +703,7 @@ class Environment(object):
         rc = mdb_env_get_path(self._env, path)
         if rc:
             raise _error("mdb_env_get_path", rc)
-        return _ffi.string(path[0])
+        return _ffi.string(path[0]).decode(sys.getfilesystemencoding())
 
     def copy(self, path):
         """Make a consistent copy of the environment in the given destination
