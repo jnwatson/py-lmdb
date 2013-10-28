@@ -183,6 +183,7 @@ _CFFI_CDEF = '''
     #define MDB_READERS_FULL ...
     #define MDB_REVERSEKEY ...
     #define MDB_TXN_FULL ...
+    #define MDB_NORDAHEAD ...
     #define MDB_WRITEMAP ...
     #define MDB_NOTLS ...
 
@@ -556,6 +557,11 @@ class Environment(object):
         `create`:
             If ``False``, do not create the directory `path` if it is missing.
 
+        `readahead`:
+            If ``False``, LMDB will disable the OS filesystem readahead
+            mechanism, which may improve random read performance when a
+            database is larger than RAM.
+
         `writemap`:
             If ``True`` LMDB will use a writeable memory map to update the
             database. This option is incompatible with nested transactions.
@@ -601,8 +607,8 @@ class Environment(object):
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
-            mode=0o644, create=True, writemap=False, max_readers=126,
-            max_dbs=0, max_spare_txns=1, max_spare_cursors=32,
+            mode=0o644, create=True, readahead=True, writemap=False,
+            max_readers=126, max_dbs=0, max_spare_txns=1, max_spare_cursors=32,
             max_spare_iters=32):
         envpp = _ffi.new('MDB_env **')
 
@@ -639,6 +645,8 @@ class Environment(object):
             flags |= MDB_NOSYNC
         if map_async:
             flags |= MDB_MAPASYNC
+        if not readahead:
+            flags |= MDB_NORDAHEAD
         if writemap:
             flags |= MDB_WRITEMAP
 
