@@ -13,7 +13,7 @@ env:
     - ENV=py26_c
     - ENV=py27_c
     - ENV=py33_c
-    - ENV=py34_c
+    #- ENV=py34_c
 
 install:
     - "sudo ./.travis.install.sh $ENV"
