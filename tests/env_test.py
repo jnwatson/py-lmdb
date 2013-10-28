@@ -137,19 +137,29 @@ class OpenTest(unittest.TestCase):
             assert env.flags()['map_async'] == flag
 
     def test_mode_subdir_create(self):
-        for mode in 0777, 0755, 0700:
-            path = testlib.temp_dir(create=False)
-            env = lmdb.open(path, subdir=True, create=True, mode=mode)
-            assert testlib.path_mode(path) == mode
-            assert testlib.path_mode(path+'/data.mdb') == (mode & ~OCT('111'))
-            assert testlib.path_mode(path+'/lock.mdb') == (mode & ~OCT('111'))
+        oldmask = os.umask(0)
+        try:
+            for mode in 0777, 0755, 0700:
+                path = testlib.temp_dir(create=False)
+                env = lmdb.open(path, subdir=True, create=True, mode=mode)
+                fmode = mode & ~OCT('111')
+                assert testlib.path_mode(path) == mode
+                assert testlib.path_mode(path+'/data.mdb') == fmode
+                assert testlib.path_mode(path+'/lock.mdb') == fmode
+        finally:
+            os.umask(oldmask)
 
     def test_mode_subdir_nocreate(self):
-        for mode in 0777, 0755, 0700:
-            path = testlib.temp_dir()
-            env = lmdb.open(path, subdir=True, create=False, mode=mode)
-            assert testlib.path_mode(path+'/data.mdb') == (mode & ~OCT('111'))
-            assert testlib.path_mode(path+'/lock.mdb') == (mode & ~OCT('111'))
+        oldmask = os.umask(0)
+        try:
+            for mode in 0777, 0755, 0700:
+                path = testlib.temp_dir()
+                env = lmdb.open(path, subdir=True, create=False, mode=mode)
+                fmode = mode & ~OCT('111')
+                assert testlib.path_mode(path+'/data.mdb') == fmode
+                assert testlib.path_mode(path+'/lock.mdb') == fmode
+        finally:
+            os.umask(oldmask)
 
     def test_readahead(self):
         for flag in True, False:
