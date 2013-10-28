@@ -267,6 +267,7 @@ if not lmdb._reading_docs():
     # Try to use distutils-bundled cffi configuration to avoid a recompile and
     # potential compile errors during first module import.
     _config_vars = _config.CONFIG if _config else {
+        'extra_compile_args': ['-w'],
         'extra_sources': ['lib/mdb.c', 'lib/midl.c'],
         'extra_include_dirs': ['lib'],
         'extra_library_dirs': [],
@@ -279,7 +280,7 @@ if not lmdb._reading_docs():
         modulename='lmdb_cffi',
         ext_package='lmdb',
         sources=_config_vars['extra_sources'],
-        extra_compile_args=['-Wno-shorten-64-to-32'],
+        extra_compile_args=_config_vars['extra_compile_args'],
         include_dirs=_config_vars['extra_include_dirs'],
         libraries=_config_vars['libraries'],
         library_dirs=_config_vars['extra_library_dirs'])

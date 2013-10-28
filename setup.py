@@ -78,12 +78,21 @@ else:
     libraries = []
 
 
+# distutils perplexingly forces NDEBUG for package code!
+extra_compile_args = ['-UNDEBUG']
+
+# Disable some Clang/GCC warnings.
+if not os.getenv('LMDB_MAINTAINER'):
+    extra_compile_args += ['-w']
+
+
 # Capture setup.py configuration for later use by cffi, otherwise the
 # configuration may differ, forcing a recompile (and therefore likely compile
 # errors). This happens even when `use_cpython` since user might want to
 # LMDB_FORCE_CFFI=1 during testing.
 with open('lmdb/_config.py', 'w') as fp:
     fp.write('CONFIG = %r\n\n' % ({
+        'extra_compile_args': extra_compile_args,
         'extra_sources': extra_sources,
         'extra_library_dirs': extra_library_dirs,
         'extra_include_dirs': extra_include_dirs,
@@ -91,14 +100,9 @@ with open('lmdb/_config.py', 'w') as fp:
     },))
 
 
-# distutils perplexingly forces NDEBUG for package code!
-extra_compile_args = ['-UNDEBUG']
-
-
 if use_cpython:
     print('py-lmdb: Using CPython extension; override with LMDB_FORCE_CFFI=1.')
     install_requires = []
-    extra_compile_args += ['-Wno-shorten-64-to-32']
     if memsink:
         extra_compile_args += ['-DHAVE_MEMSINK',
                                '-I' + os.path.dirname(memsink.__file__)]
