@@ -1019,7 +1019,8 @@ class Transaction(object):
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
         if write and env.readonly:
-            raise _error('Cannot start write transaction with read-only env')
+            msg = 'Cannot start write transaction with read-only env'
+            raise _error(msg, EACCES)
         if write:
             flags = 0
         else:

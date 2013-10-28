@@ -928,7 +928,8 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
     }
 
     if(write && env->readonly) {
-        return err_set("Cannot start write transaction with read-only env", 0);
+        const char *msg = "Cannot start write transaction with read-only env";
+        return err_set(msg, EACCES);
     }
 
     TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
