@@ -679,7 +679,7 @@ class Environment(object):
 
     def close(self):
         """Close the environment, invalidating any open iterators, cursors, and
-        transactions.
+        transactions. Repeat calls to :py:meth:`close` have no effect.
 
         Equivalent to `mdb_env_close()
         <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
@@ -1114,15 +1114,17 @@ class Transaction(object):
         Equivalent to `mdb_txn_commit()
         <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
         """
-        if self._txn:
-            _kill_dependents(self)
-            rc = mdb_txn_commit(self._txn)
-            self._txn = _invalid
-            if rc:
-                raise _error("mdb_txn_commit", rc)
+        _kill_dependents(self)
+        rc = mdb_txn_commit(self._txn)
+        self._txn = _invalid
+        if rc:
+            raise _error("mdb_txn_commit", rc)
 
     def abort(self):
-        """Abort the pending transaction.
+        """Abort the pending transaction. Repeat calls to :py:meth:`abort` have
+        no effect after a previously successful :py:meth:`commit` or
+        :py:meth:`abort`, or after the associated :py:class:`Environment` has
+        been closed.
 
         Equivalent to `mdb_txn_abort()
         <http://symas.com/mdb/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_

@@ -193,5 +193,33 @@ class OpenTest(unittest.TestCase):
                 lambda: env.open_db('toomany'))
 
 
+
+class CloseTest(unittest.TestCase):
+    def test_close_normal(self):
+        path, env = testlib.temp_env()
+        # Attempting things should be ok.
+        txn = env.begin()
+        env.close()
+        # Repeated calls are ignored:
+        env.close()
+        # Attempting to use invalid objects should crash.
+        self.assertRaises(Exception,
+            lambda: txn.cursor())
+        self.assertRaises(Exception,
+            lambda: txn.commit())
+        # Abort should be OK though.
+        txn.abort()
+        # Attempting to start new txn should crash.
+        self.assertRaises(Exception,
+            lambda: env.begin())
+        # Attempting to get env state should crash.
+        self.assertRaises(Exception,
+            lambda: env.path())
+        self.assertRaises(Exception,
+            lambda: env.flags())
+        self.assertRaises(Exception,
+            lambda: env.info())
+
+
 if __name__ == '__main__':
     unittest.main()

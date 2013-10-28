@@ -2477,19 +2477,18 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static PyObject *
 trans_abort(TransObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
-    DEBUG("aborting")
-    INVALIDATE(self)
+    if(self->valid) {
+        DEBUG("aborting")
+        INVALIDATE(self)
 #ifdef HAVE_MEMSINK
-    ms_notify((PyObject *) self, &self->sink_head);
+        ms_notify((PyObject *) self, &self->sink_head);
 #endif
-    DROP_GIL
-    mdb_txn_abort(self->txn);
-    LOCK_GIL
-    self->txn = NULL;
-    self->valid = 0;
+        DROP_GIL
+        mdb_txn_abort(self->txn);
+        LOCK_GIL
+        self->txn = NULL;
+        self->valid = 0;
+    }
     Py_RETURN_NONE;
 }
 
