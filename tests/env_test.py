@@ -32,12 +32,17 @@ from testlib import OCT
 
 import lmdb
 
+try:
+    INT_TYPES = (int, long)
+except NameError:
+    INT_TYPES = (int,)
+
 
 class VersionTest(unittest.TestCase):
     def test_version(self):
         ver = lmdb.version()
         assert len(ver) == 3
-        assert all(isinstance(i, (int, long)) for i in ver)
+        assert all(isinstance(i, INT_TYPES) for i in ver)
         assert all(i >= 0 for i in ver)
 
 
@@ -61,8 +66,8 @@ class OpenTest(unittest.TestCase):
 
     def test_subdir_false_junk(self):
         path = testlib.temp_file()
-        fp = file(path, 'w')
-        fp.write('A' * 8192)
+        fp = open(path, 'wb')
+        fp.write(B('A' * 8192))
         fp.close()
         self.assertRaises(lmdb.InvalidError,
             lambda: lmdb.open(path, subdir=False))
