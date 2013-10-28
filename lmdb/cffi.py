@@ -802,6 +802,26 @@ class Environment(object):
             "num_readers": info.me_numreaders
         }
 
+    def flags(self):
+        """flags()
+
+        Return a dict describing Environment constructor flags used to
+        instantiate this environment."""
+        flags_ = _ffi.new('unsigned int[]', 1)
+        rc = mdb_env_get_flags(self._env, flags_)
+        if rc:
+            raise _error("mdb_env_get_flags", rc)
+        flags = flags_[0]
+        return {
+            'subdir': not (flags & MDB_NOSUBDIR),
+            'readonly': bool(flags & MDB_RDONLY),
+            'metasync': not (flags & MDB_NOMETASYNC),
+            'sync': not (flags & MDB_NOSYNC),
+            'map_async': bool(flags & MDB_MAPASYNC),
+            'readahead': not (flags & MDB_NORDAHEAD),
+            'writemap': bool(flags & MDB_WRITEMAP)
+        }
+
     def readers(self):
         """Return a list of newline-terminated human readable strings
         describing the current state of the reader lock table.

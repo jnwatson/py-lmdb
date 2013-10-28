@@ -1401,6 +1401,34 @@ env_info(EnvObject *self)
 }
 
 /**
+ * Environment.flags() -> dict
+ */
+static PyObject *
+env_flags(EnvObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    unsigned int flags;
+    int rc = mdb_env_get_flags(self->env, &flags);
+    if(rc) {
+        err_set("mdb_env_get_flags", rc);
+        return NULL;
+    }
+
+    PyObject *dct = PyDict_New();
+    PyDict_SetItemString(dct, "subdir", py_bool(!(flags & MDB_NOSUBDIR)));
+    PyDict_SetItemString(dct, "readonly", py_bool(flags & MDB_RDONLY));
+    PyDict_SetItemString(dct, "metasync", py_bool(!(flags & MDB_NOMETASYNC)));
+    PyDict_SetItemString(dct, "sync", py_bool(!(flags & MDB_NOSYNC)));
+    PyDict_SetItemString(dct, "map_async", py_bool(flags & MDB_MAPASYNC));
+    PyDict_SetItemString(dct, "readahead", py_bool(!(flags & MDB_NORDAHEAD)));
+    PyDict_SetItemString(dct, "writemap", py_bool(flags & MDB_WRITEMAP));
+    return dct;
+}
+
+/**
  * Environment.open_db() -> handle
  */
 static PyObject *
@@ -1583,6 +1611,7 @@ static struct PyMethodDef env_methods[] = {
     {"copy", (PyCFunction)env_copy, METH_VARARGS},
     {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
+    {"flags", (PyCFunction)env_flags, METH_NOARGS},
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
