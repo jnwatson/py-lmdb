@@ -25,28 +25,40 @@ import atexit
 import contextlib
 import os
 import shutil
+import stat
 import tempfile
 
 import lmdb
 
 
-def temp_dir():
+def temp_dir(create=True):
     path = tempfile.mkdtemp(prefix='lmdb_test')
+    if not create:
+        os.rmdir(path)
     atexit.register(shutil.rmtree, path, ignore_errors=True)
     return path
 
 
-def temp_file():
+def temp_file(create=True):
     fd, path = tempfile.mkstemp(prefix='lmdb_test')
     os.close(fd)
+    if not create:
+        os.unlink(path)
     atexit.register(lambda: os.path.exists(path) and os.unlink(path))
+    pathlock = path + '-lock'
+    atexit.register(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
     return path
 
 
 def temp_env(path=None, max_dbs=10, **kwargs):
-    path = temp_dir()
+    if not path:
+        path = temp_dir()
     env = lmdb.open(path, max_dbs=max_dbs, **kwargs)
     return path, env
+
+
+def path_mode(path):
+    return stat.S_IMODE(os.stat(path).st_mode)
 
 
 # B(ascii 'string') -> bytes
@@ -64,6 +76,8 @@ BL = lambda *args: map(B, args)
 BT = lambda *args: tuple(B(s) for s in args)
 # O(int) -> length-1 bytes
 O = lambda arg: B(chr(arg))
+# OCT(s) -> parse string as octal
+OCT = lambda s: int(s, 8)
 
 
 KEYS = BL('a', 'b', 'baa', 'd')
