@@ -843,6 +843,17 @@ class Environment(object):
         matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
         return mdb_env_get_maxkeysize(self._env)
 
+    def max_readers(self):
+        """Return the maximum number of readers specified during open of the
+        environment by the first process. This is the same as `max_dbs=`
+        specified to the constructor if this process was the first to open the
+        environment."""
+        readers_ = _ffi.new('unsigned int[]', 1)
+        rc = mdb_env_get_maxreaders(self._env, readers_)
+        if rc:
+            raise _error("mdb_env_get_maxreaders", rc)
+        return readers_[0]
+
     def readers(self):
         """Return a list of newline-terminated human readable strings
         describing the current state of the reader lock table.

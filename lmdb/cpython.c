@@ -1446,6 +1446,23 @@ env_max_key_size(EnvObject *self)
 }
 
 /**
+ * Environment.max_key_size() -> int
+ */
+static PyObject *
+env_max_readers(EnvObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    unsigned int readers;
+    int rc = mdb_env_get_maxreaders(self->env, &readers);
+    if(rc) {
+        return err_set("mdb_env_get_maxreaders", rc);
+    }
+    return PyLong_FromLongLong(readers);
+}
+
+/**
  * Environment.open_db() -> handle
  */
 static PyObject *
@@ -1630,6 +1647,7 @@ static struct PyMethodDef env_methods[] = {
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"flags", (PyCFunction)env_flags, METH_NOARGS},
     {"max_key_size", (PyCFunction)env_max_key_size, METH_NOARGS},
+    {"max_readers", (PyCFunction)env_max_readers, METH_NOARGS},
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
