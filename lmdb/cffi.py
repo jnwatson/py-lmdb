@@ -434,11 +434,12 @@ class DiskError(Error):
     MDB_NAME = 'ENOSPC'
 
 # Prepare _error_map, a mapping of integer MDB_ERROR_CODE to exception class.
-_error_map = {}
-for obj in list(globals().values()):
-    if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
-        _error_map[globals()[obj.MDB_NAME]] = obj
-del obj
+if not lmdb._reading_docs():
+    _error_map = {}
+    for obj in list(globals().values()):
+        if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
+            _error_map[globals()[obj.MDB_NAME]] = obj
+    del obj
 
 def _error(what, rc):
     """Lookup and instantiate the correct exception class for the error code
