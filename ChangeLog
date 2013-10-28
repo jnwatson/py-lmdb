@@ -1,5 +1,5 @@
 
-2013-10-08 v0.76
+2013-10-28 v0.76
 
 * Added support for Environment(..., readahead=False).
 
