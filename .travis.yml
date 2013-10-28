@@ -8,7 +8,7 @@ env:
     #- ENV=py31_cffi
     - ENV=py32_cffi
     - ENV=py33_cffi
-    - ENV=py34_cffi
+    #- ENV=py34_cffi
     - ENV=py25_c
     - ENV=py26_c
     - ENV=py27_c
