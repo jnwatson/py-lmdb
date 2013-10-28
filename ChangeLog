@@ -1,10 +1,13 @@
 
 2013-10-28 v0.77
 
-* The CFFI version now correctly raises the correct Error subclass associated
-  with an MDB_* return code.
-
 * Added Environment.max_key_size(), Environment.max_readers().
+
+* CFFI now raises the correct Error subclass associated with an MDB_* return
+  code.
+
+* Numerous CFFI vs. CPython behavioural inconsistencies have been fixed.
+
 
 
 2013-10-28 v0.76
