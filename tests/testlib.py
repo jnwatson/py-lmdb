@@ -21,10 +21,11 @@
 #
 
 from __future__ import absolute_import
-import contextlib
-import tempfile
-import shutil
 import atexit
+import contextlib
+import os
+import shutil
+import tempfile
 
 import lmdb
 
@@ -35,7 +36,14 @@ def temp_dir():
     return path
 
 
-def temp_env(max_dbs=10, **kwargs):
+def temp_file():
+    fd, path = tempfile.mkstemp(prefix='lmdb_test')
+    os.close(fd)
+    atexit.register(lambda: os.path.exists(path) and os.unlink(path))
+    return path
+
+
+def temp_env(path=None, max_dbs=10, **kwargs):
     path = temp_dir()
     env = lmdb.open(path, max_dbs=max_dbs, **kwargs)
     return path, env
