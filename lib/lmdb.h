@@ -174,7 +174,7 @@ typedef int mdb_filehandle_t;
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	8
+#define MDB_VERSION_PATCH	9
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -184,7 +184,7 @@ typedef int mdb_filehandle_t;
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"September 9, 2013"
+#define MDB_VERSION_DATE	"October 24, 2013"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
@@ -275,6 +275,8 @@ typedef void (MDB_rel_func)(MDB_val *item, void *oldptr, void *newptr, void *rel
 #define MDB_NOTLS		0x200000
 	/** don't do any locking, caller must manage their own locks */
 #define MDB_NOLOCK		0x400000
+	/** don't do readahead (no effect on Windows) */
+#define MDB_NORDAHEAD	0x800000
 /** @} */
 
 /**	@defgroup	mdb_dbi_open	Database Flags
@@ -538,6 +540,12 @@ int  mdb_env_create(MDB_env **env);
 	 *		that no readers are using old transactions while a writer is
 	 *		active. The simplest approach is to use an exclusive lock so that
 	 *		no readers may be active at all when a writer begins.
+	 *	<li>#MDB_NORDAHEAD
+	 *		Turn off readahead. Most operating systems perform readahead on
+	 *		read requests by default. This option turns it off if the OS
+	 *		supports it. Turning it off may help random read performance
+	 *		when the DB is larger than RAM and system RAM is full.
+	 *		The option is not implemented on Windows.
 	 * </ul>
 	 * @param[in] mode The UNIX permissions to set on created files. This parameter
 	 * is ignored on Windows.
@@ -670,6 +678,18 @@ int  mdb_env_get_flags(MDB_env *env, unsigned int *flags);
 	 * </ul>
 	 */
 int  mdb_env_get_path(MDB_env *env, const char **path);
+
+	/** @brief Return the filedescriptor for the given environment.
+	 *
+	 * @param[in] env An environment handle returned by #mdb_env_create()
+	 * @param[out] fd Address of a mdb_filehandle_t to contain the descriptor.
+	 * @return A non-zero error value on failure and 0 on success. Some possible
+	 * errors are:
+	 * <ul>
+	 *	<li>EINVAL - an invalid parameter was specified.
+	 * </ul>
+	 */
+int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 
 	/** @brief Set the size of the memory map to use for this environment.
 	 *
