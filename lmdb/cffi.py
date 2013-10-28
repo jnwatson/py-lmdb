@@ -711,7 +711,7 @@ class Environment(object):
         Equivalent to `mdb_env_copy()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
-        rc = mdb_env_copy(self._env, path)
+        rc = mdb_env_copy(self._env, path.encode(sys.getfilesystemencoding()))
         if rc:
             raise _error("mdb_env_copy", rc)
 
