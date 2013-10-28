@@ -22,6 +22,7 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import signal
 import os
 import unittest
 
@@ -36,6 +37,13 @@ try:
     INT_TYPES = (int, long)
 except NameError:
     INT_TYPES = (int,)
+
+# Handle moronic Python >=3.0 <3.3.
+UnicodeType = type('')
+if UnicodeType is bytes:
+    UnicodeType = str
+
+NO_READERS = UnicodeType('(no active readers)\n')
 
 
 class VersionTest(unittest.TestCase):
@@ -193,10 +201,9 @@ class OpenTest(unittest.TestCase):
                 lambda: env.open_db('toomany'))
 
 
-
 class CloseTest(unittest.TestCase):
-    def test_close_normal(self):
-        path, env = testlib.temp_env()
+    def test_close(self):
+        _, env = testlib.temp_env()
         # Attempting things should be ok.
         txn = env.begin()
         env.close()
@@ -219,6 +226,140 @@ class CloseTest(unittest.TestCase):
             lambda: env.flags())
         self.assertRaises(Exception,
             lambda: env.info())
+
+
+class InfoMethodsTest(unittest.TestCase):
+    def test_path(self):
+        path, env = testlib.temp_env()
+        assert path == env.path()
+        assert isinstance(path, UnicodeType)
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.path())
+
+    def test_stat(self):
+        _, env = testlib.temp_env()
+        stat = env.stat()
+        for k in 'psize', 'depth', 'branch_pages', 'overflow_pages',\
+                 'entries':
+            assert isinstance(stat[k], INT_TYPES), k
+            assert stat[k] >= 0
+
+        assert stat['entries'] == 0
+        txn = env.begin(write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+        stat = env.stat()
+        assert stat['entries'] == 1
+
+    def test_info(self):
+        _, env = testlib.temp_env()
+        info = env.info()
+        for k in 'map_addr', 'map_size', 'last_pgno', 'last_txnid', \
+                 'max_readers', 'num_readers':
+            assert isinstance(info[k], INT_TYPES), k
+            assert info[k] >= 0
+
+        assert info['last_txnid'] == 0
+        txn = env.begin(write=True)
+        txn.put(B('a'), B(''))
+        txn.commit()
+        info = env.info()
+        assert info['last_txnid'] == 1
+
+    def test_flags(self):
+        _, env = testlib.temp_env()
+        info = env.flags()
+        for k in 'subdir', 'readonly', 'metasync', 'sync', 'map_async',\
+                 'readahead', 'writemap':
+            assert isinstance(info[k], bool)
+
+    def test_max_key_size(self):
+        _, env = testlib.temp_env()
+        mks = env.max_key_size()
+        assert isinstance(mks, INT_TYPES)
+        assert mks > 0
+
+    def test_max_readers(self):
+        _, env = testlib.temp_env()
+        mr = env.max_readers()
+        assert isinstance(mr, INT_TYPES)
+        assert mr > 0 and mr == env.info()['max_readers']
+
+    def test_readers(self):
+        _, env = testlib.temp_env()
+        r = env.readers()
+        assert isinstance(r, UnicodeType)
+        assert r == NO_READERS
+
+        rtxn = env.begin()
+        r2 = env.readers()
+        assert isinstance(env.readers(), UnicodeType)
+        assert env.readers() != r
+
+
+class AdminMethodsTest(unittest.TestCase):
+    def test_copy(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+
+        dest_dir = testlib.temp_dir()
+        env.copy(dest_dir)
+        assert os.path.exists(dest_dir + '/data.mdb')
+
+        cenv = lmdb.open(dest_dir)
+        ctxn = cenv.begin()
+        assert ctxn.get(B('a')) == B('b')
+
+    def test_copyfd(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+
+        dst_path = testlib.temp_file(create=False)
+        fp = open(dst_path, 'wb')
+        env.copyfd(fp.fileno())
+        fp.close()
+
+        dstenv = lmdb.open(dst_path, subdir=False)
+        dtxn = dstenv.begin()
+        assert dtxn.get(B('a')) == B('b')
+
+    def test_sync(self):
+        _, env = testlib.temp_env()
+        env.sync(False)
+        env.sync(True)
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.sync(False))
+        self.assertRaises(Exception,
+            lambda: env.sync(True))
+
+    def test_reader_check(self):
+        path, env = testlib.temp_env()
+        rc = env.reader_check()
+        assert rc == 0
+
+        txn1 = env.begin()
+        assert env.readers() != NO_READERS
+        assert env.reader_check() == 0
+
+        # Start a child, open a txn, then crash the child.
+        child_pid = os.fork()
+        if not child_pid:
+            env2 = lmdb.open(path)
+            txn = env2.begin()
+            os.kill(os.getpid(), signal.SIGKILL)
+
+        os.waitpid(child_pid, 0)
+        assert env.reader_check() == 1
+        assert env.reader_check() == 0
+        assert env.readers() != NO_READERS
+        txn1.abort()
+        assert env.readers() == NO_READERS
 
 
 if __name__ == '__main__':
