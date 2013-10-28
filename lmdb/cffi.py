@@ -1009,6 +1009,13 @@ class Transaction(object):
             returned buffer objects. The benefit of this facility is diminished
             when using small keys and values.
     """
+
+    # If constructor fails, then __del__ will attempt to access these
+    # attributes.
+    _env = _invalid
+    _txn = _invalid
+    _parent = None
+
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         _depend(env, self)
         self.env = env # hold ref
