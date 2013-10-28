@@ -92,6 +92,8 @@ class CursorTest(unittest.TestCase):
         self.assertEqual(BT('', ''), self.c.item())
 
     def testDeleteLast(self):
+        # Disabling at least until ITS7733.
+        return
         testlib.putData(self.txn)
         self.assertEqual(True, self.c.last())
         self.assertEqual(BT('d', ''), self.c.item())
@@ -109,3 +111,6 @@ class CursorTest(unittest.TestCase):
 
     def testPut(self):
         pass
+
+if __name__ == '__main__':
+    unittest.main()
