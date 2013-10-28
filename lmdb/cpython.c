@@ -1213,7 +1213,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         goto fail;
     }
 
-    if(arg.create && arg.subdir) {
+    if(arg.create && arg.subdir && !arg.readonly) {
         struct stat st;
         errno = 0;
         stat(arg.path, &st);

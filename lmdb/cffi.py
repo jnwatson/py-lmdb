@@ -645,7 +645,7 @@ class Environment(object):
         if rc:
             raise _error("mdb_env_set_maxdbs", rc)
 
-        if create and subdir and not os.path.exists(path):
+        if create and subdir and not (os.path.exists(path) or readonly):
             os.mkdir(path)
 
         flags = MDB_NOTLS
