@@ -811,6 +811,7 @@ class Environment(object):
         if rc:
             raise _error("mdb_env_info", rc)
         return {
+            "map_addr": int(_ffi.cast('long', info.me_mapaddr)),
             "map_size": info.me_mapsize,
             "last_pgno": info.me_last_pgno,
             "last_txnid": info.me_last_txnid,
