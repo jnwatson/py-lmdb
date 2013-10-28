@@ -846,7 +846,7 @@ class Environment(object):
 
     def max_readers(self):
         """Return the maximum number of readers specified during open of the
-        environment by the first process. This is the same as `max_dbs=`
+        environment by the first process. This is the same as `max_readers=`
         specified to the constructor if this process was the first to open the
         environment."""
         readers_ = _ffi.new('unsigned int[]', 1)
