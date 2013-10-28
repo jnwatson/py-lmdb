@@ -1769,6 +1769,7 @@ cursor_delete(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
+    PyObject *res = Py_False;
     if(self->positioned) {
         DEBUG("deleting key '%.*s'",
               (int) self->key.mv_size,
@@ -1779,9 +1780,11 @@ cursor_delete(CursorObject *self)
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
+        res = Py_True;
         _cursor_get_c(self, MDB_GET_CURRENT);
     }
-    return py_bool(self->positioned);
+    Py_INCREF(res);
+    return res;
 }
 
 /**
