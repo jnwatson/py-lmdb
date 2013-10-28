@@ -521,6 +521,18 @@ struct dict_field {
 };
 
 /**
+ * Return a new reference to Py_True if the given argument is true, otherwise
+ * a new reference to Py_False.
+ */
+static PyObject *
+py_bool(int pred)
+{
+    PyObject *obj = pred ? Py_True : Py_False;
+    Py_INCREF(obj);
+    return obj;
+}
+
+/**
  * Convert the structure `o` described by `fields` to a dict and return the new
  * dict.
  */
@@ -1716,9 +1728,7 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
     if(_cursor_get_c(self, op)) {
         return NULL;
     }
-    PyObject *res = self->positioned ? Py_True : Py_False;
-    Py_INCREF(res);
-    return res;
+    return py_bool(self->positioned);
 }
 
 /**
@@ -1730,7 +1740,6 @@ cursor_delete(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    PyObject *ret = Py_False;
     if(self->positioned) {
         DEBUG("deleting key '%.*s'",
               (int) self->key.mv_size,
@@ -1741,11 +1750,9 @@ cursor_delete(CursorObject *self)
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
-        ret = Py_True;
         _cursor_get_c(self, MDB_GET_CURRENT);
     }
-    Py_INCREF(ret);
-    return ret;
+    return py_bool(self->positioned);
 }
 
 /**
