@@ -525,8 +525,7 @@ class Environment(object):
 
     To write to the environment a :py:class:`Transaction` must be created. One
     simultaneous write transaction is allowed, however there is no limit on the
-    number of read transactions even when a write transaction exists. Due to
-    this, write transactions should be kept as short as possible.
+    number of read transactions even when a write transaction exists.
 
     Equivalent to `mdb_env_open()
     <http://symas.com/mdb/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
