@@ -130,6 +130,7 @@ _CFFI_CDEF = '''
     int mdb_env_copyfd(MDB_env *env, int fd);
     int mdb_env_stat(MDB_env *env, MDB_stat *stat);
     int mdb_env_info(MDB_env *env, MDB_envinfo *stat);
+    int mdb_env_get_maxkeysize(MDB_env *env);
     int mdb_env_sync(MDB_env *env, int force);
     void mdb_env_close(MDB_env *env);
     int mdb_env_set_flags(MDB_env *env, unsigned int flags, int onoff);
@@ -836,6 +837,11 @@ class Environment(object):
             'readahead': not (flags & MDB_NORDAHEAD),
             'writemap': bool(flags & MDB_WRITEMAP)
         }
+
+    def max_key_size(self):
+        """Return the maximum size in bytes of a record's key part. This
+        matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
+        return mdb_env_get_maxkeysize(self._env)
 
     def readers(self):
         """Return a list of newline-terminated human readable strings

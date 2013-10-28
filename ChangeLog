@@ -1,4 +1,12 @@
 
+2013-10-28 v0.77
+
+* The CFFI version now correctly raises the correct Error subclass associated
+  with an MDB_* return code.
+
+* Added Environment.max_key_size().
+
+
 2013-10-28 v0.76
 
 * Added support for Environment(..., readahead=False).

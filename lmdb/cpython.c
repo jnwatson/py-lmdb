@@ -1433,6 +1433,19 @@ env_flags(EnvObject *self)
 }
 
 /**
+ * Environment.max_key_size() -> int
+ */
+static PyObject *
+env_max_key_size(EnvObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    int key_size = mdb_env_get_maxkeysize(self->env);
+    return PyLong_FromLongLong(key_size);
+}
+
+/**
  * Environment.open_db() -> handle
  */
 static PyObject *
@@ -1616,6 +1629,7 @@ static struct PyMethodDef env_methods[] = {
     {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"flags", (PyCFunction)env_flags, METH_NOARGS},
+    {"max_key_size", (PyCFunction)env_max_key_size, METH_NOARGS},
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},
     {"path", (PyCFunction)env_path, METH_NOARGS},
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
