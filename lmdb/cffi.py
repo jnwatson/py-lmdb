@@ -790,17 +790,17 @@ class Environment(object):
         """Return some nice environment information as a dict:
 
         +--------------------+---------------------------------------+
-        | map_addr           | Address of database map in RAM.       |
+        | ``map_addr``       | Address of database map in RAM.       |
         +--------------------+---------------------------------------+
-        | map_size           | Size of database map in RAM.          |
+        | ``map_size``       | Size of database map in RAM.          |
         +--------------------+---------------------------------------+
-        | last_pgno          | ID of last used page.                 |
+        | ``last_pgno``      | ID of last used page.                 |
         +--------------------+---------------------------------------+
-        | last_txnid         | ID of last committed transaction.     |
+        | ``last_txnid``     | ID of last committed transaction.     |
         +--------------------+---------------------------------------+
-        | max_readers        | Maximum number of threads.            |
+        | ``max_readers``    | Maximum number of threads.            |
         +--------------------+---------------------------------------+
-        | num_readers        | Number of threads in use.             |
+        | ``num_readers``    | Number of threads in use.             |
         +--------------------+---------------------------------------+
 
         Equivalent to `mdb_env_info()
@@ -879,7 +879,7 @@ class Environment(object):
         return reaped[0]
 
     def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
-            create=True):
+                create=True):
         """
         Open a database, returning an opaque handle. Repeat
         :py:meth:`Environment.open_db` calls for the same name will return the
