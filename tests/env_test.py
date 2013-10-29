@@ -549,7 +549,7 @@ class OpenDbTest(unittest.TestCase):
         env = lmdb.open(path, max_dbs=10)
         txn = env.begin(write=True)
 
-        for flag, val in flagsets:
+        for flag, val in self.FLAG_SETS:
             name = '%s-%s' % (flag, val)
             db = env.open_db(name, txn=txn)
             assert db.flags(txn)[flag] == val
