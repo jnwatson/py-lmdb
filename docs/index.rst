@@ -11,12 +11,11 @@ lmdb
     :maxdepth: 2
 
 This is a universal Python binding for the `LMDB 'Lightning' Database
-<http://symas.com/mdb/>`_. Two implementations are provided and automatically
-selected during installation, depending on host environment: a `CFFI
-<http://cffi.readthedocs.org/en/release-0.5/>`_ implementation that supports
-`PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6, and a custom
-module that supports CPython 2.5-2.7 and >=3.3. Both implementations provide
-the same interface.
+<http://symas.com/mdb/>`_. Two variants are provided and automatically selected
+during install: a `CFFI <http://cffi.readthedocs.org/en/release-0.5/>`_ variant
+that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6,
+and a C extension that supports CPython 2.5-2.7 and >=3.3. Both variants
+provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
 
@@ -35,12 +34,6 @@ LMDB is a tiny database with some excellent properties:
 * No application-level caching is required: LMDB relies entirely on the
   operating system's buffer cache.
 
-Significant effort has been made to ensure the binding is as user-friendly as
-possible, in particular by raising exceptions instead of crashing when
-impossible operations are attempted, such as iterating a cursor when its
-transaction has been aborted, or deleting a key when the environment has been
-closed.
-
 Installation
 ++++++++++++
 
@@ -49,17 +42,16 @@ built statically by default. If your system distribution includes LMDB, set the
 ``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
 and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
-*Note:* on PyPy the wrapper depends on CFFI which in turn depends on
-``libffi``, so you may need to install the development package for it. Both
-wrappers additionally depend on the CPython development headers when running
-under CPython. On Debian/Ubuntu:
+The CFFI variant depends on CFFI, which in turn depends on ``libffi``, which
+may need to be installed from a package. On CPython, both variants additionally
+depend on the CPython development headers. On Debian/Ubuntu:
 
     ::
 
         apt-get install libffi-dev python-dev build-essential
 
-To install the Python module, ensure a C compiler and `pip` or `easy_install`
-are available and type:
+To install the C extension, ensure a C compiler and `pip` or `easy_install` are
+available and type:
 
     ::
 
@@ -67,63 +59,45 @@ are available and type:
         # or
         easy_install lmdb
 
-You may also use the CFFI version on CPython. This is accomplished by setting
-the ``LMDB_FORCE_CFFI`` environment variable before installation or before
-module import with an existing installation:
+The CFFI variant may be used on CPython by setting the ``LMDB_FORCE_CFFI``
+environment variable before installation, or before module import with an
+existing installation:
 
     ::
 
         >>> import os
         >>> os.environ['LMDB_FORCE_CFFI'] = '1'
 
-        >>> # CFFI version is loaded.
+        >>> # CFFI variant is loaded.
         >>> import lmdb
 
 
 Named Databases
 +++++++++++++++
 
-To use named databases you must call :py:func:`lmdb.open` or
-:py:class:`lmdb.Environment` with a `max_dbs=` parameter set to the number of
-databases required. This must be done by the first process or thread opening
-the environment as it is used to allocate resources kept in shared memory.
+Named databases require the `max_dbs=` parameter to be provided when calling
+:py:func:`lmdb.open` or :py:class:`lmdb.Environment`. This must be done by the
+first process or thread opening the environment, as it is used to allocate
+resources kept in shared memory.
 
-.. caution::
-
-    Named databases are implemented by *storing a special descriptor in the
-    main database*. All databases in an environment *share the same file*.
-    Because the descriptor is present in the main database, attempts to create
-    a named database will fail if a key matching the database's name already
-    exists. Furthermore *the key is visible to lookups and enumerations*. If
-    your main database keyspace conflicts with the names you use for named
-    databases, then move the contents of your main database to another named
-    database.
-
-    ::
-
-        >>> env = lmdb.open('/tmp/test', max_dbs=2)
-        >>> with env.begin(write=True) as txn
-        ...     txn.put('somename', 'somedata')
-
-        >>> # Error: database cannot share name of existing key!
-        >>> subdb = env.open_db('somename')
+Once a correctly configured :py:class:`Environment` is created, new named
+databases may be created via :py:meth:`Environment.open_db`.
 
 
 Storage efficiency & limits
 +++++++++++++++++++++++++++
 
-LMDB groups records in pages matching the operating system memory manager's
-page size which is usually 4096 bytes. In order to maintain its internal
-structure each page must contain a minimum of 2 records, in addition to 8 bytes
-per record and a 16 byte header. Due to this the engine is most space-efficient
-when the combined size of any (8+key+value) combination does not exceed 2040
-bytes.
+LMDB groups records in pages matching the operating system's page size, which
+is usually 4096 bytes. Each page must contain at least 2 records, in addition
+to 8 bytes per record and a 16 byte header. Due to this the engine is most
+space-efficient when the combined size of any (8+key+value) combination does
+not exceed 2040 bytes.
 
 When an attempt to store a record would exceed the maximum size, its value part
-is written separately to one or more pages. Since the trailer of the last page
-containing the record value cannot be shared with other records, it is more
-efficient when large values are an approximate multiple of 4096 bytes, minus 16
-bytes for an initial header.
+is written separately to one or more dedicated pages. Since the trailer of the
+last page containing the record value cannot be shared with other records, it
+is more efficient when large values are an approximate multiple of 4096 bytes,
+minus 16 bytes for an initial header.
 
 Space usage can be monitored using :py:meth:`Environment.stat`:
 
@@ -141,7 +115,8 @@ This database contains 3,761,848 records and no values were spilled
 (``overflow_pages``).
 
 By default record keys are limited to 511 bytes in length, however this can be
-adjusted by rebuilding the library.
+adjusted by rebuilding the library. The compile-time key length can be queried
+via :py:meth:`Environment.max_key_size()`.
 
 
 Buffers

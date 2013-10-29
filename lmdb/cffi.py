@@ -888,6 +888,24 @@ class Environment(object):
         Equivalent to `mdb_dbi_open()
         <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
 
+        Named databases are implemented by *storing a special descriptor in the
+        main database*. All databases in an environment *share the same file*.
+        Because the descriptor is present in the main database, attempts to
+        create a named database will fail if a key matching the database's name
+        already exists. Furthermore *the key is visible to lookups and
+        enumerations*. If your main database keyspace conflicts with the names
+        you use for named databases, then move the contents of your main
+        database to another named database.
+
+        ::
+
+            >>> env = lmdb.open('/tmp/test', max_dbs=2)
+            >>> with env.begin(write=True) as txn
+            ...     txn.put('somename', 'somedata')
+
+            >>> # Error: database cannot share name of existing key!
+            >>> subdb = env.open_db('somename')
+
         A newly created database will not exist if the transaction that created
         it aborted, nor if another process deleted it. The handle resides in
         the shared environment, it is not owned by the current transaction or
