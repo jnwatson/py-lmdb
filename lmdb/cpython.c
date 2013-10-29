@@ -713,6 +713,25 @@ type_error(const char *what)
     return NULL;
 }
 
+/**
+ * Convert a PyObject to filesystem bytes. Must call fspath_fini() when done.
+ * Return 0 on success, or set an exception and return -1 on failure.
+ */
+static PyObject *
+get_fspath(PyObject *src)
+{
+    if(PyBytes_CheckExact(src)) {
+        Py_INCREF(src);
+        return src;
+    }
+    if(! PyUnicode_CheckExact(src)) {
+        type_error("Filesystem path must be Unicode or bytes.");
+        return NULL;
+    }
+    return PyUnicode_AsEncodedString(src, Py_FileSystemDefaultEncoding,
+                                     "strict");
+}
+
 
 // ----------------
 // Argument parsing
@@ -1137,7 +1156,7 @@ static PyObject *
 env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     struct env_new {
-        char *path;
+        PyObject *path;
         size_t map_size;
         int subdir;
         int readonly;
@@ -1156,7 +1175,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 126, 0, 1, 32, 32};
 
     static const struct argspec argspec[] = {
-        {ARG_STR, PATH_S, OFFSET(env_new, path)},
+        {ARG_OBJ, PATH_S, OFFSET(env_new, path)},
         {ARG_SIZE, MAP_SIZE_S, OFFSET(env_new, map_size)},
         {ARG_BOOL, SUBDIR_S, OFFSET(env_new, subdir)},
         {ARG_BOOL, READONLY_S, OFFSET(env_new, readonly)},
@@ -1182,6 +1201,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return type_error("'path' argument required");
     }
 
+    PyObject *fspath_obj = NULL;
     EnvObject *self = PyObject_New(EnvObject, type);
     if(! self) {
         return NULL;
@@ -1213,13 +1233,18 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         goto fail;
     }
 
+    if(! ((fspath_obj = get_fspath(arg.path)))) {
+        goto fail;
+    }
+    const char *fspath = PyBytes_AS_STRING(fspath_obj);
+
     if(arg.create && arg.subdir && !arg.readonly) {
         struct stat st;
         errno = 0;
-        stat(arg.path, &st);
+        stat(fspath, &st);
         if(errno == ENOENT) {
-            if(mkdir(arg.path, arg.mode)) {
-                PyErr_SetFromErrnoWithFilename(PyExc_OSError, arg.path);
+            if(mkdir(fspath, arg.mode)) {
+                PyErr_SetFromErrnoWithFilename(PyExc_OSError, fspath);
                 goto fail;
             }
         }
@@ -1252,22 +1277,23 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     // Strip +x.
     int mode = arg.mode & ~0111;
 
-    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, arg.path, flags, mode)
-    UNLOCKED(rc, mdb_env_open(self->env, arg.path, flags, mode));
+    DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, fspath, flags, mode)
+    UNLOCKED(rc, mdb_env_open(self->env, fspath, flags, mode));
     if(rc) {
-        err_set(arg.path, rc);
+        err_set(fspath, rc);
         goto fail;
     }
 
     self->main_db = txn_db_from_name(self, NULL, 0);
     if(self->main_db) {
         self->valid = 1;
-        DEBUG("EnvObject '%s' opened at %p", arg.path, self)
+        DEBUG("EnvObject '%s' opened at %p", fspath, self)
         return (PyObject *) self;
     }
 
 fail:
     DEBUG("initialization failed")
+    Py_CLEAR(fspath_obj);
     if(self) {
         env_dealloc(self);
     }
@@ -1325,11 +1351,11 @@ static PyObject *
 env_copy(EnvObject *self, PyObject *args)
 {
     struct env_copy {
-        char *path;
+        PyObject *path;
     } arg = {NULL};
 
     static const struct argspec argspec[] = {
-        {ARG_STR, PATH_S, OFFSET(env_copy, path)}
+        {ARG_OBJ, PATH_S, OFFSET(env_copy, path)}
     };
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
@@ -1338,8 +1364,14 @@ env_copy(EnvObject *self, PyObject *args)
     if(! arg.path) {
         return type_error("path argument required");
     }
+    PyObject *fspath_obj = get_fspath(arg.path);
+    if(! fspath_obj) {
+        return NULL;
+    }
+
     int rc;
-    UNLOCKED(rc, mdb_env_copy(self->env, arg.path));
+    UNLOCKED(rc, mdb_env_copy(self->env, PyBytes_AS_STRING(fspath_obj)));
+    Py_CLEAR(fspath_obj);
     if(rc) {
         return err_set("mdb_env_copy", rc);
     }
