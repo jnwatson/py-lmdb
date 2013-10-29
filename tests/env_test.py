@@ -387,7 +387,7 @@ class AdminMethodsTest(unittest.TestCase):
             txn = env2.begin()
             os.kill(os.getpid(), signal.SIGKILL)
 
-        os.waitpid(child_pid, 0)
+        assert os.waitpid(child_pid, 0) == (child_pid, signal.SIGKILL)
         assert env.reader_check() == 1
         assert env.reader_check() == 0
         assert env.readers() != NO_READERS
