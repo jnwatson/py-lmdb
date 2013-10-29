@@ -21,7 +21,7 @@
 #
 
 """
-CPython/cffi wrapper for OpenLDAP's "Lightning" MDB database.
+CPython/CFFI wrapper for OpenLDAP's "Lightning" MDB database.
 
 Please see http://lmdb.readthedocs.org/
 """
@@ -57,7 +57,7 @@ UnicodeType = type('')
 if UnicodeType is bytes:
     UnicodeType = unicode
 
-# Used to track context across cffi callbcks.
+# Used to track context across CFFI callbcks.
 _callbacks = threading.local()
 
 _CFFI_CDEF = '''
@@ -205,7 +205,7 @@ _CFFI_CDEF = '''
     #define MDB_WRITEMAP ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
-    // cffi will use PyString_AS_STRING when passed as an argument.
+    // CFFI will use PyString_AS_STRING when passed as an argument.
     static int pymdb_del(MDB_txn *txn, MDB_dbi dbi,
                          char *key_s, size_t keylen,
                          char *val_s, size_t vallen);
@@ -229,7 +229,7 @@ _CFFI_VERIFY = '''
     #include "lmdb.h"
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
-    // cffi will use PyString_AS_STRING when passed as an argument.
+    // CFFI will use PyString_AS_STRING when passed as an argument.
     static int pymdb_get(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
                          MDB_val *val_out)
     {
@@ -282,7 +282,7 @@ _CFFI_VERIFY = '''
 if not lmdb._reading_docs():
     import cffi
 
-    # Try to use distutils-bundled cffi configuration to avoid a recompile and
+    # Try to use distutils-bundled CFFI configuration to avoid a recompile and
     # potential compile errors during first module import.
     _config_vars = _config.CONFIG if _config else {
         'extra_compile_args': ['-w'],
@@ -457,7 +457,7 @@ def _kill_dependents(parent):
             child._invalidate()
 
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
-    """We need this because cffi on PyPy treats None as cffi.NULL, instead of
+    """We need this because CFFI on PyPy treats None as cffi.NULL, instead of
     throwing an exception it feeds LMDB null pointers. That means simply
     replacing native handles with None during _kill_dependents() will lead to
     NULL pointer derefences. Instead we use this class, and its weird name to
@@ -487,7 +487,7 @@ def _undepend(parent, child):
     parent._deps.pop(id(child), None)
 
 def _mvbuf(mv):
-    """Convert a MDB_val cdata to a cffi buffer object."""
+    """Convert a MDB_val cdata to a CFFI buffer object."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)
 
 def _mvstr(mv):
@@ -497,7 +497,7 @@ def _mvstr(mv):
 def enable_drop_gil():
     """
     Arrange for the global interpreter lock to be released during database IO.
-    This flag is ignored and always assumed to be ``True`` on cffi. Note this
+    This flag is ignored and always assumed to be ``True`` on CFFI. Note this
     can only be set once per process.
 
     Continually dropping and reacquiring the GIL may incur unnecessary overhead
@@ -606,20 +606,20 @@ class Environment(object):
             :py:meth:`cursor`. Should match the process's maximum expected
             concurrent transactions (e.g. thread count).
 
-            *Note:* ignored on cffi.
+            *Note:* ignored on CFFI.
 
         `max_spare_cursors`:
             Read-only cursors to cache after becoming unused. Caching cursors
             avoids two allocations per :py:class:`Cursor` or :py:meth:`cursor`
             or :py:meth:`Transaction.cursor` invocation.
 
-            *Note:* ignored on cffi.
+            *Note:* ignored on CFFI.
 
         `max_spare_iters`:
             Iterators to cache after becoming unused. Caching iterators avoids
             one allocation per :py:class:`Cursor` ``iter*`` method invocation.
 
-            *Note:* ignored on cffi.
+            *Note:* ignored on CFFI.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,

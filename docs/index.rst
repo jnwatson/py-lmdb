@@ -12,7 +12,7 @@ lmdb
 
 This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two implementations are provided and automatically
-selected during installation, depending on host environment: a `cffi
+selected during installation, depending on host environment: a `CFFI
 <http://cffi.readthedocs.org/en/release-0.5/>`_ implementation that supports
 `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6, and a custom
 module that supports CPython 2.5-2.7 and >=3.3. Both implementations provide
@@ -49,7 +49,7 @@ built statically by default. If your system distribution includes LMDB, set the
 ``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
 and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
-*Note:* on PyPy the wrapper depends on cffi which in turn depends on
+*Note:* on PyPy the wrapper depends on CFFI which in turn depends on
 ``libffi``, so you may need to install the development package for it. Both
 wrappers additionally depend on the CPython development headers when running
 under CPython. On Debian/Ubuntu:
@@ -67,7 +67,7 @@ are available and type:
         # or
         easy_install lmdb
 
-You may also use the cffi version on CPython. This is accomplished by setting
+You may also use the CFFI version on CPython. This is accomplished by setting
 the ``LMDB_FORCE_CFFI`` environment variable before installation or before
 module import with an existing installation:
 
@@ -76,7 +76,7 @@ module import with an existing installation:
         >>> import os
         >>> os.environ['LMDB_FORCE_CFFI'] = '1'
 
-        >>> # cffi version is loaded.
+        >>> # CFFI version is loaded.
         >>> import lmdb
 
 
@@ -492,8 +492,8 @@ Deviations from LMDB API
 Technology
 ##########
 
-The binding is implemented twice: once using `cffi`, and once as native C
-extension. This is since a `cffi` binding is necessary for PyPy, but its
+The binding is implemented twice: once using CFFI, and once as native C
+extension. This is since a CFFI binding is necessary for PyPy, but its
 performance on CPython is very poor. For good performance on CPython, only
 Cython and a native extension are viable options. Initially Cython was used,
 however this was abandoned due to the effort and relative mismatch involved
@@ -523,7 +523,7 @@ weaving a linked list into all ``PyObject`` structures. This avoids the need to
 maintain a separate heap-allocated structure, or produce excess ``weakref``
 objects (which internally simply manage their own lists).
 
-On `cffi` this isn't possible. Instead each object has a ``_deps`` dict that
+With CFFI this isn't possible. Instead each object has a ``_deps`` dict that
 maps dependent object IDs to corresponding weakrefs. Prior to invalidation
 ``_deps`` is walked to notify each dependent that the resource is about to
 disappear.
@@ -531,10 +531,10 @@ disappear.
 Finally, each object may either store an explicit ``_invalid`` attribute and
 check it prior to every operation, or rely on another mechanism to avoid the
 crash resulting from using an invalidated resource. Instead of performing these
-explicit tests continuously, on `cffi` a magic
+explicit tests continuously, on CFFI a magic
 ``Some_LMDB_Resource_That_Was_Deleted_Or_Closed`` object is used. During
 invalidation, all native handles are replaced with an instance of this object.
-Since `cffi` cannot convert the magical object to a C type, any attempt to make
+Since CFFI cannot convert the magical object to a C type, any attempt to make
 a native call will raise ``TypeError`` with a nice descriptive type name
 indicating the problem. Hacky but efficient, and mission accomplished.
 
