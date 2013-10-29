@@ -561,7 +561,7 @@ class Environment(object):
             will flush at its discretion, or user can flush with
             :py:meth:`sync`.
 
-        `sync`
+        `sync`:
             If ``False``, never explicitly flush data pages to disk. OS will
             flush at its discretion, or user can flush with :py:meth:`sync`.
             This optimization means a system crash can corrupt the database or
