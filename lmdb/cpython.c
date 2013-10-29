@@ -1559,7 +1559,7 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, CREATE_S, OFFSET(env_open_db, create)},
     };
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
