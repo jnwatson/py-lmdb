@@ -22,6 +22,7 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import itertools
 import signal
 import os
 import unittest
@@ -488,8 +489,70 @@ class OpenDbTest(unittest.TestCase):
         txn = env.begin(write=True)
         # Now get main DBI, we should already be open.
         db = env.open_db(None)
-        # w00t, deadlock did not occur.
+        # w00t, no deadlock.
+
+        flags = db.flags(txn)
+        assert not flags['reverse_key']
+        assert not flags['dupsort']
         txn.abort()
+
+    def test_sub_notxn(self):
+        _, env = testlib.temp_env()
+        assert env.info()['last_txnid'] == 0
+        db1 = env.open_db('subdb1')
+        assert env.info()['last_txnid'] == 1
+        db2 = env.open_db('subdb2')
+        assert env.info()['last_txnid'] == 2
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.open_db('subdb3'))
+
+    def test_sub_rotxn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=False)
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: env.open_db('subdb', txn=txn))
+
+    def test_sub_txn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        db1 = env.open_db('subdb1', txn=txn)
+        db2 = env.open_db('subdb2', txn=txn)
+        for db in db1, db2:
+            assert db.flags(txn) == {'reverse_key': False, 'dupsort': False}
+        txn.commit()
+
+    def test_reopen(self):
+        path, env = testlib.temp_env()
+        db1 = env.open_db('subdb1')
+        env.close()
+        env = lmdb.open(path, max_dbs=10)
+        db1 = env.open_db('subdb1')
+
+    FLAG_SETS = list(itertools.product(
+        ('reverse_key', 'dupsort'),
+        (True, False)))
+
+    def test_flags(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+
+        for flag, val in self.FLAG_SETS:
+            name = '%s-%s' % (flag, val)
+            db = env.open_db(name, txn=txn, **{flag: val})
+            assert db.flags(txn)[flag] == val
+
+        txn.commit()
+        # Test flag persistence.
+        env.close()
+        env = lmdb.open(path, max_dbs=10)
+        txn = env.begin(write=True)
+
+        for flag, val in flagsets:
+            name = '%s-%s' % (flag, val)
+            db = env.open_db(name, txn=txn)
+            assert db.flags(txn)[flag] == val
 
 
 if __name__ == '__main__':

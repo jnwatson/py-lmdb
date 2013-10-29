@@ -75,6 +75,8 @@ except TypeError: # Python3.x, requires encoding parameter.
 except NameError: # Python<=2.5.
     B = lambda s: s
 
+BytesType = type(B(''))
+
 # BL('s1', 's2') -> ['bytes1', 'bytes2']
 BL = lambda *args: map(B, args)
 # TS('s1', 's2') -> ('bytes1', 'bytes2')
