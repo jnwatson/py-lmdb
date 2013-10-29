@@ -235,7 +235,7 @@ class InfoMethodsTest(unittest.TestCase):
     def test_path(self):
         path, env = testlib.temp_env()
         assert path == env.path()
-        assert isinstance(path, UnicodeType)
+        assert isinstance(env.path(), UnicodeType)
         env.close()
         self.assertRaises(Exception,
             lambda: env.path())

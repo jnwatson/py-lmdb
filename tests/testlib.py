@@ -26,6 +26,7 @@ import contextlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 
 import lmdb
@@ -36,7 +37,7 @@ def temp_dir(create=True):
     if not create:
         os.rmdir(path)
     atexit.register(shutil.rmtree, path, ignore_errors=True)
-    return path
+    return path.decode(sys.getfilesystemencoding())
 
 
 def temp_file(create=True):
@@ -47,7 +48,7 @@ def temp_file(create=True):
     atexit.register(lambda: os.path.exists(path) and os.unlink(path))
     pathlock = path + '-lock'
     atexit.register(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
-    return path
+    return path.decode(sys.getfilesystemencoding())
 
 
 def temp_env(path=None, max_dbs=10, **kwargs):
