@@ -1098,6 +1098,43 @@ db_clear(DbObject *self)
 }
 
 /**
+ * _Database.flags()
+ */
+static PyObject *
+db_flags(DbObject *self, PyObject *args, PyObject *kwds)
+{
+    struct db_flags {
+        TransObject *txn;
+    } arg = {NULL};
+
+    static const struct argspec argspec[] = {
+        {ARG_TRANS, TXN_S, OFFSET(db_flags, txn)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    if(! arg.txn) {
+        return type_error("'txn' argument required");
+    }
+    if(! arg.txn->valid) {
+        return err_invalid();
+    }
+
+    unsigned int f;
+    int rc = mdb_dbi_flags(arg.txn->txn, self->dbi, &f);
+    if(rc) {
+        err_set("mdb_dbi_flags", rc);
+        return NULL;
+    }
+
+    PyObject *dct = PyDict_New();
+    PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
+    PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
+    return dct;
+}
+
+/**
  * _Database.__del__()
  */
 static void
@@ -1107,12 +1144,18 @@ db_dealloc(DbObject *self)
     PyObject_Del(self);
 }
 
+static struct PyMethodDef db_methods[] = {
+    {"flags", (PyCFunction)db_flags, METH_VARARGS|METH_KEYWORDS},
+    {0, 0, 0, 0}
+};
+
 static PyTypeObject PyDatabase_Type = {
     PyObject_HEAD_INIT(NULL)
     .tp_basicsize = sizeof(DbObject),
     .tp_dealloc = (destructor) db_dealloc,
     .tp_clear = (inquiry) db_clear,
     .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_methods = db_methods,
     .tp_name = "_Database"
 };
 

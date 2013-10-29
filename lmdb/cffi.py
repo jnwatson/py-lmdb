@@ -158,6 +158,7 @@ _CFFI_CDEF = '''
     typedef int (MDB_msg_func)(const char *msg, void *ctx);
     int mdb_reader_list(MDB_env *env, MDB_msg_func *func, void *ctx);
     int mdb_reader_check(MDB_env *env, int *dead);
+    int mdb_dbi_flags(MDB_txn *txn, MDB_dbi dbi, unsigned int *flags);
 
     #define MDB_VERSION_MAJOR ...
     #define MDB_VERSION_MINOR ...
@@ -820,9 +821,7 @@ class Environment(object):
         }
 
     def flags(self):
-        """flags()
-
-        Return a dict describing Environment constructor flags used to
+        """Return a dict describing Environment constructor flags used to
         instantiate this environment."""
         flags_ = _ffi.new('unsigned int[]', 1)
         rc = mdb_env_get_flags(self._env, flags_)
@@ -987,6 +986,19 @@ class _Database(object):
         if rc:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
+
+    def flags(self, txn):
+        """Return the database's associated flags as a dict of _Database
+        constructor kwargs."""
+        flags_ = _ffi.new('unsigned int[]', 1)
+        rc = mdb_dbi_flags(txn._txn, self._dbi, flags_)
+        if rc:
+            raise _error("mdb_dbi_flags", rc)
+        flags = flags_[0]
+        return {
+            'reverse_key': bool(flags & MDB_REVERSEKEY),
+            'dupsort': bool(flags & MDB_DUPSORT),
+        }
 
     def _invalidate(self):
         pass
