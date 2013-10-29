@@ -325,7 +325,7 @@ class InfoMethodsTest(unittest.TestCase):
             lambda: env.readers())
 
 
-class AdminMethodsTest(unittest.TestCase):
+class OtherMethodsTest(unittest.TestCase):
     def test_copy(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=True)
@@ -397,6 +397,101 @@ class AdminMethodsTest(unittest.TestCase):
         env.close()
         self.assertRaises(Exception,
             lambda: env.reader_check())
+
+
+class BeginTest(unittest.TestCase):
+    def test_begin_readonly(self):
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        # Read txn can't write.
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: txn.put(B('a'), B('')))
+        txn.abort()
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.begin())
+
+    def test_begin_write(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        # Write txn can write.
+        assert txn.put(B('a'), B(''))
+        txn.commit()
+
+    def test_bind_db(self):
+        _, env = testlib.temp_env()
+        main = env.open_db(None)
+        sub = env.open_db('db1')
+
+        txn = env.begin(write=True, db=sub)
+        assert txn.put(B('b'), B(''))           # -> sub
+        assert txn.put(B('a'), B(''), db=main)  # -> main
+        txn.commit()
+
+        txn = env.begin()
+        assert txn.get(B('a')) == B('')
+        assert txn.get(B('b')) is None
+        assert txn.get(B('a'), db=sub) is None
+        assert txn.get(B('b'), db=sub) == B('')
+        txn.abort()
+
+    def test_parent_readonly(self):
+        _, env = testlib.temp_env()
+        parent = env.begin()
+        # Nonsensical.
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: env.begin(parent=parent))
+
+    def test_parent(self):
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        parent.put(B('a'), B('a'))
+
+        child = env.begin(write=True, parent=parent)
+        assert child.get(B('a')) == B('a')
+        assert child.put(B('a'), B('b'))
+        child.abort()
+
+        # put() should have rolled back
+        assert parent.get(B('a')) == B('a')
+
+        child = env.begin(write=True, parent=parent)
+        assert child.put(B('a'), B('b'))
+        child.commit()
+
+        # put() should be visible
+        assert parent.get(B('a')) == B('b')
+
+    def test_buffers(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True, buffers=True)
+        assert txn.put(B('a'), B('a'))
+        b = txn.get(B('a'))
+        assert b is not None
+        assert len(b) == 1
+        assert b[0] == B('a')
+        assert not isinstance(b, type(B('')))
+        txn.commit()
+
+        txn = env.begin(buffers=False)
+        b = txn.get(B('a'))
+        assert b is not None
+        assert len(b) == 1
+        assert b[0] == B('a')
+        assert isinstance(b, type(B('')))
+        txn.abort()
+
+
+class OpenDbTest(unittest.TestCase):
+    def test_main(self):
+        _, env = testlib.temp_env()
+        # Start write txn, so we cause deadlock if open_db attempts txn.
+        txn = env.begin(write=True)
+        # Now get main DBI, we should already be open.
+        db = env.open_db(None)
+        # w00t, deadlock did not occur.
+        txn.abort()
 
 
 if __name__ == '__main__':

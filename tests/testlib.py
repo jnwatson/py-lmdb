@@ -41,6 +41,7 @@ def temp_dir(create=True):
         path = path.decode(sys.getfilesystemencoding())
     return path
 
+
 def temp_file(create=True):
     fd, path = tempfile.mkstemp(prefix='lmdb_test')
     os.close(fd)
