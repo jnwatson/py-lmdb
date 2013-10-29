@@ -8,6 +8,7 @@
 
 * Numerous CFFI vs. CPython behavioural inconsistencies have been fixed.
 
+* An endless variety of Unicode related 2.x/3.x/CPython/CFFI fixed were made.
 
 
 2013-10-28 v0.76
