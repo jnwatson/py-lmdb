@@ -40,8 +40,11 @@ except NameError:
 
 # Handle moronic Python >=3.0 <3.3.
 UnicodeType = type('')
-if UnicodeType is bytes:
-    UnicodeType = str
+try:
+    if UnicodeType is bytes:
+        UnicodeType = unicode
+except NameError: # Python 2.5 no bytes.
+    UnicodeType = unicode
 
 NO_READERS = UnicodeType('(no active readers)\n')
 
