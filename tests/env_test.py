@@ -470,7 +470,6 @@ class BeginTest(unittest.TestCase):
         b = txn.get(B('a'))
         assert b is not None
         assert len(b) == 1
-        assert b[0] == B('a')
         assert not isinstance(b, type(B('')))
         txn.commit()
 
@@ -478,7 +477,6 @@ class BeginTest(unittest.TestCase):
         b = txn.get(B('a'))
         assert b is not None
         assert len(b) == 1
-        assert b[0] == B('a')
         assert isinstance(b, type(B('')))
         txn.abort()
 
