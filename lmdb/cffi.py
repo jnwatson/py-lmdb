@@ -55,7 +55,7 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
 # Handle moronic Python >=3.0 <3.3.
 UnicodeType = type('')
 if UnicodeType is bytes:
-    UnicodeType = str
+    UnicodeType = unicode
 
 # Used to track context across cffi callbcks.
 _callbacks = threading.local()
