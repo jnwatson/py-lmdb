@@ -37,8 +37,9 @@ def temp_dir(create=True):
     if not create:
         os.rmdir(path)
     atexit.register(shutil.rmtree, path, ignore_errors=True)
-    return path.decode(sys.getfilesystemencoding())
-
+    if hasattr(path, 'decode'):
+        path = path.decode(sys.getfilesystemencoding())
+    return path
 
 def temp_file(create=True):
     fd, path = tempfile.mkstemp(prefix='lmdb_test')
@@ -48,7 +49,9 @@ def temp_file(create=True):
     atexit.register(lambda: os.path.exists(path) and os.unlink(path))
     pathlock = path + '-lock'
     atexit.register(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
-    return path.decode(sys.getfilesystemencoding())
+    if hasattr(path, 'decode'):
+        path = path.decode(sys.getfilesystemencoding())
+    return path
 
 
 def temp_env(path=None, max_dbs=10, **kwargs):
