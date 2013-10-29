@@ -22,7 +22,6 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
-import itertools
 import signal
 import os
 import unittest
@@ -530,9 +529,9 @@ class OpenDbTest(unittest.TestCase):
         env = lmdb.open(path, max_dbs=10)
         db1 = env.open_db('subdb1')
 
-    FLAG_SETS = list(itertools.product(
-        ('reverse_key', 'dupsort'),
-        (True, False)))
+    FLAG_SETS = [(flag, val)
+                 for flag in ('reverse_key', 'dupsort')
+                 for val in (True, False)]
 
     def test_flags(self):
         path, env = testlib.temp_env()
