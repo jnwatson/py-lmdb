@@ -208,27 +208,26 @@ class CloseTest(unittest.TestCase):
     def test_close(self):
         _, env = testlib.temp_env()
         # Attempting things should be ok.
-        txn = env.begin()
+        txn = env.begin(write=True)
+        txn.put(B('a'), B(''))
+        cursor = txn.cursor()
+        list(cursor)
+        cursor.first()
+        it = iter(cursor)
+
         env.close()
         # Repeated calls are ignored:
         env.close()
         # Attempting to use invalid objects should crash.
-        self.assertRaises(Exception,
-            lambda: txn.cursor())
-        self.assertRaises(Exception,
-            lambda: txn.commit())
+        self.assertRaises(Exception, lambda: txn.cursor())
+        self.assertRaises(Exception, lambda: txn.commit())
+        self.assertRaises(Exception, lambda: cursor.first())
+        self.assertRaises(Exception, lambda: list(it))
         # Abort should be OK though.
         txn.abort()
         # Attempting to start new txn should crash.
         self.assertRaises(Exception,
             lambda: env.begin())
-        # Attempting to get env state should crash.
-        self.assertRaises(Exception,
-            lambda: env.path())
-        self.assertRaises(Exception,
-            lambda: env.flags())
-        self.assertRaises(Exception,
-            lambda: env.info())
 
 
 class InfoMethodsTest(unittest.TestCase):
