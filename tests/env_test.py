@@ -236,6 +236,7 @@ class InfoMethodsTest(unittest.TestCase):
         path, env = testlib.temp_env()
         assert path == env.path()
         assert isinstance(env.path(), UnicodeType)
+
         env.close()
         self.assertRaises(Exception,
             lambda: env.path())
@@ -255,6 +256,10 @@ class InfoMethodsTest(unittest.TestCase):
         stat = env.stat()
         assert stat['entries'] == 1
 
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.stat())
+
     def test_info(self):
         _, env = testlib.temp_env()
         info = env.info()
@@ -270,6 +275,10 @@ class InfoMethodsTest(unittest.TestCase):
         info = env.info()
         assert info['last_txnid'] == 1
 
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.info())
+
     def test_flags(self):
         _, env = testlib.temp_env()
         info = env.flags()
@@ -277,17 +286,29 @@ class InfoMethodsTest(unittest.TestCase):
                  'readahead', 'writemap':
             assert isinstance(info[k], bool)
 
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.flags())
+
     def test_max_key_size(self):
         _, env = testlib.temp_env()
         mks = env.max_key_size()
         assert isinstance(mks, INT_TYPES)
         assert mks > 0
 
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.max_key_size())
+
     def test_max_readers(self):
         _, env = testlib.temp_env()
         mr = env.max_readers()
         assert isinstance(mr, INT_TYPES)
         assert mr > 0 and mr == env.info()['max_readers']
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.max_readers())
 
     def test_readers(self):
         _, env = testlib.temp_env()
@@ -299,6 +320,10 @@ class InfoMethodsTest(unittest.TestCase):
         r2 = env.readers()
         assert isinstance(env.readers(), UnicodeType)
         assert env.readers() != r
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.readers())
 
 
 class AdminMethodsTest(unittest.TestCase):
@@ -316,6 +341,10 @@ class AdminMethodsTest(unittest.TestCase):
         ctxn = cenv.begin()
         assert ctxn.get(B('a')) == B('b')
 
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.copy(testlib.temp_dir()))
+
     def test_copyfd(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
@@ -325,11 +354,15 @@ class AdminMethodsTest(unittest.TestCase):
         dst_path = testlib.temp_file(create=False)
         fp = open(dst_path, 'wb')
         env.copyfd(fp.fileno())
-        fp.close()
 
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()
         assert dtxn.get(B('a')) == B('b')
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.copyfd(fp.fileno()))
+        fp.close()
 
     def test_sync(self):
         _, env = testlib.temp_env()
@@ -338,8 +371,6 @@ class AdminMethodsTest(unittest.TestCase):
         env.close()
         self.assertRaises(Exception,
             lambda: env.sync(False))
-        self.assertRaises(Exception,
-            lambda: env.sync(True))
 
     def test_reader_check(self):
         path, env = testlib.temp_env()
@@ -363,6 +394,10 @@ class AdminMethodsTest(unittest.TestCase):
         assert env.readers() != NO_READERS
         txn1.abort()
         assert env.readers() == NO_READERS
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.reader_check())
 
 
 if __name__ == '__main__':
