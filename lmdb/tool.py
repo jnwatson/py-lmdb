@@ -310,8 +310,8 @@ def cmd_drop(opts, args):
 
 def cmd_readers(opts, args):
     if opts.clean:
-        print 'Cleaned %d stale entries.' % (ENV.reader_check(),)
-    print ENV.readers()
+        print('Cleaned %d stale entries.' % (ENV.reader_check(),))
+    print(ENV.readers())
 
 
 def cmd_restore(opts, args):
