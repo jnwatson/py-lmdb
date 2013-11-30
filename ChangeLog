@@ -1,5 +1,5 @@
 
-2013-10-28 v0.77
+2013-11-30 v0.77
 
 * Added Environment.max_key_size(), Environment.max_readers().
 
@@ -9,6 +9,10 @@
 * Numerous CFFI vs. CPython behavioural inconsistencies have been fixed.
 
 * An endless variety of Unicode related 2.x/3.x/CPython/CFFI fixes were made.
+
+* LMDB 0.9.10 is now bundled, along with some extra fixes from Git.
+
+* Added Environment(meminit=...) option.
 
 
 2013-10-28 v0.76
