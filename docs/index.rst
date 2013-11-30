@@ -2,8 +2,6 @@
 lmdb
 ====
 
-`http://github.com/dw/py-lmdb <http://github.com/dw/py-lmdb>`_
-
 .. currentmodule:: lmdb
 
 .. toctree::
