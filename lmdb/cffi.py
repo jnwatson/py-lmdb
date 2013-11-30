@@ -868,9 +868,8 @@ class Environment(object):
         return readers_[0]
 
     def readers(self):
-        """Return a list of newline-terminated human readable strings
-        describing the current state of the reader lock table.
-        """
+        """Return a multi line Unicode string describing the current state of
+        the reader lock table."""
         _callbacks.msg_func = []
         try:
             rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
@@ -1061,7 +1060,7 @@ class Transaction(object):
 
         `buffers`:
             If ``True``, indicates :py:func:`buffer` objects should be yielded
-            instead of strings. This setting applies to the
+            instead of bytestrings. This setting applies to the
             :py:class:`Transaction` instance itself and any :py:class:`Cursors
             <Cursor>` created within the transaction.
 
@@ -1204,10 +1203,10 @@ class Transaction(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
 
             `key`:
-                String key to store.
+                Bytestring key to store.
 
             `value`:
-                String value to store.
+                Bytestring value to store.
 
             `dupdata`:
                 If ``True`` and database was opened with `dupsort=True`, add
@@ -1272,7 +1271,7 @@ class Transaction(object):
 
             value:
                 If the database was opened with dupsort=True and value is not
-                the empty string, then delete elements matching only this
+                the empty bytestring, then delete elements matching only this
                 `(key, value)` pair, otherwise all values for key are deleted.
 
         Returns True if at least one key was deleted.
@@ -1537,7 +1536,7 @@ class Cursor(object):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
         the exact key was not found.
 
-        It is an error to :py:meth:`set_key` the empty string.
+        It is an error to :py:meth:`set_key` the empty bytestring.
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -1559,7 +1558,7 @@ class Cursor(object):
         ``True`` on success, or ``False`` to indicate key was past end of
         database.
 
-        Behaves like :py:meth:`first` if `key` is the empty string.
+        Behaves like :py:meth:`first` if `key` is the empty bytestring.
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_ with `MDB_SET_RANGE <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
@@ -1608,10 +1607,10 @@ class Cursor(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga1f83ccb40011837ff37cc32be01ad91e>`_
 
             `key`:
-                String key to store.
+                Bytestring key to store.
 
             `val`:
-                String value to store.
+                Bytestring value to store.
 
             `dupdata`:
                 If ``True`` and database was opened with `dupsort=True`, add
@@ -1651,10 +1650,10 @@ class Cursor(object):
         `set-and-return-previous` operation.
 
             `key`:
-                String key to store.
+                Bytestring key to store.
 
             `value`:
-                String value to store.
+                Bytestring value to store.
         """
         flags = MDB_NOOVERWRITE
         keylen = len(key)
@@ -1682,7 +1681,7 @@ class Cursor(object):
         `delete-and-return-previous` operation.
 
             `key`:
-                String key to delete.
+                Bytestring key to delete.
         """
         if self._cursor_get_key(MDB_SET_KEY, key):
             old = _mvstr(self._val)

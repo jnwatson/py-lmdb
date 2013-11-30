@@ -117,20 +117,40 @@ adjusted by rebuilding the library. The compile-time key length can be queried
 via :py:meth:`Environment.max_key_size()`.
 
 
+Bytestrings
++++++++++++
+
+This documentation uses `bytestring` to mean either the Python<=2.7
+:py:func:`str` type, or the Python>=3.0 :py:func:`bytes` type, depending on the
+Python version in use.
+
+Due to the design of Python 2.x, LMDB will happily accept Unicode instances
+where :py:func:`str` instances are expected, so long as they contain only ASCII
+characters, in which case they are implicitly encoded to ASCII. You should not
+rely on this behaviour! It results in brittle programs that often break the
+moment they are deployed in production. Always explicitly encode and decode any
+Unicode values before passing them to LMDB.
+
+This documentation uses :py:func:`bytes` in examples. In Python 3.x this is a
+distinct type, whereas in Python 2.6 and 2.7 it is simply an alias for
+:py:func:`str`. Since Python 2.5 does not have this alias, you should
+substitute :py:func:`str` for :py:func:`bytes` in any code examples below when
+running on Python 2.5.
+
+
 Buffers
 +++++++
 
 Since LMDB is memory mapped it is possible to access record data without keys
 or values ever being copied by the kernel, database library, or application. To
 exploit this the library can be instructed to return :py:func:`buffer` objects
-instead of strings by passing `buffers=True` to :py:meth:`Environment.begin` or
-:py:class:`Transaction`.
+instead of bytestrings by passing `buffers=True` to
+:py:meth:`Environment.begin` or :py:class:`Transaction`.
 
-In Python :py:func:`buffer` objects can be used in many places where strings
-are expected. In every way they act like a regular sequence: they support
-slicing, indexing, iteration, and taking their length. Many Python APIs will
-automatically convert them to bytestrings as necessary, since they also
-implement ``__str__()``:
+In Python :py:func:`buffer` objects can be used in many places where
+bytestrings are expected. In every way they act like a regular sequence: they
+support slicing, indexing, iteration, and taking their length. Many Python APIs
+will automatically convert them to bytestrings as necessary:
 
     ::
 
@@ -145,11 +165,11 @@ implement ``__str__()``:
         'a'
         >>> buf[:2]
         'ab'
-        >>> value = str(buf)
+        >>> value = bytes(buf)
         >>> len(value)
         4096
         >>> type(value)
-        <type 'str'>
+        <type 'bytes'>
 
 It is also possible to pass buffers directly to many native APIs, for example
 :py:meth:`file.write`, :py:meth:`socket.send`, :py:meth:`zlib.decompress` and
@@ -170,7 +190,7 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
     :py:class:`Cursor` are reused, so that consecutive calls to
     :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
     overwrite the objects that have already been returned. To preserve a value
-    returned in a buffer, convert it to a string using :py:func:`str`.
+    returned in a buffer, convert it to a bytestring using :py:func:`bytes`.
 
     ::
 
@@ -179,18 +199,18 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
         >>> txn.put('key2', 'value2')
 
         >>> val1 = txn.get('key1')
-        >>> vals1 = str(val1)
+        >>> vals1 = bytes(val1)
         >>> vals1
         'value1'
         >>> val2 = txn.get('key2')
-        >>> str(val2)
+        >>> bytes(val2)
         'value2'
 
         >>> # Caution: the buffer object is reused!
-        >>> str(val1)
+        >>> bytes(val1)
         'value2'
 
-        >>> # But our string copy was preserved!
+        >>> # But our bytestring copy was preserved!
         >>> vals1
         'value1'
 
