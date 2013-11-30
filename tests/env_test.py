@@ -187,6 +187,11 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(writemap=flag)
             assert env.flags()['writemap'] == flag
 
+    def test_meminit(self):
+        for flag in True, False:
+            path, env = testlib.temp_env(meminit=flag)
+            assert env.flags()['meminit'] == flag
+
     def test_max_readers(self):
         self.assertRaises(lmdb.InvalidParameterError,
             lambda: testlib.temp_env(max_readers=0))

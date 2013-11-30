@@ -204,6 +204,7 @@ _CFFI_CDEF = '''
     #define MDB_RDONLY ...
     #define MDB_REVERSEKEY ...
     #define MDB_WRITEMAP ...
+    #define MDB_NOMEMINIT ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // CFFI will use PyString_AS_STRING when passed as an argument.
@@ -583,6 +584,15 @@ class Environment(object):
             If ``True`` LMDB will use a writeable memory map to update the
             database. This option is incompatible with nested transactions.
 
+        `meminit`:
+            If ``False`` LMDB will not zero-initialize buffers prior to writing
+            them to disk. This improves performance but may cause old heap data
+            to be written saved in the unused portion of the buffer. Do not use
+            this option if your application manipulates confidential data (e.g.
+            plaintext passwords) in memory. This option is only meaningful when
+            `writemap=False`; new pages are always zero-initialized when
+            `writemap=True`.
+
         `map_async`:
              When ``writemap=True``, use asynchronous flushes to disk. As with
              ``sync=False``, a system crash can then corrupt the database or
@@ -625,8 +635,8 @@ class Environment(object):
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=0o755, create=True, readahead=True, writemap=False,
-            max_readers=126, max_dbs=0, max_spare_txns=1, max_spare_cursors=32,
-            max_spare_iters=32):
+            meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
+            max_spare_cursors=32, max_spare_iters=32):
         envpp = _ffi.new('MDB_env **')
 
         rc = mdb_env_create(envpp)
@@ -666,6 +676,8 @@ class Environment(object):
             flags |= MDB_NORDAHEAD
         if writemap:
             flags |= MDB_WRITEMAP
+        if not meminit:
+            flags |= MDB_NOMEMINIT
 
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
@@ -835,7 +847,8 @@ class Environment(object):
             'sync': not (flags & MDB_NOSYNC),
             'map_async': bool(flags & MDB_MAPASYNC),
             'readahead': not (flags & MDB_NORDAHEAD),
-            'writemap': bool(flags & MDB_WRITEMAP)
+            'writemap': bool(flags & MDB_WRITEMAP),
+            'meminit': not (flags & MDB_NOMEMINIT)
         }
 
     def max_key_size(self):
