@@ -111,7 +111,8 @@ if use_cpython:
         sources=['lmdb/cpython.c'] + extra_sources,
         extra_compile_args=extra_compile_args,
         libraries=libraries,
-        include_dirs=extra_include_dirs
+        include_dirs=extra_include_dirs,
+        library_dirs=extra_library_dirs
     )]
 else:
     print('Using cffi extension.')
