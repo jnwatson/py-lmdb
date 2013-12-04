@@ -75,8 +75,7 @@ Named Databases
 
 Named databases require the `max_dbs=` parameter to be provided when calling
 :py:func:`lmdb.open` or :py:class:`lmdb.Environment`. This must be done by the
-first process or thread opening the environment, as it is used to allocate
-resources kept in shared memory.
+first process or thread opening the environment.
 
 Once a correctly configured :py:class:`Environment` is created, new named
 databases may be created via :py:meth:`Environment.open_db`.
@@ -470,13 +469,13 @@ Deviations from LMDB API
 
 `mdb_dbi_close()`:
     This is not exposed since its use is perilous at best. Users must ensure
-    all activity on the DBI has ceased in all processes before closing the
-    handle. Failure to do this could result in "impossible" errors, or the
-    DBI slot becoming reused, resulting in operations being serviced by the
-    wrong named database. Leaving handles open wastes a tiny amount of memory,
-    which seems a good price to avoid subtle data corruption.
+    all activity on the DBI has ceased in all threads before closing the
+    handle. Failure to do this could result in "impossible" errors, or the DBI
+    slot becoming reused, resulting in operations being serviced by the wrong
+    named database. Leaving handles open wastes a tiny amount of memory, which
+    seems a good price to avoid subtle data corruption.
 
-:py:meth:`lmdb.Cursor.replace`, :py:meth:`lmdb.Cursor.pop`:
+:py:meth:`Cursor.replace`, :py:meth:`Cursor.pop`:
     There are no native equivalents to these calls, they just implement common
     operations in C to avoid a chunk of error prone, boilerplate Python from
     having to do the same.
