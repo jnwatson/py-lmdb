@@ -1634,12 +1634,13 @@ static const struct dict_field mdb_stat_fields[] = {
 static PyObject *
 env_stat(EnvObject *self)
 {
+    MDB_stat st;
+    int rc;
+
     if(! self->valid) {
         return err_invalid();
     }
 
-    MDB_stat st;
-    int rc;
     UNLOCKED(rc, mdb_env_stat(self->env, &st));
     if(rc) {
         err_set("mdb_env_stat", rc);
@@ -1656,10 +1657,11 @@ static int env_readers_callback(const char *msg, void *str_)
 {
     PyObject **str = str_;
     PyObject *s = PyUnicode_FromString(msg);
+    PyObject *new;
     if(! s) {
         return -1;
     }
-    PyObject *new = PyUnicode_Concat(*str, s);
+    new = PyUnicode_Concat(*str, s);
     Py_CLEAR(*str);
     *str = new;
     if(! new) {
@@ -1674,12 +1676,12 @@ static int env_readers_callback(const char *msg, void *str_)
 static PyObject *
 env_readers(EnvObject *self)
 {
+    PyObject *str;
     if(! self->valid) {
         return err_invalid();
     }
 
-    PyObject *str = PyUnicode_FromString("");
-    if(! str) {
+    if(! ((str = PyUnicode_FromString("")))) {
         return NULL;
     }
 
