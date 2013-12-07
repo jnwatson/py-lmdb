@@ -405,23 +405,21 @@ static void link_child(struct lmdb_object *parent, struct lmdb_object *child)
  */
 static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
 {
-    if(! parent) {
-        return;
+    if(parent) {
+        struct lmdb_object *prev = child->siblings.prev;
+        struct lmdb_object *next = child->siblings.next;
+        if(prev) {
+            prev->siblings.next = next;
+                 // If double unlink_child(), this test my legitimately fail:
+        } else if(parent->children.next == child) {
+            parent->children.next = next;
+        }
+        if(next) {
+            next->siblings.prev = prev;
+        }
+        child->siblings.prev = NULL;
+        child->siblings.next = NULL;
     }
-
-    struct lmdb_object *prev = child->siblings.prev;
-    struct lmdb_object *next = child->siblings.next;
-    if(prev) {
-        prev->siblings.next = next;
-             // If double unlink_child(), this test my legitimately fail:
-    } else if(parent->children.next == child) {
-        parent->children.next = next;
-    }
-    if(next) {
-        next->siblings.prev = prev;
-    }
-    child->siblings.prev = NULL;
-    child->siblings.next = NULL;
 }
 
 #define UNLINK_CHILD(parent, child) unlink_child((void *)parent, (void *)child);
@@ -552,6 +550,8 @@ dict_from_fields(void *o, const struct dict_field *fields)
     while(fields->type != TYPE_EOF) {
         uint8_t *p = ((uint8_t *) o) + fields->offset;
         unsigned PY_LONG_LONG l = 0;
+        PyObject *lo;
+
         if(fields->type == TYPE_UINT) {
             l = *(unsigned int *)p;
         } else if(fields->type == TYPE_SIZE) {
@@ -560,8 +560,7 @@ dict_from_fields(void *o, const struct dict_field *fields)
             l = (intptr_t) *(void **)p;
         }
 
-        PyObject *lo = PyLong_FromUnsignedLongLong(l);
-        if(! lo) {
+        if(! ((lo = PyLong_FromUnsignedLongLong(l)))) {
             Py_DECREF(dict);
             return NULL;
         }
@@ -853,13 +852,14 @@ static int NOINLINE
 parse_args(int valid, int specsize, const struct argspec *argspec,
            PyObject *args, PyObject *kwds, void *out)
 {
+    unsigned set = 0;
+    unsigned i;
+
     if(! valid) {
         err_invalid();
         return -1;
     }
 
-    unsigned set = 0;
-    unsigned i;
     if(args) {
         int size = PyTuple_GET_SIZE(args);
         if(size > specsize) {
@@ -928,6 +928,11 @@ db_owner_check(DbObject *db, EnvObject *env)
 static PyObject *
 make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buffers)
 {
+    MDB_txn *parent_txn;
+    TransObject *self;
+    int flags;
+    int rc;
+
     DEBUG("make_trans(env=%p, parent=%p, write=%d, buffers=%d)",
         env, parent, write, buffers)
     if(! env->valid) {
@@ -940,7 +945,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         return NULL;
     }
 
-    MDB_txn *parent_txn = NULL;
+    parent_txn = NULL;
     if(parent) {
         if(parent->flags & TRANS_RDONLY) {
             return err_set("Read-only transactions cannot be nested.", EINVAL);
@@ -956,13 +961,11 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         return err_set(msg, EACCES);
     }
 
-    TransObject *self = PyObject_New(TransObject, &PyTransaction_Type);
-    if(! self) {
+    if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
         return NULL;
     }
 
-    int flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
-    int rc;
+    flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
     UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
     if(rc) {
         PyObject_Del(self);
@@ -994,6 +997,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 static PyObject *
 make_cursor(DbObject *db, TransObject *trans)
 {
+    CursorObject *self;
+    int rc;
+
     if(! trans->valid) {
         return err_invalid();
     }
@@ -1003,8 +1009,7 @@ make_cursor(DbObject *db, TransObject *trans)
         return NULL;
     }
 
-    CursorObject *self = PyObject_New(CursorObject, &PyCursor_Type);
-    int rc;
+    self = PyObject_New(CursorObject, &PyCursor_Type);
     UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &self->curs));
     if(rc) {
         PyObject_Del(self);
@@ -1037,6 +1042,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
 {
     MDB_dbi dbi;
     int rc;
+    DbObject *dbo;
 
     UNLOCKED(rc, mdb_dbi_open(txn, name, flags, &dbi));
     if(rc) {
@@ -1044,8 +1050,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
         return NULL;
     }
 
-    DbObject *dbo = PyObject_New(DbObject, &PyDatabase_Type);
-    if(! dbo) {
+    if(! ((dbo = PyObject_New(DbObject, &PyDatabase_Type)))) {
         return NULL;
     }
 
