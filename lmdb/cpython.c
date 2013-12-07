@@ -1070,6 +1070,7 @@ txn_db_from_name(EnvObject *env, const char *name,
 {
     int rc;
     MDB_txn *txn;
+    DbObject *dbo;
 
     int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
     UNLOCKED(rc, mdb_txn_begin(env->env, NULL, begin_flags, &txn));
@@ -1078,8 +1079,7 @@ txn_db_from_name(EnvObject *env, const char *name,
         return NULL;
     }
 
-    DbObject *dbo = db_from_name(env, txn, name, flags);
-    if(! dbo) {
+    if(! ((dbo = db_from_name(env, txn, name, flags)))) {
         DROP_GIL
         mdb_txn_abort(txn);
         LOCK_GIL
@@ -1111,6 +1111,10 @@ db_clear(DbObject *self)
 static PyObject *
 db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 {
+    unsigned int f;
+    PyObject *dct;
+    int rc;
+
     struct db_flags {
         TransObject *txn;
     } arg = {NULL};
@@ -1128,15 +1132,12 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     if(! arg.txn->valid) {
         return err_invalid();
     }
-
-    unsigned int f;
-    int rc = mdb_dbi_flags(arg.txn->txn, self->dbi, &f);
-    if(rc) {
+    if((rc = mdb_dbi_flags(arg.txn->txn, self->dbi, &f))) {
         err_set("mdb_dbi_flags", rc);
         return NULL;
     }
 
-    PyObject *dct = PyDict_New();
+    dct = PyDict_New();
     PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
     PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
     return dct;
@@ -1246,6 +1247,13 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)}
     };
 
+    PyObject *fspath_obj = NULL;
+    EnvObject *self;
+    const char *fspath;
+    int flags;
+    int rc;
+    int mode;
+
     if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
@@ -1254,9 +1262,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return type_error("'path' argument required");
     }
 
-    PyObject *fspath_obj = NULL;
-    EnvObject *self = PyObject_New(EnvObject, type);
-    if(! self) {
+    if(! ((self = PyObject_New(EnvObject, type)))) {
         return NULL;
     }
 
@@ -1265,7 +1271,6 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = NULL;
     self->env = NULL;
 
-    int rc;
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
         goto fail;
@@ -1289,7 +1294,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if(! ((fspath_obj = get_fspath(arg.path)))) {
         goto fail;
     }
-    const char *fspath = PyBytes_AS_STRING(fspath_obj);
+    fspath = PyBytes_AS_STRING(fspath_obj);
 
     if(arg.create && arg.subdir && !arg.readonly) {
         struct stat st;
@@ -1303,7 +1308,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         }
     }
 
-    int flags = MDB_NOTLS;
+    flags = MDB_NOTLS;
     if(! arg.subdir) {
         flags |= MDB_NOSUBDIR;
     }
@@ -1331,7 +1336,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
 
     // Strip +x.
-    int mode = arg.mode & ~0111;
+    mode = arg.mode & ~0111;
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, fspath, flags, mode)
     UNLOCKED(rc, mdb_env_open(self->env, fspath, flags, mode));
