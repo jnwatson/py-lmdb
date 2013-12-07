@@ -56,8 +56,6 @@
 // Inlining control for compatible compilers.
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #   define NOINLINE __attribute__((noinline))
-#elif defined(_MSC_VER)
-#   define NOINLINE __declspec(noinline)
 #else
 #   define NOINLINE
 #endif
