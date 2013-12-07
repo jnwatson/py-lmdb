@@ -23,7 +23,6 @@
 #define PY_SSIZE_T_CLEAN
 
 #include <errno.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
