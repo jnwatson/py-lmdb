@@ -1419,18 +1419,19 @@ env_copy(EnvObject *self, PyObject *args)
         {ARG_OBJ, PATH_S, OFFSET(env_copy, path)}
     };
 
+    PyObject *fspath_obj;
+    int rc;
+
     if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
         return NULL;
     }
     if(! arg.path) {
         return type_error("path argument required");
     }
-    PyObject *fspath_obj = get_fspath(arg.path);
-    if(! fspath_obj) {
+    if(! ((fspath_obj = get_fspath(arg.path)))) {
         return NULL;
     }
 
-    int rc;
     UNLOCKED(rc, mdb_env_copy(self->env, PyBytes_AS_STRING(fspath_obj)));
     Py_CLEAR(fspath_obj);
     if(rc) {
@@ -1503,18 +1504,20 @@ env_info(EnvObject *self)
 static PyObject *
 env_flags(EnvObject *self)
 {
+    PyObject *dct;
+    unsigned int flags;
+    int rc;
+
     if(! self->valid) {
         return err_invalid();
     }
 
-    unsigned int flags;
-    int rc = mdb_env_get_flags(self->env, &flags);
-    if(rc) {
+    if((rc = mdb_env_get_flags(self->env, &flags))) {
         err_set("mdb_env_get_flags", rc);
         return NULL;
     }
 
-    PyObject *dct = PyDict_New();
+    dct = PyDict_New();
     PyDict_SetItemString(dct, "subdir", py_bool(!(flags & MDB_NOSUBDIR)));
     PyDict_SetItemString(dct, "readonly", py_bool(flags & MDB_RDONLY));
     PyDict_SetItemString(dct, "metasync", py_bool(!(flags & MDB_NOMETASYNC)));
