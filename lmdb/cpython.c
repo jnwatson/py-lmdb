@@ -31,7 +31,6 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <tgmath.h>
 
 #include "Python.h"
 #include "structmember.h"
