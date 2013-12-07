@@ -43,7 +43,7 @@
 #include "lmdb.h"
 
 
-// Comment out for copious debug.
+/* Comment out for copious debug. */
 #define NODEBUG
 
 #ifdef NODEBUG
@@ -53,7 +53,7 @@
     "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, ## __VA_ARGS__);
 #endif
 
-// Inlining control for compatible compilers.
+/* Inlining control for compatible compilers. */
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #   define NOINLINE __attribute__((noinline))
 #else
@@ -113,7 +113,7 @@ enum string_id {
     WRITE_S,
     WRITEMAP_S,
 
-    // Must be last.
+    /* Must be last. */
     STRING_ID_COUNT
 };
 
@@ -192,13 +192,13 @@ typedef struct IterObject IterObject;
 typedef struct TransObject TransObject;
 
 
-// --------------------------
-// Buffer object abuse macros
-// --------------------------
+/* -------------------------- */
+/* Buffer object abuse macros */
+/* -------------------------- */
 
 #if PY_MAJOR_VERSION >= 3
 
-// Python 3.3 kindly exports the struct definitions for us.
+/* Python 3.3 kindly exports the struct definitions for us. */
 #   define MOD_RETURN(mod) return mod;
 #   define MODINIT_NAME PyInit_cpython
 #   define BUFFER_TYPE PyMemoryViewObject
@@ -211,7 +211,7 @@ typedef struct TransObject TransObject;
 
 #else
 
-// So evil.
+/* So evil. */
 typedef struct {
     PyObject_HEAD
     PyObject *b_base;
@@ -238,7 +238,7 @@ typedef struct {
         (buf)->b_size = (size); \
     }
 
-// Python 2.5
+/* Python 2.5 */
 #ifndef Py_TYPE
 #   define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
 #endif
@@ -288,7 +288,7 @@ struct lmdb_object {
 struct DbObject {
     LmdbObject_HEAD
     /** Python Environment reference. */
-    struct EnvObject *env; // Not refcounted.
+    struct EnvObject *env; /* Not refcounted. */
     /** MDB database handle. */
     MDB_dbi dbi;
 };
@@ -408,7 +408,7 @@ static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
         struct lmdb_object *next = child->siblings.next;
         if(prev) {
             prev->siblings.next = next;
-                 // If double unlink_child(), this test my legitimately fail:
+                 /* If double unlink_child(), this test my legitimately fail: */
         } else if(parent->children.next == child) {
             parent->children.next = next;
         }
@@ -452,9 +452,9 @@ static void invalidate(struct lmdb_object *parent)
 #define INVALIDATE(parent) invalidate((void *)parent);
 
 
-// ----------
-// Exceptions
-// ----------
+/* ---------- */
+/* Exceptions */
+/* ---------- */
 
 struct error_map {
     int code;
@@ -491,9 +491,9 @@ static const struct error_map error_map[] = {
     {ENOSPC, "DiskError"}
 };
 
-// -------
-// Helpers
-// -------
+/* ------- */
+/* Helpers */
+/* ------- */
 
 /**
  * Describes the type of a struct field.
@@ -640,9 +640,9 @@ val_from_buffer(MDB_val *val, PyObject *buf)
 }
 
 
-// -------------------
-// Concurrency control
-// -------------------
+/* ------------------- */
+/* Concurrency control */
+/* ------------------- */
 
 static NOINLINE PyThreadState *save_thread(void)
 {
@@ -660,11 +660,11 @@ static NOINLINE void restore_thread(PyThreadState *state)
     }
 }
 
-// Like Py_BEGIN_ALLOW_THREADS
+/* Like Py_BEGIN_ALLOW_THREADS */
 #define DROP_GIL \
     { PyThreadState *_save; _save = save_thread();
 
-// Like Py_END_ALLOW_THREADS
+/* Like Py_END_ALLOW_THREADS */
 #define LOCK_GIL \
     restore_thread(_save); }
 
@@ -674,9 +674,9 @@ static NOINLINE void restore_thread(PyThreadState *state)
     LOCK_GIL
 
 
-// ----------
-// Exceptions
-// ----------
+/* ---------- */
+/* Exceptions */
+/* ---------- */
 
 /**
  * Raise an exception appropriate for the given `rc` MDB error code.
@@ -735,9 +735,9 @@ get_fspath(PyObject *src)
 }
 
 
-// ----------------
-// Argument parsing
-// ----------------
+/* ---------------- */
+/* Argument parsing */
+/* ---------------- */
 
 #define OFFSET(k, y) offsetof(struct k, y)
 #define SPECSIZE() (sizeof(argspec) / sizeof(argspec[0]))
@@ -919,9 +919,9 @@ db_owner_check(DbObject *db, EnvObject *env)
 }
 
 
-// --------------------------------------------------------
-// Functionality shared between Transaction and Environment
-// --------------------------------------------------------
+/* -------------------------------------------------------- */
+/* Functionality shared between Transaction and Environment */
+/* -------------------------------------------------------- */
 
 static PyObject *
 make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buffers)
@@ -1030,9 +1030,9 @@ make_cursor(DbObject *db, TransObject *trans)
 }
 
 
-// --------
-// Database
-// --------
+/* -------- */
+/* Database */
+/* -------- */
 
 static DbObject *
 db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
@@ -1054,7 +1054,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
 
     OBJECT_INIT(dbo)
     LINK_CHILD(env, dbo)
-    dbo->env = env; // no refcount
+    dbo->env = env; /* no refcount */
     dbo->dbi = dbi;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
     return dbo;
@@ -1169,9 +1169,9 @@ static PyTypeObject PyDatabase_Type = {
 };
 
 
-// -----------
-// Environment
-// -----------
+/* ----------- */
+/* Environment */
+/* ----------- */
 
 static int
 env_clear(EnvObject *self)
@@ -1335,7 +1335,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         flags |= MDB_NOMEMINIT;
     }
 
-    // Strip +x.
+    /* Strip +x. */
     mode = arg.mode & ~0111;
 
     DEBUG("mdb_env_open(%p, '%s', %d, %o);", self->env, fspath, flags, mode)
@@ -1764,9 +1764,9 @@ static PyTypeObject PyEnvironment_Type = {
 };
 
 
-// -------
-// Cursors
-// -------
+/* ------- */
+/* Cursors */
+/* ------- */
 
 static int
 cursor_clear(CursorObject *self)
@@ -1980,7 +1980,7 @@ cursor_item(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    // Must refresh `key` and `val` following mutation.
+    /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
@@ -2031,7 +2031,7 @@ cursor_key(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    // Must refresh `key` and `val` following mutation.
+    /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
@@ -2259,7 +2259,7 @@ cursor_value(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    // Must refresh `key` and `val` following mutation.
+    /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
@@ -2428,9 +2428,9 @@ static PyTypeObject PyCursor_Type = {
 };
 
 
-// ---------
-// Iterators
-// ---------
+/* --------- */
+/* Iterators */
+/* --------- */
 
 
 /**
@@ -2496,9 +2496,9 @@ static PyTypeObject PyIterator_Type = {
 };
 
 
-// ------------
-// Transactions
-// ------------
+/* ------------ */
+/* Transactions */
+/* ------------ */
 
 static int
 trans_clear(TransObject *self)
