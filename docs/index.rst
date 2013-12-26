@@ -116,6 +116,32 @@ adjusted by rebuilding the library. The compile-time key length can be queried
 via :py:meth:`Environment.max_key_size()`.
 
 
+Memory usage
+++++++++++++
+
+Diagnostic tools often overreport the memory usage of LMDB databases, since the
+tools poorly classify that memory. The Linux ``ps`` command ``RSS`` measurement
+may report a process as having an entire database resident, causing user alarm.
+While the entire database may really be resident, it is half the story.
+
+Unlike heap memory, pages in file-backed memory maps, such as those used by
+LMDB, may be efficiently reclaimed by the OS at any moment so long as the pages
+in the map are `clean`. `Clean` simply means that the resident pages' contents
+match the associated pages that live in the disk file that backs the mapping. A
+clean mapping works exactly like a cache, and in fact it is a cache: the `OS
+page cache <http://en.wikipedia.org/wiki/Page_cache>`_.
+
+On Linux, the ``/proc/<pid>/smaps`` file contains one section for each memory
+mapping in a process. To inspect the actual memory usage of an LMDB database,
+look for a ``data.mdb`` entry, then observe its `Dirty` and `Clean` values.
+
+When no write transaction is active, all pages in an LMDB database should be
+marked `clean`, unless the Environment was opened with `sync=False`, and no
+explicit :py:meth:`Environment.sync` has been called since the last write
+transaction, and the OS writeback mechanism has not yet opportunistically
+written the dirty pages to disk.
+
+
 Bytestrings
 +++++++++++
 
