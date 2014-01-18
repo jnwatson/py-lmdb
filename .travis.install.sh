@@ -5,14 +5,22 @@
 ENV="$1"
 PKGS="$PKGS libffi-dev"
 
-#[[ "$ENV" == *'31'* ]] && {
+[[ "$ENV" == *'30'* ]] && {
+    # pip 1.4.1 broken with Python3.0, need the dev version in this case.
+    REPOS="$REPOS ppa:fkrull/deadsnakes"
+    PKGS="$PKGS python3.0 python3.0-dev"
+}
+
+[[ "$ENV" == *'31'* ]] && {
     # pip 1.4.1 broken with Python3.1, need the dev version in this case.
- #   echo "Replacing pip with dev version.."
- #   pip install -U 'https://github.com/pypa/pip/archive/02fff2b7a00a71ce8c8a98b671a5127490770093.zip#egg=pip'
- #   hash -r
- #   REPOS="$REPOS ppa:fkrull/deadsnakes"
- #   PKGS="$PKGS python3.1 python3.1-dev"
-#}
+    REPOS="$REPOS ppa:fkrull/deadsnakes"
+    PKGS="$PKGS python3.1 python3.1-dev"
+}
+
+[[ "$ENV" == *'25'* ]] && {
+    REPOS="$REPOS ppa:fkrull/deadsnakes"
+    PKGS="$PKGS python2.5"
+}
 
 [[ "$ENV" == *'pypy'* ]] && {
     REPOS="$REPOS ppa:pypy/ppa"
@@ -35,5 +43,7 @@ PKGS="$PKGS libffi-dev"
     apt-get --force-yes -qq install $PKGS
 }
 
+pip install -U setuptools
 pip install -U pip
-pip install tox
+pip install -U tox
+pip install -U cffi
