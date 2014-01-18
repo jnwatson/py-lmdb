@@ -9,6 +9,8 @@
 
 * LMDB 0.9.11 is now bundled.
 
+* To work around install failures minimum CFFI version is now >=0.8.0.
+
 
 2013-11-30 v0.77
 
