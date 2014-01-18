@@ -1914,7 +1914,7 @@ cursor_item(CursorObject *self)
 
     int as_buffer = self->trans->flags & TRANS_BUFFERS;
     PyObject *key = obj_from_val(&self->key, as_buffer);
-    PyObject *val = obj_from_val(&self->key, as_buffer);
+    PyObject *val = obj_from_val(&self->val, as_buffer);
     PyObject *tup = PyTuple_New(2);
     if(tup && key && val) {
         PyTuple_SET_ITEM(tup, 0, key);
