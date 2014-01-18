@@ -20,7 +20,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <assert.h>
 #include "midl.h"
 
 /** @defgroup internal	MDB Internals
@@ -150,7 +149,7 @@ int mdb_midl_need( MDB_IDL *idp, unsigned num )
 		num = (num + num/4 + (256 + 2)) & -256;
 		if (!(ids = realloc(ids-1, num * sizeof(MDB_ID))))
 			return ENOMEM;
-		*ids++ = num -= 2;
+		*ids++ = num - 2;
 		*idp = ids;
 	}
 	return 0;
@@ -306,7 +305,6 @@ int mdb_mid2l_insert( MDB_ID2L ids, MDB_ID2 *id )
 	unsigned x, i;
 
 	x = mdb_mid2l_search( ids, id->mid );
-	assert( x > 0 );
 
 	if( x < 1 ) {
 		/* internal error */
