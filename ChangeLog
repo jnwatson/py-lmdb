@@ -11,6 +11,11 @@
 
 * To work around install failures minimum CFFI version is now >=0.8.0.
 
+* ticket #38: remove all buffer object hacks. This results in ~50% slowdown
+  for cursor enumeration, but results in far simpler object lifetimes. A
+  future version may introduce a better mechanism for achieving the same
+  performance without loss of sanity.
+
 
 2013-11-30 v0.77
 

@@ -192,35 +192,16 @@ typedef struct IterObject IterObject;
 typedef struct TransObject TransObject;
 
 
-/* -------------------------- */
-/* Buffer object abuse macros */
-/* -------------------------- */
+/* ------------------------ */
+/* Python 3.x Compatibility */
+/* ------------------------ */
 
 #if PY_MAJOR_VERSION >= 3
 
-/* Python 3.3 kindly exports the struct definitions for us. */
 #   define MOD_RETURN(mod) return mod;
 #   define MODINIT_NAME PyInit_cpython
-#   define BUFFER_TYPE PyMemoryViewObject
-#   define MAKE_BUFFER() PyMemoryView_FromMemory("", 0, PyBUF_READ)
-#   define SET_BUFFER(buff, ptr, size) {\
-        (buff)->view.buf = (ptr); \
-        (buff)->view.len = (size); \
-        (buff)->hash = -1; \
-    }
 
 #else
-
-/* So evil. */
-typedef struct {
-    PyObject_HEAD
-    PyObject *b_base;
-    void *b_ptr;
-    Py_ssize_t b_size;
-    Py_ssize_t b_offset;
-    int b_readonly;
-    long b_hash;
-} PyBufferObject;
 
 #   define PyUnicode_InternFromString PyString_InternFromString
 #   define PyBytes_AS_STRING PyString_AS_STRING
@@ -230,18 +211,13 @@ typedef struct {
 #   define _PyBytes_Resize _PyString_Resize
 #   define MOD_RETURN(mod) return
 #   define MODINIT_NAME initcpython
-#   define BUFFER_TYPE PyBufferObject
-#   define MAKE_BUFFER() PyBuffer_FromMemory("", 0)
-#   define SET_BUFFER(buf, ptr, size) {\
-        (buf)->b_hash = -1; \
-        (buf)->b_ptr = (ptr); \
-        (buf)->b_size = (size); \
-    }
+#   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
+#   define PyBUF_READ 0
 
 /* Python 2.5 */
-#ifndef Py_TYPE
-#   define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
-#endif
+#   ifndef Py_TYPE
+#       define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
+#   endif
 
 #endif
 
@@ -326,8 +302,6 @@ struct TransObject {
     MDB_txn *txn;
     /** Bitfield of trans_flags values. */
     int flags;
-    /** NULL if !TRANS_BUFFERS, or prior to any call to get(). */
-    BUFFER_TYPE *key_buf;
     /** Default database if none specified. */
     DbObject *db;
     /** Number of mutations occurred since start of transaction. Required to
@@ -344,12 +318,6 @@ struct CursorObject {
     int positioned;
     /** MDB-level cursor object. */
     MDB_cursor *curs;
-    /** NULL if trans->buffers==0, or prior to any fetch call. */
-    BUFFER_TYPE *key_buf;
-    /** NULL if trans->buffers==0, or prior to any fetch call. */
-    BUFFER_TYPE *val_buf;
-    /** NULL if trans->buffers==0, or prior to any item() call.*/
-    PyObject *item_tup;
     /** mv_size==0 if positioned==0, otherwise points to current key. */
     MDB_val key;
     /** mv_size==0 if positioned==0, otherwise points to current value. */
@@ -575,36 +543,16 @@ dict_from_fields(void *o, const struct dict_field *fields)
 }
 
 /**
- * Given an MDB_val `val`, create a new buffer object to describe it, storing
- * the result in `bufp`. If `*bufp` is not NULL, then it is assumed to already
- * contain a buffer object. In that case simply update the existing object.
- * Return the buffer object on success, or NULL on failure.
- */
-static PyObject * NOINLINE
-buffer_from_val(BUFFER_TYPE **bufp, MDB_val *val)
-{
-    BUFFER_TYPE *buf = *bufp;
-    if(! buf) {
-        buf = (BUFFER_TYPE *) MAKE_BUFFER();
-        if(! buf) {
-            return NULL;
-        }
-        *bufp = buf;
-    }
-
-    SET_BUFFER(buf, val->mv_data, val->mv_size);
-    Py_INCREF(buf);
-    return (PyObject *) buf;
-}
-
-/**
  * Given an MDB_val `val`, convert it to a Python string or bytes object,
  * depending on the Python version. Returns a new reference to the object on
  * sucess, or NULL on failure.
  */
 static PyObject *
-string_from_val(MDB_val *val)
+obj_from_val(MDB_val *val, int as_buffer)
 {
+    if(as_buffer) {
+        return PyMemoryView_FromMemory(val->mv_data, val->mv_size, PyBuf_READ);
+    }
     return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
 }
 
@@ -622,18 +570,6 @@ val_from_buffer(MDB_val *val, PyObject *buf)
         val->mv_size = PyBytes_GET_SIZE(buf);
         return 0;
     }
-#if PY_MAJOR_VERSION >= 3
-    if(PyUnicode_CheckExact(buf)) {
-        char *data;
-        Py_ssize_t size;
-        if(! (data = PyUnicode_AsUTF8AndSize(buf, &size))) {
-            return -1;
-        }
-        val->mv_data = data;
-        val->mv_size = size;
-        return 0;
-    }
-#endif
     return PyObject_AsReadBuffer(buf,
         (const void **) &val->mv_data,
         (Py_ssize_t *) &val->mv_size);
@@ -979,7 +915,6 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 #ifdef HAVE_MEMSINK
     self->sink_head = NULL;
 #endif
-    self->key_buf = NULL;
 
     self->mutations = 0;
     self->flags = 0;
@@ -1018,11 +953,8 @@ make_cursor(DbObject *db, TransObject *trans)
     OBJECT_INIT(self)
     LINK_CHILD(trans, self)
     self->positioned = 0;
-    self->key_buf = NULL;
-    self->val_buf = NULL;
     self->key.mv_size = 0;
     self->val.mv_size = 0;
-    self->item_tup = NULL;
     self->trans = trans;
     self->last_mutation = trans->mutations;
     Py_INCREF(self->trans);
@@ -1784,17 +1716,6 @@ cursor_clear(CursorObject *self)
         LOCK_GIL
         self->valid = 0;
     }
-    if(self->key_buf) {
-        SET_BUFFER(self->key_buf, "", 0);
-        Py_CLEAR(self->key_buf);
-    }
-    if(self->val_buf) {
-        SET_BUFFER(self->val_buf, "", 0);
-        Py_CLEAR(self->val_buf);
-    }
-    if(self->item_tup) {
-        Py_CLEAR(self->item_tup);
-    }
     Py_CLEAR(self->trans);
     return 0;
 }
@@ -1990,41 +1911,20 @@ cursor_item(CursorObject *self)
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
-    if(self->trans->flags & TRANS_BUFFERS) {
-        if(! buffer_from_val(&self->key_buf, &self->key)) {
-            return NULL;
-        }
-        if(! buffer_from_val(&self->val_buf, &self->val)) {
-            return NULL;
-        }
-        if(! self->item_tup) {
-            self->item_tup = PyTuple_Pack(2, self->key_buf, self->val_buf);
-        }
-        if(! self->item_tup) {
-            return NULL;
-        }
-        Py_INCREF(self->item_tup);
-        return self->item_tup;
-    }
 
-    PyObject *key = string_from_val(&self->key);
-    if(! key) {
-        return NULL;
-    }
-    PyObject *val = string_from_val(&self->val);
-    if(! val) {
-        Py_DECREF(key);
-        return NULL;
-    }
+    int as_buffer = self->trans->flags & TRANS_BUFFERS;
+    PyObject *key = obj_from_val(&self->key, as_buffer);
+    PyObject *val = obj_from_val(&self->key, as_buffer);
     PyObject *tup = PyTuple_New(2);
-    if(! tup) {
-        Py_DECREF(key);
-        Py_DECREF(val);
-        return NULL;
+    if(tup && key && val) {
+        PyTuple_SET_ITEM(tup, 0, key);
+        PyTuple_SET_ITEM(tup, 1, val);
+        return tup;
     }
-    PyTuple_SET_ITEM(tup, 0, key);
-    PyTuple_SET_ITEM(tup, 1, val);
-    return tup;
+    Py_CLEAR(key);
+    Py_CLEAR(val);
+    Py_CLEAR(tup);
+    return NULL;
 }
 
 /**
@@ -2041,14 +1941,7 @@ cursor_key(CursorObject *self)
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
-    if(self->trans->flags & TRANS_BUFFERS) {
-        if(! buffer_from_val(&self->key_buf, &self->key)) {
-            return NULL;
-        }
-        Py_INCREF(self->key_buf);
-        return (PyObject *) self->key_buf;
-    }
-    return string_from_val(&self->key);
+    return obj_from_val(&self->key, self->trans->flags & TRANS_BUFFERS);
 }
 
 /**
@@ -2168,7 +2061,7 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_put", rc);
     }
 
-    PyObject *old = string_from_val(&arg.val);
+    PyObject *old = obj_from_val(&arg.val, 0);
     if(! old) {
         return NULL;
     }
@@ -2207,7 +2100,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     if(! self->positioned) {
         Py_RETURN_NONE;
     }
-    PyObject *old = string_from_val(&self->val);
+    PyObject *old = obj_from_val(&self->val, 0);
     if(! old) {
         return NULL;
     }
@@ -2269,14 +2162,7 @@ cursor_value(CursorObject *self)
        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
-    if(self->trans->flags & TRANS_BUFFERS) {
-        if(! buffer_from_val(&self->val_buf, &self->val)) {
-            return NULL;
-        }
-        Py_INCREF(self->val_buf);
-        return (PyObject *) self->val_buf;
-    }
-    return string_from_val(&self->val);
+    return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
 }
 
 static PyObject *
@@ -2745,10 +2631,7 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         }
         return err_set("mdb_get", rc);
     }
-    if(self->flags & TRANS_BUFFERS) {
-        return buffer_from_val(&self->key_buf, &val);
-    }
-    return string_from_val(&val);
+    return obj_from_val(&val, self->flags & TRANS_BUFFERS);
 }
 
 /**
@@ -2859,7 +2742,7 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_put", rc);
     }
 
-    PyObject *old = string_from_val(&arg.value);
+    PyObject *old = obj_from_val(&arg.value, 0);
     if(! old) {
         Py_DECREF((PyObject *) cursor);
         return NULL;
@@ -2914,7 +2797,7 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         Py_DECREF((PyObject *)cursor);
         Py_RETURN_NONE;
     }
-    PyObject *old = string_from_val(&cursor->val);
+    PyObject *old = obj_from_val(&cursor->val, 0);
     if(! old) {
         Py_DECREF((PyObject *)cursor);
         return NULL;

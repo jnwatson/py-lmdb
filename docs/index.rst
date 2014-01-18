@@ -198,9 +198,8 @@ will automatically convert them to bytestrings as necessary:
 
 It is also possible to pass buffers directly to many native APIs, for example
 :py:meth:`file.write`, :py:meth:`socket.send`, :py:meth:`zlib.decompress` and
-so on.
-
-A buffer may be sliced without copying by passing it to :py:func:`buffer`:
+so on. A buffer may be sliced without copying by passing it to
+:py:func:`buffer`:
 
     ::
 
@@ -209,38 +208,23 @@ A buffer may be sliced without copying by passing it to :py:func:`buffer`:
         >>> len(sub_buf)
         200
 
-.. caution::
+In both PyPy and CPython, returned buffers *must be discarded* after their
+producing transaction has completed or been modified in any way. To preserve
+buffer's contents, copy it using :py:func:`bytes`:
 
-    In CPython buffers returned by :py:class:`Transaction` and
-    :py:class:`Cursor` are reused, so that consecutive calls to
-    :py:class:`Transaction.get` or any of the :py:class:`Cursor` methods will
-    overwrite the objects that have already been returned. To preserve a value
-    returned in a buffer, convert it to a bytestring using :py:func:`bytes`.
+    .. code-block:: python
 
-    ::
+        with env.begin(write=True, buffers=True) as txn:
+            buf = env.get('foo')           # only valid until the next write.
+            buf_copy = bytes(buf)          # valid forever
+            env.delete('foo')              # this is a write!
+            env.put('foo2', 'bar2')        # this is also a write!
 
-        >>> txn = env.begin(write=True, buffers=True)
-        >>> txn.put('key1', 'value1')
-        >>> txn.put('key2', 'value2')
+            print('foo: %r' % (buf,))      # ERROR! invalidated by write
+            print('foo: %r' % (buf_copy,)  # OK
 
-        >>> val1 = txn.get('key1')
-        >>> vals1 = bytes(val1)
-        >>> vals1
-        'value1'
-        >>> val2 = txn.get('key2')
-        >>> bytes(val2)
-        'value2'
-
-        >>> # Caution: the buffer object is reused!
-        >>> bytes(val1)
-        'value2'
-
-        >>> # But our bytestring copy was preserved!
-        >>> vals1
-        'value1'
-
-    In both PyPy and CPython, returned buffer objects *must be discarded* after
-    their generating transaction has completed.
+        print('foo: %r' % (buf,))          # ERROR! also invalidated by txn end
+        print('foo: %r' % (buf_copy,)      # still OK
 
 
 ``writemap`` mode
@@ -566,24 +550,6 @@ copies, resulting in a difference of 10,000 lookups/sec slowdown in a
 particular microbenchmark. The 10k/sec slowdown could potentially disappear
 given a sufficiently large application, so this decision needs revisited at
 some stage.
-
-
-Buffer mutation
-###############
-
-This violates the CPython API, and it really is a huge hack. Since the buffer
-objects never change, the 2-tuple wrapping those objects for
-:py:meth:`Cursor.item` need not change either, so a good deal of heap churn
-can be avoided via the hack. The efficiency benefit of this hack may be
-negligable at best.
-
-There is a second motivation for this hack, and that is to neutralize any
-returned `buffer` objects prior to a transaction ending or a cursor mutation.
-Without such a hack, the user may attempt to read from the `buffer` later on
-and become surprised at its content, or the resulting crash.
-
-Still it really is candidate for eventual removal, after the effects of the
-removal are tested.
 
 
 ChangeLog
