@@ -551,7 +551,7 @@ static PyObject *
 obj_from_val(MDB_val *val, int as_buffer)
 {
     if(as_buffer) {
-        return PyMemoryView_FromMemory(val->mv_data, val->mv_size, PyBuf_READ);
+        return PyMemoryView_FromMemory(val->mv_data, val->mv_size, PyBUF_READ);
     }
     return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
 }
