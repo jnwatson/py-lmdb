@@ -1,4 +1,15 @@
 
+2014-01-30 v0.78
+
+* Patch from bra-fsn to fix LMDB_LIBDIR.
+
+* Various inaccurate documentation improvements.
+
+* Initial work towards Windows/Microsoft Visual C++ 9.0 build.
+
+* LMDB 0.9.11 is now bundled.
+
+
 2013-11-30 v0.77
 
 * Added Environment.max_key_size(), Environment.max_readers().
