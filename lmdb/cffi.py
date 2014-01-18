@@ -1332,10 +1332,10 @@ class Cursor(object):
             >>> with env.begin() as txn:
             ...     cursor = txn.cursor()
             ...     if not cursor.set_range('5'): # Position at first key >= '5'.
-            ...         print 'Not found!'
+            ...         print('Not found!')
             ...     else:
             ...         for key, value in cursor: # Iterate from first key >= '5'.
-            ...             print key, value
+            ...             print((key, value))
 
     Iteration is not required to navigate, and sometimes results in ugly or
     inefficient code. In cases where the iteration order is not obvious, or is
@@ -1458,7 +1458,7 @@ class Cursor(object):
 
             >>> with env.begin() as txn:
             ...     for i, (key, value) in enumerate(txn.cursor().iterprev()):
-            ...         print '%dth last item is (%r, %r)' % (1 + i, key, value)
+            ...         print('%dth last item is (%r, %r)' % (1+i, key, value))
         """
         if not self._valid:
             self.last()
