@@ -16,10 +16,6 @@
   future version may introduce a better mechanism for achieving the same
   performance without loss of sanity.
 
-* On Python 3, Unicode strings are no longer silently converted to UTF-8
-  bytestrings. You must first explicitly encode Unicode strings before passing
-  them to the API.
-
 
 2013-11-30 v0.77
 

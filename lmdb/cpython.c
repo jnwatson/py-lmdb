@@ -570,6 +570,18 @@ val_from_buffer(MDB_val *val, PyObject *buf)
         val->mv_size = PyBytes_GET_SIZE(buf);
         return 0;
     }
+#if PY_MAJOR_VERSION >= 3
+    if(PyUnicode_CheckExact(buf)) {
+        char *data;
+        Py_ssize_t size;
+        if(! (data = PyUnicode_AsUTF8AndSize(buf, &size))) {
+            return -1;
+        }
+        val->mv_data = data;
+        val->mv_size = size;
+        return 0;
+    }
+#endif
     return PyObject_AsReadBuffer(buf,
         (const void **) &val->mv_data,
         (Py_ssize_t *) &val->mv_size);
