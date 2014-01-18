@@ -22,7 +22,7 @@ def x():
     words.update([w.upper() for w in words])
     words.update([w[::-1] for w in words])
     words.update([w[::-1].upper() for w in words])
-    #words.update(['-'.join(w) for w in words])
+    words.update(['-'.join(w) for w in words])
     #words.update(['+'.join(w) for w in words])
     #words.update(['/'.join(w) for w in words])
     words = list(words)
@@ -89,12 +89,6 @@ def x():
             hash(txn.get(word))
     t1 = now()
     print 'per txn rand lookup+hash all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    t0 = now()
-    for word in words:
-        hash(env.get(word))
-    t1 = now()
-    print 'txnless rand lookup+hash all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
     with env.begin() as txn:
         t0 = now()
