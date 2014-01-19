@@ -219,7 +219,8 @@ _CFFI_CDEF = '''
                          char *key_s, size_t keylen,
                          MDB_val *val_out);
     static int pymdb_cursor_get(MDB_cursor *cursor,
-                                char *key_s, size_t keylen,
+                                char *key_s, size_t key_len,
+                                char *data_s, size_t data_len,
                                 MDB_val *key, MDB_val *data, int op);
     static int pymdb_cursor_put(MDB_cursor *cursor,
                                 char *key_s, size_t keylen,
@@ -261,13 +262,17 @@ _CFFI_VERIFY = '''
         return mdb_del(txn, dbi, &key, valptr);
     }
 
-    static int pymdb_cursor_get(MDB_cursor *cursor, char *key_s, size_t keylen,
+    static int pymdb_cursor_get(MDB_cursor *cursor,
+                                char *key_s, size_t key_len,
+                                char *data_s, size_t data_len,
                                 MDB_val *key, MDB_val *data, int op)
     {
-        MDB_val tmpkey = {keylen, key_s};
-        int rc = mdb_cursor_get(cursor, &tmpkey, data, op);
-        if(rc == 0) {
-            *key = tmpkey;
+        MDB_val tmp_key = {key_len, key_s};
+        MDB_val tmp_data = {data_len, data_s};
+        int rc = mdb_cursor_get(cursor, &tmp_key, &tmp_data, op);
+        if(! rc) {
+            *key = tmp_key;
+            *data = tmp_data;
         }
         return rc;
     }
@@ -1320,10 +1325,10 @@ class Cursor(object):
     meaning strange behavior results when multiple iterators exist on the same
     cursor.
 
-    Both :py:meth:`iternext` and :py:meth:`iterprev` accept `keys` and `values`
-    arguments. If both are ``True``, then the value of :py:meth:`item` is
-    yielded on each iteration. If only `keys` is ``True``, :py:meth:`key` is
-    yielded, otherwise only :py:meth:`value` is yielded.
+    Iterator methods such as :py:meth:`iternext` and :py:meth:`iterprev` accept
+    `keys` and `values` arguments. If both are ``True``, then the value of
+    :py:meth:`item` is yielded on each iteration. If only `keys` is ``True``,
+    :py:meth:`key` is yielded, otherwise only :py:meth:`value` is yielded.
 
     Prior to iteration, a cursor can be positioned anywhere in the database:
 
@@ -1438,20 +1443,55 @@ class Cursor(object):
                 >>> it = iter(cursor)
                 >>> it = cursor.iternext(keys=True, values=True)
 
-        If the cursor was not yet positioned, it is moved to the first record
-        in the database, otherwise iteration proceeds from the current
-        position.
+        If the cursor is not yet positioned, it is moved to the first key in
+        the database, otherwise iteration proceeds from the current position.
         """
         if not self._valid:
             self.first()
         return self._iter(MDB_NEXT, keys, values)
     __iter__ = iternext
 
+    def iternext_dup(self, keys=True, values=True):
+        """Return a forward iterator that yields the current value
+        ("duplicate") of the current key before calling :py:meth:`next_dup`,
+        repeating until the last value of the current key is reached.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        .. code-block:: python
+
+            if not cursor.set_key("foo"):
+                print("No values found for 'foo'")
+            else:
+                for idx, data in cursor.iternext_dup():
+                    print("%d'th value for 'foo': %s" % (idx, data))
+        """
+        return self._iter(MDB_NEXT_DUP, keys, values)
+
+    def iternext_nodup(self, keys=True, values=False):
+        """Return a forward iterator that yields the current value
+        ("duplicate") of the current key before calling :py:meth:`next_nodup`,
+        repeating until the end of the database is reached.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        If the cursor is not yet positioned, it is moved to the first key in
+        the database, otherwise iteration proceeds from the current position.
+
+        .. code-block:: python
+
+            for key in cursor.iternext_nodup():
+                print("Key '%s' has %d values" % (key, cursor.count()))
+        """
+        if not self._valid:
+            self.first()
+        return self._iter(MDB_NEXT_NODUP, keys, values)
+
     def iterprev(self, keys=True, values=True):
         """Return a reverse iterator that yields the current element before
         calling :py:meth:`prev`, until the start of the database is reached.
 
-        If the cursor was not yet positioned, it is moved to the last record in
+        If the cursor is not yet positioned, it is moved to the last key in
         the database, otherwise iteration proceeds from the current position.
 
         ::
@@ -1464,33 +1504,58 @@ class Cursor(object):
             self.last()
         return self._iter(MDB_PREV, keys, values)
 
+    def iterprev_dup(self, keys=True, values=True):
+        """Return a reverse iterator that yields the current value
+        ("duplicate") of the current key before calling :py:meth:`prev_dup`,
+        repeating until the first value of the current key is reached.
+
+        Only meaningful for databases opened with `dupsort=True`.
+        """
+        return self._iter(MDB_PREV_DUP, keys, values)
+
+    def iterprev_nodup(self, keys=True, values=False):
+        """Return a reverse iterator that yields the current value
+        ("duplicate") of the current key before calling :py:meth:`prev_nodup`,
+        repeating until the start of the database is reached.
+
+        If the cursor is not yet positioned, it is moved to the last key in
+        the database, otherwise iteration proceeds from the current position.
+
+        Only meaningful for databases opened with `dupsort=True`.
+        """
+        if not self._valid:
+            self.last()
+        return self._iter(MDB_PREV_NODUP, keys, values)
+
     def _cursor_get(self, op):
         rc = mdb_cursor_get(self._cur, self._key, self._val, op)
-        v = not rc
+        self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
                     raise _error("mdb_cursor_get", rc)
-        self._valid = v
         return v
 
-    def _cursor_get_key(self, op, k):
-        rc = pymdb_cursor_get(self._cur, k, len(k), self._key, self._val, op)
-        v = not rc
+    def _cursor_get_kv(self, op, k, v):
+        rc = pymdb_cursor_get(self._cur, k, len(k), v, len(v),
+                              self._key, self._val, op)
+        self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
             if rc != MDB_NOTFOUND:
                 if not (rc == EINVAL and op == MDB_GET_CURRENT):
                     raise _error("mdb_cursor_get", rc)
-        self._valid = v
         return v
 
     def first(self):
-        """Move to the first element, returning ``True`` on success or
-        ``False`` if the database is empty.
+        """Move to the first key in the database, returning ``True`` on success
+        or ``False`` if the database is empty.
+
+        If the database was opened with `dupsort=True` and the key contains
+        duplicates, the cursor is positioned on the first value ("duplicate").
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -1499,9 +1564,25 @@ class Cursor(object):
         """
         return self._cursor_get(MDB_FIRST)
 
+    def first_dup(self):
+        """Move to the first value ("duplicate") for the current key, returning
+        ``True`` on success or ``False`` if the database is empty.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_FIRST_DUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_FIRST_DUP)
+
     def last(self):
-        """Move to the last element, returning ``True`` on success or ``False``
-        if the database is empty.
+        """Move to the last key in the database, returning ``True`` on success
+        or ``False`` if the database is empty.
+
+        If the database was opened with `dupsort=True` and the key contains
+        duplicates, the cursor is positioned on the last value ("duplicate").
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -1510,9 +1591,26 @@ class Cursor(object):
         """
         return self._cursor_get(MDB_LAST)
 
+    def last_dup(self):
+        """Move to the last value ("duplicate") for the current key, returning
+        ``True`` on success or ``False`` if the database is empty.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_LAST_DUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_FIRST_DUP)
+
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
-        ``False`` if there is no previous element.
+        ``False`` if there is no previous item.
+
+        For databases opened with `dupsort=True`, moves to the previous data
+        item ("duplicate") for the current key if one exists, otherwise moves
+        to the previous key.
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -1521,9 +1619,40 @@ class Cursor(object):
         """
         return self._cursor_get(MDB_PREV)
 
+    def prev_dup(self):
+        """Move to the previous value ("duplicate") of the current key,
+        returning ``True`` on success or ``False`` if there is no previous
+        value.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_PREV_DUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_PREV_DUP)
+
+    def prev_nodup(self):
+        """Move to the last value ("duplicate") of the previous key, returning
+        ``True`` on success or ``False`` if there is no previous key.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_PREV_NODUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_PREV_NODUP)
+
     def next(self):
         """Move to the next element, returning ``True`` on success or ``False``
         if there is no next element.
+
+        For databases opened with `dupsort=True`, moves to the next value
+        ("duplicate") for the current key if one exists, otherwise moves to the
+        first value of the next key.
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -1532,52 +1661,116 @@ class Cursor(object):
         """
         return self._cursor_get(MDB_NEXT)
 
+    def next_dup(self):
+        """Move to the next value ("duplicate") of the current key, returning
+        ``True`` on success or ``False`` if there is no next value.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_NEXT_DUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_NEXT_DUP)
+
+    def next_nodup(self):
+        """Move to the first value ("duplicate") of the next key, returning
+        ``True`` on success or ``False`` if there is no next key.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_NEXT_NODUP
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get(MDB_PREV_NODUP)
+
     def set_key(self, key):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
-        the exact key was not found.
+        the exact key was not found. It is an error to :py:meth:`set_key` the
+        empty bytestring.
 
-        It is an error to :py:meth:`set_key` the empty bytestring.
+        For databases opened with `dupsort=True`, moves to the first value
+        ("duplicate") for the key.
 
         Equivalent to `mdb_cursor_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_SET_KEY
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_key(MDB_SET_KEY, key)
+        return self._cursor_get_kv(MDB_SET_KEY, key, "")
+
+    def set_key_dup(self, key, data):
+        """Seek exactly to `(key, data)`, returning ``True`` on success or
+        ``False`` if the exact key and value was not found. It is an error
+        to :py:meth:`set_key` the empty bytestring.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_GET_BOTH
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get_kv(MDB_GET_BOTH, key, data)
 
     def get(self, key, default=None):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
         returned if `key` was found, otherwise `default`.
         """
-        if self._cursor_get_key(MDB_SET_KEY, key):
+        if self._cursor_get_kv(MDB_SET_KEY, key, ""):
             return self.value()
         return default
 
     def set_range(self, key):
         """Seek to the first key greater than or equal to `key`, returning
         ``True`` on success, or ``False`` to indicate key was past end of
-        database.
+        database. Behaves like :py:meth:`first` if `key` is the empty
+        bytestring.
 
-        Behaves like :py:meth:`first` if `key` is the empty bytestring.
+        For databases opened with `dupsort=True`, moves to the first value
+        ("duplicate") for the key.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_ with `MDB_SET_RANGE <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_SET_RANGE
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        if not key: # TODO: set_range() throws INVAL on an empty store, whereas
-                    # set_key() returns NOTFOUND
+        if not key:
             return self.first()
-        return self._cursor_get_key(MDB_SET_RANGE, key)
+        return self._cursor_get_kv(MDB_SET_RANGE, key, "")
 
-    def delete(self):
-        """Delete the current element and move to the next element, returning
-        ``True`` on success or ``False`` if the database was empty.
+    def set_range_dup(self, key, data):
+        """Seek to the first key/data pair greater than or equal to `key`,
+        returning ``True`` on success, or ``False`` to indicate `(key, data)`
+        was past end of database.
+
+        Only meaningful for databases opened with `dupsort=True`.
+
+        Equivalent to `mdb_cursor_get()
+        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        with `MDB_GET_BOTH_RANGE
+        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        """
+        return self._cursor_get_kv(MDB_GET_BOTH_RANGE, key, data)
+
+    def delete(self, dupdata=False):
+        """Delete the current element and move to the next, returning ``True``
+        on success or ``False`` if the database was empty.
+
+        If `dupdata` is ``True``, delete all values ("duplicates") for the
+        current key, otherwise delete only the currently positioned value. Only
+        meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_del()
         <http://symas.com/mdb/doc/group__mdb.html#ga26a52d3efcfd72e5bf6bd6960bf75f95>`_
         """
         v = self._valid
         if v:
-            rc = mdb_cursor_del(self._cur, 0)
+            flags = MDB_NODUPDATA if dupdata else 0
+            rc = mdb_cursor_del(self._cur, flags)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
@@ -1586,8 +1779,9 @@ class Cursor(object):
         return v
 
     def count(self):
-        """Return the number of duplicates for the current key. This is only
-        meaningful for databases that have `dupdata=True`.
+        """Return the number of values ("duplicates") for the current key.
+
+        Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_count()
         <http://symas.com/mdb/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
@@ -1683,7 +1877,7 @@ class Cursor(object):
             `key`:
                 Bytestring key to delete.
         """
-        if self._cursor_get_key(MDB_SET_KEY, key):
+        if self._cursor_get_kv(MDB_SET_KEY, key, ""):
             old = _mvstr(self._val)
             rc = mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
