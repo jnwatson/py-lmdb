@@ -1867,6 +1867,18 @@ cursor_first(CursorObject *self)
     return _cursor_get(self, MDB_FIRST);
 }
 
+/**
+ * Cursor.first_dup() -> bool
+ */
+static PyObject *
+cursor_first_dup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_FIRST_DUP);
+}
+
 static PyObject *
 cursor_value(CursorObject *self);
 
@@ -1969,6 +1981,18 @@ cursor_last(CursorObject *self)
 }
 
 /**
+ * Cursor.last_dup() -> bool
+ */
+static PyObject *
+cursor_last_dup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_LAST_DUP);
+}
+
+/**
  * Cursor.next() -> bool
  */
 static PyObject *
@@ -1981,6 +2005,30 @@ cursor_next(CursorObject *self)
 }
 
 /**
+ * Cursor.next_dup() -> bool
+ */
+static PyObject *
+cursor_next_dup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_NEXT_DUP);
+}
+
+/**
+ * Cursor.next_nodup() -> bool
+ */
+static PyObject *
+cursor_next_nodup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_NEXT_NODUP);
+}
+
+/**
  * Cursor.prev() -> bool
  */
 static PyObject *
@@ -1990,6 +2038,30 @@ cursor_prev(CursorObject *self)
         return err_invalid();
     }
     return _cursor_get(self, MDB_PREV);
+}
+
+/**
+ * Cursor.prev_dup() -> bool
+ */
+static PyObject *
+cursor_prev_dup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_PREV_DUP);
+}
+
+/**
+ * Cursor.prev_nodup() -> bool
+ */
+static PyObject *
+cursor_prev_nodup(CursorObject *self)
+{
+    if(! self->valid) {
+        return err_invalid();
+    }
+    return _cursor_get(self, MDB_PREV_NODUP);
 }
 
 /**
@@ -2128,7 +2200,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
 }
 
 /**
- * Cursor.set_key() -> bool
+ * Cursor.set_key(key) -> bool
  */
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
@@ -2143,7 +2215,31 @@ cursor_set_key(CursorObject *self, PyObject *arg)
 }
 
 /**
- * Cursor.set_range() -> bool
+ * Cursor.set_key_dup(key, value) -> bool
+ */
+static PyObject *
+cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_set_key_dup {
+        MDB_val key;
+        MDB_val value;
+    } arg = {{0, 0}, {0, 0}};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_set_key_dup, key)},
+        {ARG_BUF, VALUE_S, OFFSET(cursor_set_key_dup, value)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    self->key = arg.key;
+    self->val = arg.value;
+    return _cursor_get(self, MDB_GET_BOTH);
+}
+
+/**
+ * Cursor.set_range(key) -> bool
  */
 static PyObject *
 cursor_set_range(CursorObject *self, PyObject *arg)
@@ -2158,6 +2254,30 @@ cursor_set_range(CursorObject *self, PyObject *arg)
         return _cursor_get(self, MDB_SET_RANGE);
     }
     return _cursor_get(self, MDB_FIRST);
+}
+
+/**
+ * Cursor.set_range_dup(key, value) -> bool
+ */
+static PyObject *
+cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_set_range_dup {
+        MDB_val key;
+        MDB_val value;
+    } arg = {{0, 0}, {0, 0}};
+
+    static const struct argspec argspec[] = {
+        {ARG_BUF, KEY_S, OFFSET(cursor_set_range_dup, key)},
+        {ARG_BUF, VALUE_S, OFFSET(cursor_set_range_dup, value)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+    self->key = arg.key;
+    self->val = arg.value;
+    return _cursor_get(self, MDB_GET_BOTH);
 }
 
 /**
@@ -2193,12 +2313,13 @@ new_iterator(CursorObject *cursor, IterValFunc val_func, MDB_cursor_op op)
 
 static PyObject *
 iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
-               enum MDB_cursor_op pos_op, enum MDB_cursor_op op)
+               signed int pos_op, enum MDB_cursor_op op,
+               int keys_default, int values_default)
 {
     struct iter_from_args {
         int keys;
         int values;
-    } arg = {1, 1};
+    } arg = {keys_default, values_default};
 
     static const struct argspec argspec[] = {
         {ARG_BOOL, KEYS_S, OFFSET(iter_from_args, keys)},
@@ -2209,8 +2330,8 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
         return NULL;
     }
 
-    if(! self->positioned) {
-        if(_cursor_get_c(self, pos_op)) {
+    if(pos_op != -1 && !self->positioned) {
+        if(_cursor_get_c(self, (enum MDB_cursor_op) pos_op)) {
             return NULL;
         }
     }
@@ -2229,7 +2350,7 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
 static PyObject *
 cursor_iter(CursorObject *self)
 {
-    return iter_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT);
+    return iter_from_args(self, NULL, NULL, MDB_FIRST, MDB_NEXT, 1, 1);
 }
 
 /**
@@ -2238,7 +2359,25 @@ cursor_iter(CursorObject *self)
 static PyObject *
 cursor_iternext(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
-    return iter_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT);
+    return iter_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT, 1, 1);
+}
+
+/**
+ * Cursor.iternext_dup() -> Iterator
+ */
+static PyObject *
+cursor_iternext_dup(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iter_from_args(self, args, kwargs, -1, MDB_NEXT_DUP, 0, 1);
+}
+
+/**
+ * Cursor.iternext_nodup() -> Iterator
+ */
+static PyObject *
+cursor_iternext_nodup(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iter_from_args(self, args, kwargs, MDB_FIRST, MDB_NEXT_NODUP, 1, 0);
 }
 
 /**
@@ -2247,7 +2386,25 @@ cursor_iternext(CursorObject *self, PyObject *args, PyObject *kwargs)
 static PyObject *
 cursor_iterprev(CursorObject *self, PyObject *args, PyObject *kwargs)
 {
-    return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV);
+    return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV, 1, 1);
+}
+
+/**
+ * Cursor.iterprev_dup() -> Iterator
+ */
+static PyObject *
+cursor_iterprev_dup(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iter_from_args(self, args, kwargs, -1, MDB_PREV_DUP, 0, 1);
+}
+
+/**
+ * Cursor.iterprev_nodup() -> Iterator
+ */
+static PyObject *
+cursor_iterprev_nodup(CursorObject *self, PyObject *args, PyObject *kwargs)
+{
+    return iter_from_args(self, args, kwargs, MDB_LAST, MDB_PREV_NODUP, 1, 0);
 }
 
 /**
@@ -2300,19 +2457,31 @@ static struct PyMethodDef cursor_methods[] = {
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
     {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
     {"first", (PyCFunction)cursor_first, METH_NOARGS},
+    {"first_dup", (PyCFunction)cursor_first_dup, METH_NOARGS},
     {"get", (PyCFunction)cursor_get, METH_VARARGS|METH_KEYWORDS},
     {"item", (PyCFunction)cursor_item, METH_NOARGS},
     {"iternext", (PyCFunction)cursor_iternext, METH_VARARGS|METH_KEYWORDS},
+    {"iternext_dup", (PyCFunction)cursor_iternext_dup, METH_VARARGS|METH_KEYWORDS},
+    {"iternext_nodup", (PyCFunction)cursor_iternext_nodup, METH_VARARGS|METH_KEYWORDS},
     {"iterprev", (PyCFunction)cursor_iterprev, METH_VARARGS|METH_KEYWORDS},
+    {"iterprev_dup", (PyCFunction)cursor_iterprev_dup, METH_VARARGS|METH_KEYWORDS},
+    {"iterprev_nodup", (PyCFunction)cursor_iterprev_nodup, METH_VARARGS|METH_KEYWORDS},
     {"key", (PyCFunction)cursor_key, METH_NOARGS},
     {"last", (PyCFunction)cursor_last, METH_NOARGS},
+    {"last_dup", (PyCFunction)cursor_last_dup, METH_NOARGS},
     {"next", (PyCFunction)cursor_next, METH_NOARGS},
+    {"next_dup", (PyCFunction)cursor_next_dup, METH_NOARGS},
+    {"next_nodup", (PyCFunction)cursor_next_nodup, METH_NOARGS},
     {"prev", (PyCFunction)cursor_prev, METH_NOARGS},
+    {"prev_dup", (PyCFunction)cursor_prev_dup, METH_NOARGS},
+    {"prev_nodup", (PyCFunction)cursor_prev_nodup, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)cursor_replace, METH_VARARGS|METH_KEYWORDS},
     {"pop", (PyCFunction)cursor_pop, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
+    {"set_key_dup", (PyCFunction)cursor_set_key_dup, METH_VARARGS|METH_KEYWORDS},
     {"set_range", (PyCFunction)cursor_set_range, METH_O},
+    {"set_range_dup", (PyCFunction)cursor_set_range_dup, METH_VARARGS|METH_KEYWORDS},
     {"value", (PyCFunction)cursor_value, METH_NOARGS},
     {"_iter_from", (PyCFunction)cursor_iter_from, METH_VARARGS},
     {NULL, NULL}

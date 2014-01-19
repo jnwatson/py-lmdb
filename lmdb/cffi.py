@@ -1602,7 +1602,7 @@ class Cursor(object):
         with `MDB_LAST_DUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_FIRST_DUP)
+        return self._cursor_get(MDB_LAST_DUP)
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
@@ -1702,8 +1702,8 @@ class Cursor(object):
         """
         return self._cursor_get_kv(MDB_SET_KEY, key, b'')
 
-    def set_key_dup(self, key, data):
-        """Seek exactly to `(key, data)`, returning ``True`` on success or
+    def set_key_dup(self, key, value):
+        """Seek exactly to `(key, value)`, returning ``True`` on success or
         ``False`` if the exact key and value was not found. It is an error
         to :py:meth:`set_key` the empty bytestring.
 
@@ -1714,7 +1714,7 @@ class Cursor(object):
         with `MDB_GET_BOTH
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_GET_BOTH, key, data)
+        return self._cursor_get_kv(MDB_GET_BOTH, key, value)
 
     def get(self, key, default=None):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
@@ -1742,9 +1742,9 @@ class Cursor(object):
             return self.first()
         return self._cursor_get_kv(MDB_SET_RANGE, key, b'')
 
-    def set_range_dup(self, key, data):
-        """Seek to the first key/data pair greater than or equal to `key`,
-        returning ``True`` on success, or ``False`` to indicate `(key, data)`
+    def set_range_dup(self, key, value):
+        """Seek to the first key/value pair greater than or equal to `key`,
+        returning ``True`` on success, or ``False`` to indicate `(key, value)`
         was past end of database.
 
         Only meaningful for databases opened with `dupsort=True`.
@@ -1754,7 +1754,7 @@ class Cursor(object):
         with `MDB_GET_BOTH_RANGE
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_GET_BOTH_RANGE, key, data)
+        return self._cursor_get_kv(MDB_GET_BOTH_RANGE, key, value)
 
     def delete(self, dupdata=False):
         """Delete the current element and move to the next, returning ``True``
