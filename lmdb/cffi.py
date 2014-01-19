@@ -1718,7 +1718,7 @@ class Cursor(object):
 
     def get(self, key, default=None):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
-        returned if `key` was found, otherwise `default`.
+        returned when `key` is found, otherwise `default`.
         """
         if self._cursor_get_kv(MDB_SET_KEY, key, b''):
             return self.value()
@@ -1812,7 +1812,11 @@ class Cursor(object):
                 overwrite any existing matching key.
 
             `overwrite`:
-                If ``False``, do not overwrite any existing matching key.
+                If ``False``, do not overwrite the value for the key if it
+                exists, just return ``False``. For databases opened with
+                `dupsort=True`, ``False`` will always be returned if a
+                duplicate key/value pair is inserted, regardless of the setting
+                for `overwrite`.
 
             `append`:
                 If ``True``, append the pair to the end of the database without
