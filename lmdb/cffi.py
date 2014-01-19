@@ -1319,11 +1319,34 @@ class Cursor(object):
             ...     cursor = txn.cursor()           # Cursor on main database.
             ...     cursor2 = txn.cursor(child_db)  # Cursor on child database.
 
-    Cursors start in an unpositioned state: if :py:meth:`iternext` or
+    Cursors start in an unpositioned state. If :py:meth:`iternext` or
     :py:meth:`iterprev` are used in this state, iteration proceeds from the
     start or end respectively. Iterators directly position using the cursor,
     meaning strange behavior results when multiple iterators exist on the same
     cursor.
+
+    .. note::
+
+        From the perspective of the Python binding, cursors return to an
+        'unpositioned' state once any scanning or seeking method (e.g.
+        :py:meth:`next`, :py:meth:`prev_nodup`, :py:meth:`set_range`) returns
+        ``False`` or raises an exception. This is primarily to ensure safe,
+        consistent semantics in the face of any error condition.
+
+        When the Cursor returns to an unpositioned state, its :py:meth:`key`
+        and :py:meth:`value` return empty strings to indicate there is no
+        active position, although internally the LMDB cursor may still have a
+        valid position.
+
+        This may lead to slightly surprising behaviour when iterating the
+        values for a `dupsort=True` database's keys, since methods such as
+        :py:meth:`iternext_dup` will cause Cursor to appear unpositioned,
+        despite it returning ``False`` only to indicate there are no more
+        values for the current key. In that case, simply calling
+        :py:meth:`next` would cause iteration to resume at the next available
+        key.
+
+        This behaviour may change in future.
 
     Iterator methods such as :py:meth:`iternext` and :py:meth:`iterprev` accept
     `keys` and `values` arguments. If both are ``True``, then the value of
@@ -1356,7 +1379,6 @@ class Cursor(object):
             ...     assert cursor.set_key(path[-1]), \\
             ...         'Tree is broken! Path: %s' % (path,)
             ...     path.append(cursor.value())
-
     """
     def __init__(self, db, txn):
         _depend(db, self)
