@@ -1,5 +1,13 @@
 
-2014-01-30 v0.78
+2014-02-18 v0.79
+
+* Implement remaining Cursor methods necessary for working with MDB_DUPSORT
+  databases: next_dup(), next_nodup(), prev_dup(), prev_nodup(), first_dup(),
+  last_dup(), set_key_dup(), set_range_dup(), iternext_dup(),
+  iternext_nodup(), iterprev_dup(), iterprev_nodup().
+
+
+2014-01-18 v0.78
 
 * Patch from bra-fsn to fix LMDB_LIBDIR.
 
