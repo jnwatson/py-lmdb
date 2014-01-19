@@ -1822,6 +1822,9 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 static PyObject *
 _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 {
+    if(! self->valid) {
+        return err_invalid();
+    }
     if(_cursor_get_c(self, op)) {
         return NULL;
     }
@@ -1861,9 +1864,6 @@ cursor_delete(CursorObject *self)
 static PyObject *
 cursor_first(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_FIRST);
 }
 
@@ -1873,9 +1873,6 @@ cursor_first(CursorObject *self)
 static PyObject *
 cursor_first_dup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_FIRST_DUP);
 }
 
@@ -1974,9 +1971,6 @@ cursor_key(CursorObject *self)
 static PyObject *
 cursor_last(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_LAST);
 }
 
@@ -1986,9 +1980,6 @@ cursor_last(CursorObject *self)
 static PyObject *
 cursor_last_dup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_LAST_DUP);
 }
 
@@ -1998,9 +1989,6 @@ cursor_last_dup(CursorObject *self)
 static PyObject *
 cursor_next(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_NEXT);
 }
 
@@ -2010,9 +1998,6 @@ cursor_next(CursorObject *self)
 static PyObject *
 cursor_next_dup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_NEXT_DUP);
 }
 
@@ -2022,9 +2007,6 @@ cursor_next_dup(CursorObject *self)
 static PyObject *
 cursor_next_nodup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_NEXT_NODUP);
 }
 
@@ -2034,9 +2016,6 @@ cursor_next_nodup(CursorObject *self)
 static PyObject *
 cursor_prev(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_PREV);
 }
 
@@ -2046,9 +2025,6 @@ cursor_prev(CursorObject *self)
 static PyObject *
 cursor_prev_dup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_PREV_DUP);
 }
 
@@ -2058,9 +2034,6 @@ cursor_prev_dup(CursorObject *self)
 static PyObject *
 cursor_prev_nodup(CursorObject *self)
 {
-    if(! self->valid) {
-        return err_invalid();
-    }
     return _cursor_get(self, MDB_PREV_NODUP);
 }
 
