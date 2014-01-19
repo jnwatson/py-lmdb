@@ -81,7 +81,7 @@ def x():
         for word in words:
             txn.get(word)
         t1 = now()
-        print 'rand lookup+verify all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
+        print 'rand lookup all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
     t0 = now()
     for word in words:
@@ -103,6 +103,13 @@ def x():
             txn.get(word)
         t1 = now()
         print 'rand lookup all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
+
+    with env.begin(buffers=True) as txn:
+        t0 = now()
+        for word in words:
+            hash(txn.get(word))
+        t1 = now()
+        print 'rand lookup+hash all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
 
     with env.begin(buffers=True) as txn:
         cursget = txn.cursor().get
