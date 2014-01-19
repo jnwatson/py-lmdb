@@ -1451,7 +1451,7 @@ class Cursor(object):
         return self._iter(MDB_NEXT, keys, values)
     __iter__ = iternext
 
-    def iternext_dup(self, keys=True, values=True):
+    def iternext_dup(self, keys=False, values=True):
         """Return a forward iterator that yields the current value
         ("duplicate") of the current key before calling :py:meth:`next_dup`,
         repeating until the last value of the current key is reached.
@@ -1463,7 +1463,7 @@ class Cursor(object):
             if not cursor.set_key("foo"):
                 print("No values found for 'foo'")
             else:
-                for idx, data in cursor.iternext_dup():
+                for idx, data in enumerate(cursor.iternext_dup()):
                     print("%d'th value for 'foo': %s" % (idx, data))
         """
         return self._iter(MDB_NEXT_DUP, keys, values)
@@ -1504,7 +1504,7 @@ class Cursor(object):
             self.last()
         return self._iter(MDB_PREV, keys, values)
 
-    def iterprev_dup(self, keys=True, values=True):
+    def iterprev_dup(self, keys=False, values=True):
         """Return a reverse iterator that yields the current value
         ("duplicate") of the current key before calling :py:meth:`prev_dup`,
         repeating until the first value of the current key is reached.
@@ -1700,7 +1700,7 @@ class Cursor(object):
         with `MDB_SET_KEY
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_SET_KEY, key, "")
+        return self._cursor_get_kv(MDB_SET_KEY, key, b'')
 
     def set_key_dup(self, key, data):
         """Seek exactly to `(key, data)`, returning ``True`` on success or
@@ -1720,7 +1720,7 @@ class Cursor(object):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
         returned if `key` was found, otherwise `default`.
         """
-        if self._cursor_get_kv(MDB_SET_KEY, key, ""):
+        if self._cursor_get_kv(MDB_SET_KEY, key, b''):
             return self.value()
         return default
 
@@ -1740,7 +1740,7 @@ class Cursor(object):
         """
         if not key:
             return self.first()
-        return self._cursor_get_kv(MDB_SET_RANGE, key, "")
+        return self._cursor_get_kv(MDB_SET_RANGE, key, b'')
 
     def set_range_dup(self, key, data):
         """Seek to the first key/data pair greater than or equal to `key`,
@@ -1877,7 +1877,7 @@ class Cursor(object):
             `key`:
                 Bytestring key to delete.
         """
-        if self._cursor_get_kv(MDB_SET_KEY, key, ""):
+        if self._cursor_get_kv(MDB_SET_KEY, key, b''):
             old = _mvstr(self._val)
             rc = mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
