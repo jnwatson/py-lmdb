@@ -2076,7 +2076,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         int dupdata;
         int overwrite;
         int append;
-    } arg = {{0, 0}, {0, 0}, 0, 1, 0};
+    } arg = {{0, 0}, {0, 0}, 1, 1, 0};
 
     static const struct argspec argspec[] = {
         {ARG_BUF, KEY_S, OFFSET(cursor_put, key)},
@@ -2828,7 +2828,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         int overwrite;
         int append;
         DbObject *db;
-    } arg = {{0, 0}, {0, 0}, 0, 1, 0, self->db};
+    } arg = {{0, 0}, {0, 0}, 1, 1, 0, self->db};
 
     static const struct argspec argspec[] = {
         {ARG_BUF, KEY_S, OFFSET(trans_put, key)},

@@ -1199,7 +1199,7 @@ class Transaction(object):
             raise _error("mdb_cursor_get", rc)
         return self._to_py(self._val)
 
-    def put(self, key, value, dupdata=False, overwrite=True, append=False,
+    def put(self, key, value, dupdata=True, overwrite=True, append=False,
             db=None):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `overwrite=False`.
@@ -1814,7 +1814,7 @@ class Cursor(object):
             raise _error("mdb_cursor_count", rc)
         return countp[0]
 
-    def put(self, key, val, dupdata=False, overwrite=True, append=False):
+    def put(self, key, val, dupdata=True, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `overwrite=False`. On
         success, the cursor is positioned on the key.

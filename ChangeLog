@@ -6,6 +6,10 @@
   last_dup(), set_key_dup(), set_range_dup(), iternext_dup(),
   iternext_nodup(), iterprev_dup(), iterprev_nodup().
 
+* The default for Transaction.put(dupdata=...) and Cursor.put(dupdata=...) has
+  changed from False to True. The previous default did not reflect LMDB's
+  normal mode of operation.
+
 
 2014-01-18 v0.78
 
