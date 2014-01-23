@@ -30,21 +30,11 @@ import testlib
 from testlib import B
 from testlib import BT
 from testlib import OCT
+from testlib import INT_TYPES
+from testlib import UnicodeType
 
 import lmdb
 
-try:
-    INT_TYPES = (int, long)
-except NameError:
-    INT_TYPES = (int,)
-
-# Handle moronic Python >=3.0 <3.3.
-UnicodeType = type('')
-try:
-    if UnicodeType is bytes:
-        UnicodeType = unicode
-except NameError: # Python 2.5 no bytes.
-    UnicodeType = unicode
 
 NO_READERS = UnicodeType('(no active readers)\n')
 
@@ -405,6 +395,12 @@ class OtherMethodsTest(unittest.TestCase):
 
 
 class BeginTest(unittest.TestCase):
+    def test_begin_closed(self):
+        _, env = testlib.temp_env()
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.begin())
+
     def test_begin_readonly(self):
         _, env = testlib.temp_env()
         txn = env.begin()
@@ -412,10 +408,6 @@ class BeginTest(unittest.TestCase):
         self.assertRaises(lmdb.ReadonlyError,
             lambda: txn.put(B('a'), B('')))
         txn.abort()
-
-        env.close()
-        self.assertRaises(Exception,
-            lambda: env.begin())
 
     def test_begin_write(self):
         _, env = testlib.temp_env()

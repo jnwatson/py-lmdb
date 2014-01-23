@@ -66,6 +66,20 @@ def path_mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
+# Handle moronic Python >=3.0 <3.3.
+UnicodeType = type('')
+try:
+    if UnicodeType is bytes:
+        UnicodeType = unicode
+except NameError: # Python 2.5 no bytes.
+    UnicodeType = unicode
+
+
+try:
+    INT_TYPES = (int, long)
+except NameError:
+    INT_TYPES = (int,)
+
 # B(ascii 'string') -> bytes
 try:
     bytes('')     # Python>=2.6, alias for str().
