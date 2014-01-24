@@ -310,14 +310,6 @@ if not lmdb._reading_docs():
         libraries=_config_vars['libraries'],
         library_dirs=_config_vars['extra_library_dirs'])
 
-    globals().update((k, getattr(_lib, k))
-                     for k in dir(_lib) if k[:4] in ('mdb_', 'MDB_', 'pymd'))
-    EACCES = _lib.EACCES
-    EAGAIN = _lib.EAGAIN
-    EINVAL = _lib.EINVAL
-    ENOMEM = _lib.ENOMEM
-    ENOSPC = _lib.ENOSPC
-
     @_ffi.callback("int(char *, void *)")
     def _msg_func(s, _):
         """mdb_msg_func() callback. Appends `s` to _callbacks.msg_func list.
@@ -331,7 +323,7 @@ class Error(Exception):
     def __init__(self, what, code=0):
         self.what = what
         self.code = code
-        self.reason = _ffi.string(mdb_strerror(code))
+        self.reason = _ffi.string(_lib.mdb_strerror(code))
         msg = what
         if code:
             msg = '%s: %s' % (what, self.reason)
@@ -445,7 +437,7 @@ if not lmdb._reading_docs():
     _error_map = {}
     for obj in list(globals().values()):
         if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
-            _error_map[globals()[obj.MDB_NAME]] = obj
+            _error_map[getattr(_lib, obj.MDB_NAME)] = obj
     del obj
 
 def _error(what, rc):
@@ -521,7 +513,9 @@ def version():
     library version that the binding is linked against. The version of the
     binding itself is available from ``lmdb.__version__``.
     """
-    return (MDB_VERSION_MAJOR, MDB_VERSION_MINOR, MDB_VERSION_PATCH)
+    return (_lib.MDB_VERSION_MAJOR, \
+            _lib.MDB_VERSION_MINOR, \
+            _lib.MDB_VERSION_PATCH)
 
 
 class Environment(object):
@@ -644,50 +638,50 @@ class Environment(object):
             max_spare_cursors=32, max_spare_iters=32):
         envpp = _ffi.new('MDB_env **')
 
-        rc = mdb_env_create(envpp)
+        rc = _lib.mdb_env_create(envpp)
         if rc:
             raise _error("mdb_env_create", rc)
         self._env = envpp[0]
         self._deps = {}
 
-        rc = mdb_env_set_mapsize(self._env, map_size)
+        rc = _lib.mdb_env_set_mapsize(self._env, map_size)
         if rc:
             raise _error("mdb_env_set_mapsize", rc)
 
-        rc = mdb_env_set_maxreaders(self._env, max_readers)
+        rc = _lib.mdb_env_set_maxreaders(self._env, max_readers)
         if rc:
             raise _error("mdb_env_set_maxreaders", rc)
 
-        rc = mdb_env_set_maxdbs(self._env, max_dbs)
+        rc = _lib.mdb_env_set_maxdbs(self._env, max_dbs)
         if rc:
             raise _error("mdb_env_set_maxdbs", rc)
 
         if create and subdir and not (os.path.exists(path) or readonly):
             os.mkdir(path, mode)
 
-        flags = MDB_NOTLS
+        flags = _lib.MDB_NOTLS
         if not subdir:
-            flags |= MDB_NOSUBDIR
+            flags |= _lib.MDB_NOSUBDIR
         if readonly:
-            flags |= MDB_RDONLY
+            flags |= _lib.MDB_RDONLY
         self.readonly = readonly
         if not metasync:
-            flags |= MDB_NOMETASYNC
+            flags |= _lib.MDB_NOMETASYNC
         if not sync:
-            flags |= MDB_NOSYNC
+            flags |= _lib.MDB_NOSYNC
         if map_async:
-            flags |= MDB_MAPASYNC
+            flags |= _lib.MDB_MAPASYNC
         if not readahead:
-            flags |= MDB_NORDAHEAD
+            flags |= _lib.MDB_NORDAHEAD
         if writemap:
-            flags |= MDB_WRITEMAP
+            flags |= _lib.MDB_WRITEMAP
         if not meminit:
-            flags |= MDB_NOMEMINIT
+            flags |= _lib.MDB_NOMEMINIT
 
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
 
-        rc = mdb_env_open(self._env, path, flags, mode & ~0o111)
+        rc = _lib.mdb_env_open(self._env, path, flags, mode & ~0o111)
         if rc:
             raise _error(path, rc)
         with self.begin(db=object()) as txn:
@@ -703,7 +697,7 @@ class Environment(object):
         """
         if self._env:
             _kill_dependents(self)
-            mdb_env_close(self._env)
+            _lib.mdb_env_close(self._env)
             self._env = _invalid
 
     def __del__(self):
@@ -717,7 +711,7 @@ class Environment(object):
         <http://symas.com/mdb/doc/group__mdb.html#gac699fdd8c4f8013577cb933fb6a757fe>`_
         """
         path = _ffi.new('char **')
-        rc = mdb_env_get_path(self._env, path)
+        rc = _lib.mdb_env_get_path(self._env, path)
         if rc:
             raise _error("mdb_env_get_path", rc)
         return _ffi.string(path[0]).decode(sys.getfilesystemencoding())
@@ -729,7 +723,7 @@ class Environment(object):
         Equivalent to `mdb_env_copy()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
-        rc = mdb_env_copy(self._env, path.encode(sys.getfilesystemencoding()))
+        rc = _lib.mdb_env_copy(self._env, path.encode(sys.getfilesystemencoding()))
         if rc:
             raise _error("mdb_env_copy", rc)
 
@@ -740,7 +734,7 @@ class Environment(object):
         Equivalent to `mdb_env_copyfd()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
-        rc = mdb_env_copyfd(self._env, fd)
+        rc = _lib.mdb_env_copyfd(self._env, fd)
         if rc:
             raise _error("mdb_env_copyfd", rc)
 
@@ -760,7 +754,7 @@ class Environment(object):
             environment was opened with `sync=False` the flushes will be
             omitted, and with `map_async=True` they will be asynchronous.
         """
-        rc = mdb_env_sync(self._env, force)
+        rc = _lib.mdb_env_sync(self._env, force)
         if rc:
             raise _error("mdb_env_sync", rc)
 
@@ -799,7 +793,7 @@ class Environment(object):
         <http://symas.com/mdb/doc/group__mdb.html#gaf881dca452050efbd434cd16e4bae255>`_
         """
         st = _ffi.new('MDB_stat *')
-        rc = mdb_env_stat(self._env, st)
+        rc = _lib.mdb_env_stat(self._env, st)
         if rc:
             raise _error("mdb_env_stat", rc)
         return self._convert_stat(st)
@@ -825,7 +819,7 @@ class Environment(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
         """
         info = _ffi.new('MDB_envinfo *')
-        rc = mdb_env_info(self._env, info)
+        rc = _lib.mdb_env_info(self._env, info)
         if rc:
             raise _error("mdb_env_info", rc)
         return {
@@ -841,25 +835,25 @@ class Environment(object):
         """Return a dict describing Environment constructor flags used to
         instantiate this environment."""
         flags_ = _ffi.new('unsigned int[]', 1)
-        rc = mdb_env_get_flags(self._env, flags_)
+        rc = _lib.mdb_env_get_flags(self._env, flags_)
         if rc:
             raise _error("mdb_env_get_flags", rc)
         flags = flags_[0]
         return {
-            'subdir': not (flags & MDB_NOSUBDIR),
-            'readonly': bool(flags & MDB_RDONLY),
-            'metasync': not (flags & MDB_NOMETASYNC),
-            'sync': not (flags & MDB_NOSYNC),
-            'map_async': bool(flags & MDB_MAPASYNC),
-            'readahead': not (flags & MDB_NORDAHEAD),
-            'writemap': bool(flags & MDB_WRITEMAP),
-            'meminit': not (flags & MDB_NOMEMINIT)
+            'subdir': not (flags & _lib.MDB_NOSUBDIR),
+            'readonly': bool(flags & _lib.MDB_RDONLY),
+            'metasync': not (flags & _lib.MDB_NOMETASYNC),
+            'sync': not (flags & _lib.MDB_NOSYNC),
+            'map_async': bool(flags & _lib.MDB_MAPASYNC),
+            'readahead': not (flags & _lib.MDB_NORDAHEAD),
+            'writemap': bool(flags & _lib.MDB_WRITEMAP),
+            'meminit': not (flags & _lib.MDB_NOMEMINIT)
         }
 
     def max_key_size(self):
         """Return the maximum size in bytes of a record's key part. This
         matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
-        return mdb_env_get_maxkeysize(self._env)
+        return _lib.mdb_env_get_maxkeysize(self._env)
 
     def max_readers(self):
         """Return the maximum number of readers specified during open of the
@@ -867,7 +861,7 @@ class Environment(object):
         specified to the constructor if this process was the first to open the
         environment."""
         readers_ = _ffi.new('unsigned int[]', 1)
-        rc = mdb_env_get_maxreaders(self._env, readers_)
+        rc = _lib.mdb_env_get_maxreaders(self._env, readers_)
         if rc:
             raise _error("mdb_env_get_maxreaders", rc)
         return readers_[0]
@@ -877,7 +871,7 @@ class Environment(object):
         the reader lock table."""
         _callbacks.msg_func = []
         try:
-            rc = mdb_reader_list(self._env, _msg_func, _ffi.NULL)
+            rc = _lib.mdb_reader_list(self._env, _msg_func, _ffi.NULL)
             if rc:
                 raise _error("mdb_reader_list", rc)
             return UnicodeType().join(_callbacks.msg_func)
@@ -889,7 +883,7 @@ class Environment(object):
         crashed process. Returns the number of stale entries that were cleared.
         """
         reaped = _ffi.new('int[]', 1)
-        rc = mdb_reader_check(self._env, reaped)
+        rc = _lib.mdb_reader_check(self._env, reaped)
         if rc:
             raise _error('mdb_reader_check', rc)
         return reaped[0]
@@ -992,14 +986,14 @@ class _Database(object):
 
         flags = 0
         if reverse_key:
-            flags |= MDB_REVERSEKEY
+            flags |= _lib.MDB_REVERSEKEY
         if dupsort:
-            flags |= MDB_DUPSORT
+            flags |= _lib.MDB_DUPSORT
         if create:
-            flags |= MDB_CREATE
+            flags |= _lib.MDB_CREATE
         dbipp = _ffi.new('MDB_dbi *')
         self._dbi = None
-        rc = mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
+        rc = _lib.mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
         if rc:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
@@ -1008,13 +1002,13 @@ class _Database(object):
         """Return the database's associated flags as a dict of _Database
         constructor kwargs."""
         flags_ = _ffi.new('unsigned int[]', 1)
-        rc = mdb_dbi_flags(txn._txn, self._dbi, flags_)
+        rc = _lib.mdb_dbi_flags(txn._txn, self._dbi, flags_)
         if rc:
             raise _error("mdb_dbi_flags", rc)
         flags = flags_[0]
         return {
-            'reverse_key': bool(flags & MDB_REVERSEKEY),
-            'dupsort': bool(flags & MDB_DUPSORT),
+            'reverse_key': bool(flags & _lib.MDB_REVERSEKEY),
+            'dupsort': bool(flags & _lib.MDB_DUPSORT),
         }
 
     def _invalidate(self):
@@ -1092,11 +1086,11 @@ class Transaction(object):
         self._deps = {}
         if write and env.readonly:
             msg = 'Cannot start write transaction with read-only env'
-            raise _error(msg, EACCES)
+            raise _error(msg, _lib.EACCES)
         if write:
             flags = 0
         else:
-            flags = MDB_RDONLY
+            flags = _lib.MDB_RDONLY
         txnpp = _ffi.new('MDB_txn **')
         if parent:
             self._parent = parent
@@ -1104,7 +1098,7 @@ class Transaction(object):
             _depend(parent, self)
         else:
             parent_txn = _ffi.NULL
-        rc = mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+        rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
         if rc:
             raise _error("mdb_txn_begin", rc)
         self._txn = txnpp[0]
@@ -1136,7 +1130,7 @@ class Transaction(object):
         DBI. `db` must be a database handle returned by :py:meth:`open_db`.
         """
         st = _ffi.new('MDB_stat *')
-        rc = mdb_stat(self._txn, db._dbi, st)
+        rc = _lib.mdb_stat(self._txn, db._dbi, st)
         if rc:
             raise _error('mdb_stat', rc)
         return self.env._convert_stat(st)
@@ -1150,7 +1144,7 @@ class Transaction(object):
         <http://symas.com/mdb/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
         """
         _kill_dependents(db)
-        rc = mdb_drop(self._txn, db._dbi, delete)
+        rc = _lib.mdb_drop(self._txn, db._dbi, delete)
         self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
@@ -1162,7 +1156,7 @@ class Transaction(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
         """
         _kill_dependents(self)
-        rc = mdb_txn_commit(self._txn)
+        rc = _lib.mdb_txn_commit(self._txn)
         self._txn = _invalid
         if rc:
             raise _error("mdb_txn_commit", rc)
@@ -1178,7 +1172,7 @@ class Transaction(object):
         """
         if self._txn:
             _kill_dependents(self)
-            rc = mdb_txn_abort(self._txn)
+            rc = _lib.mdb_txn_abort(self._txn)
             self._txn = _invalid
             if rc:
                 raise _error("mdb_txn_abort", rc)
@@ -1191,10 +1185,10 @@ class Transaction(object):
         Equivalent to `mdb_get()
         <http://symas.com/mdb/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
         """
-        rc = pymdb_get(self._txn, (db or self._db)._dbi,
-                       key, len(key), self._val)
+        rc = _lib.pymdb_get(self._txn, (db or self._db)._dbi,
+                            key, len(key), self._val)
         if rc:
-            if rc == MDB_NOTFOUND:
+            if rc == _lib.MDB_NOTFOUND:
                 return default
             raise _error("mdb_cursor_get", rc)
         return self._to_py(self._val)
@@ -1232,17 +1226,17 @@ class Transaction(object):
         """
         flags = 0
         if not dupdata:
-            flags |= MDB_NODUPDATA
+            flags |= _lib.MDB_NODUPDATA
         if not overwrite:
-            flags |= MDB_NOOVERWRITE
+            flags |= _lib.MDB_NOOVERWRITE
         if append:
-            flags |= MDB_APPEND
+            flags |= _lib.MDB_APPEND
 
-        rc = pymdb_put(self._txn, (db or self._db)._dbi,
-                       key, len(key), value, len(value), flags)
+        rc = _lib.pymdb_put(self._txn, (db or self._db)._dbi,
+                            key, len(key), value, len(value), flags)
         self._mutations += 1
         if rc:
-            if rc == MDB_KEYEXIST:
+            if rc == _lib.MDB_KEYEXIST:
                 return False
             raise _error("mdb_put", rc)
         return True
@@ -1281,11 +1275,11 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
-        rc = pymdb_del(self._txn, (db or self._db)._dbi,
-                       key, len(key), value, len(value))
+        rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
+                            key, len(key), value, len(value))
         self._mutations += 1
         if rc:
-            if rc == MDB_NOTFOUND:
+            if rc == _lib.MDB_NOTFOUND:
                 return False
             raise _error("mdb_del", rc)
         return True
@@ -1393,7 +1387,7 @@ class Cursor(object):
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
         self._cur = None
-        rc = mdb_cursor_open(self._txn, self._dbi, curpp)
+        rc = _lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
             raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
@@ -1403,14 +1397,14 @@ class Cursor(object):
 
     def _invalidate(self):
         if self._cur:
-            mdb_cursor_close(self._cur)
+            _lib.mdb_cursor_close(self._cur)
         self._cur = _invalid
         self._dbi = _invalid
         self._txn = _invalid
 
     def __del__(self):
         if self._cur:
-            mdb_cursor_close(self._cur)
+            _lib.mdb_cursor_close(self._cur)
         _undepend(self.db, self)
         _undepend(self.txn, self)
 
@@ -1418,21 +1412,21 @@ class Cursor(object):
         """Return the current key."""
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self.txn._mutations:
-            self._cursor_get(MDB_GET_CURRENT)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._key)
 
     def value(self):
         """Return the current value."""
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self.txn._mutations:
-            self._cursor_get(MDB_GET_CURRENT)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._val)
 
     def item(self):
         """Return the current `(key, value)` pair."""
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self.txn._mutations:
-            self._cursor_get(MDB_GET_CURRENT)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, op, keys, values):
@@ -1448,9 +1442,9 @@ class Cursor(object):
         val = self._val
         while self._valid:
             yield get()
-            rc = mdb_cursor_get(cur, key, val, op)
+            rc = _lib.mdb_cursor_get(cur, key, val, op)
             self._valid = not rc
-            if rc and rc != MDB_NOTFOUND:
+            if rc and rc != _lib.MDB_NOTFOUND:
                 raise _error("mdb_cursor_get", rc)
 
     def iternext(self, keys=True, values=True):
@@ -1470,7 +1464,7 @@ class Cursor(object):
         """
         if not self._valid:
             self.first()
-        return self._iter(MDB_NEXT, keys, values)
+        return self._iter(_lib.MDB_NEXT, keys, values)
     __iter__ = iternext
 
     def iternext_dup(self, keys=False, values=True):
@@ -1488,7 +1482,7 @@ class Cursor(object):
                 for idx, data in enumerate(cursor.iternext_dup()):
                     print("%d'th value for 'foo': %s" % (idx, data))
         """
-        return self._iter(MDB_NEXT_DUP, keys, values)
+        return self._iter(_lib.MDB_NEXT_DUP, keys, values)
 
     def iternext_nodup(self, keys=True, values=False):
         """Return a forward iterator that yields the current value
@@ -1507,7 +1501,7 @@ class Cursor(object):
         """
         if not self._valid:
             self.first()
-        return self._iter(MDB_NEXT_NODUP, keys, values)
+        return self._iter(_lib.MDB_NEXT_NODUP, keys, values)
 
     def iterprev(self, keys=True, values=True):
         """Return a reverse iterator that yields the current element before
@@ -1524,7 +1518,7 @@ class Cursor(object):
         """
         if not self._valid:
             self.last()
-        return self._iter(MDB_PREV, keys, values)
+        return self._iter(_lib.MDB_PREV, keys, values)
 
     def iterprev_dup(self, keys=False, values=True):
         """Return a reverse iterator that yields the current value
@@ -1533,7 +1527,7 @@ class Cursor(object):
 
         Only meaningful for databases opened with `dupsort=True`.
         """
-        return self._iter(MDB_PREV_DUP, keys, values)
+        return self._iter(_lib.MDB_PREV_DUP, keys, values)
 
     def iterprev_nodup(self, keys=True, values=False):
         """Return a reverse iterator that yields the current value
@@ -1547,28 +1541,28 @@ class Cursor(object):
         """
         if not self._valid:
             self.last()
-        return self._iter(MDB_PREV_NODUP, keys, values)
+        return self._iter(_lib.MDB_PREV_NODUP, keys, values)
 
     def _cursor_get(self, op):
-        rc = mdb_cursor_get(self._cur, self._key, self._val, op)
+        rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
-            if rc != MDB_NOTFOUND:
-                if not (rc == EINVAL and op == MDB_GET_CURRENT):
+            if rc != _lib.MDB_NOTFOUND:
+                if not (rc == _lib.EINVAL and op == _lib.MDB_GET_CURRENT):
                     raise _error("mdb_cursor_get", rc)
         return v
 
     def _cursor_get_kv(self, op, k, v):
-        rc = pymdb_cursor_get(self._cur, k, len(k), v, len(v),
-                              self._key, self._val, op)
+        rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
+                                   self._key, self._val, op)
         self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
-            if rc != MDB_NOTFOUND:
-                if not (rc == EINVAL and op == MDB_GET_CURRENT):
+            if rc != _lib.MDB_NOTFOUND:
+                if not (rc == _lib.EINVAL and op == _lib.MDB_GET_CURRENT):
                     raise _error("mdb_cursor_get", rc)
         return v
 
@@ -1584,7 +1578,7 @@ class Cursor(object):
         with `MDB_FIRST
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_FIRST)
+        return self._cursor_get(_lib.MDB_FIRST)
 
     def first_dup(self):
         """Move to the first value ("duplicate") for the current key, returning
@@ -1597,7 +1591,7 @@ class Cursor(object):
         with `MDB_FIRST_DUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_FIRST_DUP)
+        return self._cursor_get(_lib.MDB_FIRST_DUP)
 
     def last(self):
         """Move to the last key in the database, returning ``True`` on success
@@ -1611,7 +1605,7 @@ class Cursor(object):
         with `MDB_LAST
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_LAST)
+        return self._cursor_get(_lib.MDB_LAST)
 
     def last_dup(self):
         """Move to the last value ("duplicate") for the current key, returning
@@ -1624,7 +1618,7 @@ class Cursor(object):
         with `MDB_LAST_DUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_LAST_DUP)
+        return self._cursor_get(_lib.MDB_LAST_DUP)
 
     def prev(self):
         """Move to the previous element, returning ``True`` on success or
@@ -1639,7 +1633,7 @@ class Cursor(object):
         with `MDB_PREV
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_PREV)
+        return self._cursor_get(_lib.MDB_PREV)
 
     def prev_dup(self):
         """Move to the previous value ("duplicate") of the current key,
@@ -1653,7 +1647,7 @@ class Cursor(object):
         with `MDB_PREV_DUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_PREV_DUP)
+        return self._cursor_get(_lib.MDB_PREV_DUP)
 
     def prev_nodup(self):
         """Move to the last value ("duplicate") of the previous key, returning
@@ -1666,7 +1660,7 @@ class Cursor(object):
         with `MDB_PREV_NODUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_PREV_NODUP)
+        return self._cursor_get(_lib.MDB_PREV_NODUP)
 
     def next(self):
         """Move to the next element, returning ``True`` on success or ``False``
@@ -1681,7 +1675,7 @@ class Cursor(object):
         with `MDB_NEXT
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_NEXT)
+        return self._cursor_get(_lib.MDB_NEXT)
 
     def next_dup(self):
         """Move to the next value ("duplicate") of the current key, returning
@@ -1694,7 +1688,7 @@ class Cursor(object):
         with `MDB_NEXT_DUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_NEXT_DUP)
+        return self._cursor_get(_lib.MDB_NEXT_DUP)
 
     def next_nodup(self):
         """Move to the first value ("duplicate") of the next key, returning
@@ -1707,7 +1701,7 @@ class Cursor(object):
         with `MDB_NEXT_NODUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(MDB_PREV_NODUP)
+        return self._cursor_get(_lib.MDB_PREV_NODUP)
 
     def set_key(self, key):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
@@ -1722,7 +1716,7 @@ class Cursor(object):
         with `MDB_SET_KEY
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_SET_KEY, key, b'')
+        return self._cursor_get_kv(_lib.MDB_SET_KEY, key, b'')
 
     def set_key_dup(self, key, value):
         """Seek exactly to `(key, value)`, returning ``True`` on success or
@@ -1736,13 +1730,13 @@ class Cursor(object):
         with `MDB_GET_BOTH
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_GET_BOTH, key, value)
+        return self._cursor_get_kv(_lib.MDB_GET_BOTH, key, value)
 
     def get(self, key, default=None):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
         returned when `key` is found, otherwise `default`.
         """
-        if self._cursor_get_kv(MDB_SET_KEY, key, b''):
+        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, b''):
             return self.value()
         return default
 
@@ -1762,7 +1756,7 @@ class Cursor(object):
         """
         if not key:
             return self.first()
-        return self._cursor_get_kv(MDB_SET_RANGE, key, b'')
+        return self._cursor_get_kv(_lib.MDB_SET_RANGE, key, b'')
 
     def set_range_dup(self, key, value):
         """Seek to the first key/value pair greater than or equal to `key`,
@@ -1776,7 +1770,7 @@ class Cursor(object):
         with `MDB_GET_BOTH_RANGE
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(MDB_GET_BOTH_RANGE, key, value)
+        return self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
 
     def delete(self, dupdata=False):
         """Delete the current element and move to the next, returning ``True``
@@ -1791,12 +1785,12 @@ class Cursor(object):
         """
         v = self._valid
         if v:
-            flags = MDB_NODUPDATA if dupdata else 0
-            rc = mdb_cursor_del(self._cur, flags)
+            flags = _lib.MDB_NODUPDATA if dupdata else 0
+            rc = _lib.mdb_cursor_del(self._cur, flags)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
-            self._cursor_get(MDB_GET_CURRENT)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
             v = rc == 0
         return v
 
@@ -1809,7 +1803,7 @@ class Cursor(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
         """
         countp = _ffi.new('size_t *')
-        rc = mdb_cursor_count(self._cur, countp)
+        rc = _lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
@@ -1847,19 +1841,19 @@ class Cursor(object):
         """
         flags = 0
         if not dupdata:
-            flags |= MDB_NODUPDATA
+            flags |= _lib.MDB_NODUPDATA
         if not overwrite:
-            flags |= MDB_NOOVERWRITE
+            flags |= _lib.MDB_NOOVERWRITE
         if append:
-            flags |= MDB_APPEND
+            flags |= _lib.MDB_APPEND
 
-        rc = pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+        rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self.txn._mutations += 1
         if rc:
-            if rc == MDB_KEYEXIST:
+            if rc == _lib.MDB_KEYEXIST:
                 return False
             raise _error("mdb_cursor_put", rc)
-        self._cursor_get(MDB_GET_CURRENT)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
 
     def replace(self, key, val):
@@ -1875,22 +1869,22 @@ class Cursor(object):
             `value`:
                 Bytestring value to store.
         """
-        flags = MDB_NOOVERWRITE
+        flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
-        rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
         self.txn._mutations += 1
         if not rc:
             return
-        if rc != MDB_KEYEXIST:
+        if rc != _lib.MDB_KEYEXIST:
             raise _error("mdb_cursor_put", rc)
 
-        self._cursor_get(MDB_GET_CURRENT)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         old = _mvstr(self._val)
-        rc = pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
         self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
-        self._cursor_get(MDB_GET_CURRENT)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         return old
 
     def pop(self, key):
@@ -1903,13 +1897,13 @@ class Cursor(object):
             `key`:
                 Bytestring key to delete.
         """
-        if self._cursor_get_kv(MDB_SET_KEY, key, b''):
+        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, b''):
             old = _mvstr(self._val)
-            rc = mdb_cursor_del(self._cur, 0)
+            rc = _lib.mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
-            self._cursor_get(MDB_GET_CURRENT)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
             return old
 
     def _iter_from(self, k, reverse):
