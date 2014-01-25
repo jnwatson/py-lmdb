@@ -1,25 +1,5 @@
-language: python
-python: 2.7
-env:
-    - ENV=pypy_cffi
-    - ENV=py26_cffi
-    - ENV=py27_cffi
-    #- ENV=py30_cffi
-    #- ENV=py31_cffi
-    - ENV=py32_cffi
-    - ENV=py33_cffi
-    #- ENV=py34_cffi
-    #- ENV=py25_c
-    - ENV=py26_c
-    - ENV=py27_c
-    - ENV=py33_c
-    #- ENV=py34_c
-
-install:
-    - "sudo ./.travis.install.sh $ENV"
-
 script:
-    - tox -e $ENV
+    - "sudo ./.runtests-ubuntu-12-04.sh"
 
 notifications:
   email: false
