@@ -3,7 +3,6 @@
 # Delete Travis PyPy or it'll supercede the PPA version.
 rm -rf /usr/local/pypy/bin
 
-cat >/dev/null <<EOF
 add-apt-repository -y ppa:fkrull/deadsnakes
 add-apt-repository -y ppa:pypy/pypy-weekly
 apt-get -qq update
@@ -30,7 +29,6 @@ python2.7 -measy_install pytest cffi
 python3.1 -measy_install pytest cffi
 python3.2 -measy_install pytest cffi
 python3.3 -measy_install pytest cffi
-EOF
 
 clean() {
     git clean -dfx
