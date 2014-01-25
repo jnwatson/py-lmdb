@@ -1,3 +1,6 @@
+language: c
+install:
+setup:
 script:
     - "sudo ./.runtests-ubuntu-12-04.sh"
 
