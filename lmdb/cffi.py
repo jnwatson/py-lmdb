@@ -55,7 +55,7 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
 
 # Handle moronic Python 3 mess.
 UnicodeType = type('')
-if 'bytes' not in globals() or UnicodeType is bytes:
+if (not hasattr(__builtins__, 'bytes')) or UnicodeType is bytes:
     UnicodeType = unicode
 
 O_0755 = int('0755', 8)
