@@ -54,9 +54,8 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
 
 
 # Handle moronic Python 3 mess.
-UnicodeType = type('')
-if (not hasattr(__builtins__, 'bytes')) or UnicodeType is bytes:
-    UnicodeType = unicode
+UnicodeType = getattr(__builtins__, 'unicode', str)
+BytesType = getattr(__builtins__, 'bytes', str)
 
 O_0755 = int('0755', 8)
 O_0111 = int('0111', 8)
