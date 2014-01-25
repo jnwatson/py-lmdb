@@ -1,7 +1,7 @@
 #!/bin/bash -ex
 
 quiet() {
-    "$@" > /tmp/$$ || cat /tmp/$$
+    "$@" > /tmp/$$ || { cat /tmp/$$; return 1; }
 }
 
 # Delete Travis PyPy or it'll supercede the PPA version.
