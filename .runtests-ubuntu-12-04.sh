@@ -1,52 +1,56 @@
 #!/bin/bash -ex
 
+quiet() {
+    "$@" > /tmp/$$ || cat /tmp/$$
+}
+
 # Delete Travis PyPy or it'll supercede the PPA version.
 rm -rf /usr/local/pypy/bin
 find /usr/lib -name '*setuptools*' | xargs rm -rf
 find /usr/local/lib -name '*setuptools*' | xargs rm -rf
 
-add-apt-repository -y ppa:fkrull/deadsnakes
-add-apt-repository -y ppa:pypy/pypy-weekly
-apt-get -qq update
-apt-get install --force-yes -qq \
+quiet add-apt-repository -y ppa:fkrull/deadsnakes
+quiet add-apt-repository -y ppa:pypy/pypy-weekly
+quiet apt-get -qq update
+quiet apt-get install --force-yes -qq \
     python{2.5,2.6,2.7,3.1,3.2,3.3}-dev \
     pypy-dev \
     libffi-dev
 
-wget -O ez_setup_24.py \
+wget -qO ez_setup_24.py \
     https://bitbucket.org/pypa/setuptools/raw/bootstrap-py24/ez_setup.py
-wget https://bitbucket.org/pypa/setuptools/raw/bootstrap/ez_setup.py
+wget -q https://bitbucket.org/pypa/setuptools/raw/bootstrap/ez_setup.py
 
-python2.5 ez_setup_24.py
-python2.6 ez_setup.py
-python2.7 ez_setup.py
-python3.1 ez_setup.py
-python3.2 ez_setup.py
-python3.3 ez_setup.py
-pypy ez_setup.py
+quiet python2.5 ez_setup_24.py
+quiet python2.6 ez_setup.py
+quiet python2.7 ez_setup.py
+quiet python3.1 ez_setup.py
+quiet python3.2 ez_setup.py
+quiet python3.3 ez_setup.py
+quiet pypy ez_setup.py
 
-python2.5 -measy_install pytest
-python2.6 -measy_install pytest cffi
-python2.7 -measy_install pytest cffi
-python3.1 -measy_install pytest cffi
-python3.2 -measy_install pytest cffi
-python3.3 -measy_install pytest cffi
+quiet python2.5 -measy_install pytest
+quiet python2.6 -measy_install pytest cffi
+quiet python2.7 -measy_install pytest cffi
+quiet python3.1 -measy_install pytest cffi
+quiet python3.2 -measy_install pytest cffi
+quiet python3.3 -measy_install pytest cffi
 
 clean() {
-    git clean -dfx
+    git clean -qdfx
     find /usr/local/lib -name '*lmdb*' | xargs rm -rf
     find /usr/lib -name '*lmdb*' | xargs rm -rf
 }
 
 native() {
     clean
-    $1 setup.py develop
+    quiet $1 setup.py develop
     $2 tests || fail=1
 }
 
 cffi() {
     clean
-    LMDB_FORCE_CFFI=1 $1 setup.py install
+    LMDB_FORCE_CFFI=1 quiet $1 setup.py install
     $2 tests || fail=1
 }
 
