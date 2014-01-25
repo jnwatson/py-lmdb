@@ -2,6 +2,8 @@
 
 # Delete Travis PyPy or it'll supercede the PPA version.
 rm -rf /usr/local/pypy/bin
+find /usr/lib -name '*setuptools*' | xargs rm -rf
+find /usr/local/lib -name '*setuptools*' | xargs rm -rf
 
 add-apt-repository -y ppa:fkrull/deadsnakes
 add-apt-repository -y ppa:pypy/pypy-weekly
@@ -39,13 +41,13 @@ clean() {
 native() {
     clean
     $1 setup.py develop
-    $2 tests || return 0
+    $2 tests || fail=1
 }
 
 cffi() {
     clean
     LMDB_FORCE_CFFI=1 $1 setup.py install
-    $2 tests || return 0
+    $2 tests || fail=1
 }
 
 native python2.5 py.test-2.5
@@ -58,3 +60,5 @@ cffi python2.7 py.test-2.7
 cffi python3.1 py.test-3.1
 cffi python3.2 py.test-3.2
 cffi python3.3 py.test-3.3
+
+[ "$fail" ] && exit 1
