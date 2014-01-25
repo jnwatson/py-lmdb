@@ -53,15 +53,14 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
             'InvalidParameterError', 'LockError', 'MemoryError', 'DiskError']
 
 
-# Handle moronic Python >=3.0 <3.3.
+# Handle moronic Python 3 mess.
 UnicodeType = type('')
 if 'bytes' not in globals() or UnicodeType is bytes:
     UnicodeType = unicode
 
-# Handle moronic Python >3.
 O_0755 = int('0755', 8)
 O_0111 = int('0111', 8)
-EMPTY_BYTES = u''.encode()
+EMPTY_BYTES = UnicodeType().encode()
 
 
 # Used to track context across CFFI callbcks.
