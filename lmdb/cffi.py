@@ -27,6 +27,7 @@ Please see http://lmdb.readthedocs.org/
 """
 
 from __future__ import absolute_import
+from __future__ import with_statement
 
 import inspect
 import os
@@ -54,8 +55,14 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
 
 # Handle moronic Python >=3.0 <3.3.
 UnicodeType = type('')
-if UnicodeType is bytes:
+if 'bytes' not in globals() or UnicodeType is bytes:
     UnicodeType = unicode
+
+# Handle moronic Python >3.
+O_0755 = int('0755', 8)
+O_0111 = int('0111', 8)
+EMPTY_BYTES = u''.encode()
+
 
 # Used to track context across CFFI callbcks.
 _callbacks = threading.local()
@@ -633,7 +640,7 @@ class Environment(object):
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
-            mode=0o755, create=True, readahead=True, writemap=False,
+            mode=O_0755, create=True, readahead=True, writemap=False,
             meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
             max_spare_cursors=32, max_spare_iters=32):
         envpp = _ffi.new('MDB_env **')
@@ -681,7 +688,7 @@ class Environment(object):
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
 
-        rc = _lib.mdb_env_open(self._env, path, flags, mode & ~0o111)
+        rc = _lib.mdb_env_open(self._env, path, flags, mode & ~O_0111)
         if rc:
             raise _error(path, rc)
         with self.begin(db=object()) as txn:
@@ -1259,7 +1266,7 @@ class Transaction(object):
         """
         return Cursor(db or self._db, self).pop(key)
 
-    def delete(self, key, value=b'', db=None):
+    def delete(self, key, value=EMPTY_BYTES, db=None):
         """Delete a key from the database.
 
         Equivalent to `mdb_del()
@@ -1716,7 +1723,7 @@ class Cursor(object):
         with `MDB_SET_KEY
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(_lib.MDB_SET_KEY, key, b'')
+        return self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES)
 
     def set_key_dup(self, key, value):
         """Seek exactly to `(key, value)`, returning ``True`` on success or
@@ -1736,7 +1743,7 @@ class Cursor(object):
         """Equivalent to :py:meth:`set_key()`, except :py:meth:`value` is
         returned when `key` is found, otherwise `default`.
         """
-        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, b''):
+        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             return self.value()
         return default
 
@@ -1756,7 +1763,7 @@ class Cursor(object):
         """
         if not key:
             return self.first()
-        return self._cursor_get_kv(_lib.MDB_SET_RANGE, key, b'')
+        return self._cursor_get_kv(_lib.MDB_SET_RANGE, key, EMPTY_BYTES)
 
     def set_range_dup(self, key, value):
         """Seek to the first key/value pair greater than or equal to `key`,
@@ -1897,7 +1904,7 @@ class Cursor(object):
             `key`:
                 Bytestring key to delete.
         """
-        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, b''):
+        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             old = _mvstr(self._val)
             rc = _lib.mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
