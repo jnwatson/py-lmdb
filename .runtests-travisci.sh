@@ -1,3 +1,4 @@
+#!/bin/bash -ex
 
 quiet() {
     "$@" > /tmp/$$ || { cat /tmp/$$; return 1; }
