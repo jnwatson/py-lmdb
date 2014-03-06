@@ -79,13 +79,13 @@ class InitTest(unittest.TestCase):
         maindb = env.open_db(None)
         db1 = env.open_db('d1')
         txn = lmdb.Transaction(env, write=True, db=db1)
-        assert txn.put('a', 'd1')
-        assert txn.get('a', db=db1) == 'd1'
-        assert txn.get('a', db=maindb) is None
-        assert txn.replace('a', 'd11') == 'd1'
-        assert txn.pop('a') == 'd11'
-        assert txn.put('a', 'main', db=maindb, overwrite=False)
-        assert not txn.delete('a')
+        assert txn.put(B('a'), B('d1'))
+        assert txn.get(B('a'), db=db1) == B('d1')
+        assert txn.get(B('a'), db=maindb) is None
+        assert txn.replace(B('a'), B('d11')) == B('d1')
+        assert txn.pop(B('a')) == B('d11')
+        assert txn.put(B('a'), B('main'), db=maindb, overwrite=False)
+        assert not txn.delete(B('a'))
         txn.abort()
 
     def test_parent_readonly(self):
