@@ -1,5 +1,5 @@
 
-2014-02-18 v0.79
+2014-03-06 v0.79
 
 * Implement remaining Cursor methods necessary for working with MDB_DUPSORT
   databases: next_dup(), next_nodup(), prev_dup(), prev_nodup(), first_dup(),
@@ -9,6 +9,8 @@
 * The default for Transaction.put(dupdata=...) and Cursor.put(dupdata=...) has
   changed from False to True. The previous default did not reflect LMDB's
   normal mode of operation.
+
+* LMDB 0.9.11 is bundled along with extra fixes from upstream Git.
 
 
 2014-01-18 v0.78
