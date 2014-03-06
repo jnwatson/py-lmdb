@@ -21,7 +21,6 @@
 #
 
 from __future__ import absolute_import
-import __builtin__
 import atexit
 import contextlib
 import os
@@ -29,6 +28,11 @@ import shutil
 import stat
 import sys
 import tempfile
+
+try:
+    import __builtin__
+except ImportError:
+    import builtins as __builtin__
 
 import lmdb
 

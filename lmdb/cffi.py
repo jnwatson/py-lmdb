@@ -29,12 +29,16 @@ Please see http://lmdb.readthedocs.org/
 from __future__ import absolute_import
 from __future__ import with_statement
 
-import __builtin__
 import inspect
 import os
 import sys
 import threading
 import weakref
+
+try:
+    import __builtin__
+except ImportError:
+    import builtins as __builtin__
 
 import lmdb
 try:
