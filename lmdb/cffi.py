@@ -29,6 +29,7 @@ Please see http://lmdb.readthedocs.org/
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import __builtin__
 import inspect
 import os
 import sys
@@ -54,8 +55,8 @@ __all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
 
 
 # Handle moronic Python 3 mess.
-UnicodeType = getattr(__builtins__, 'unicode', str)
-BytesType = getattr(__builtins__, 'bytes', str)
+UnicodeType = getattr(__builtin__, 'unicode', str)
+BytesType = getattr(__builtin__, 'bytes', str)
 
 O_0755 = int('0755', 8)
 O_0111 = int('0111', 8)

@@ -21,6 +21,7 @@
 #
 
 from __future__ import absolute_import
+import __builtin__
 import atexit
 import contextlib
 import os
@@ -67,8 +68,8 @@ def path_mode(path):
 
 
 # Handle moronic Python >=3.0 <3.3.
-UnicodeType = getattr(__builtins__, 'unicode', str)
-BytesType = getattr(__builtins__, 'bytes', str)
+UnicodeType = getattr(__builtin__, 'unicode', str)
+BytesType = getattr(__builtin__, 'bytes', str)
 
 
 try:
