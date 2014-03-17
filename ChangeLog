@@ -1,5 +1,12 @@
 
-2014-03-06 v0.79
+2014-03-31 v0.79
+
+* Fixed minor bug where CFFI _get_cursor() did not note its idea of
+  the current key and value were up to date.
+
+* Cursor.replace() and Cursor.pop() updated for MDB_DUPSORT databases. For
+  pop(), the first data item is popped and returned. For replace(), the first
+  data item is returned, and all duplicates for the key are replaced.
 
 * Implement remaining Cursor methods necessary for working with MDB_DUPSORT
   databases: next_dup(), next_nodup(), prev_dup(), prev_nodup(), first_dup(),
