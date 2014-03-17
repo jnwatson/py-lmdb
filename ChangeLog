@@ -1,6 +1,8 @@
 
 2014-03-31 v0.79
 
+* CPython Cursor.delete() lacked dupdata argument, fixed.
+
 * Fixed minor bug where CFFI _get_cursor() did not note its idea of
   the current key and value were up to date.
 
