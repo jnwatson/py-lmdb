@@ -34,3 +34,4 @@ cffi python3.2 py.test-3.2
 cffi python3.3 py.test-3.3
 
 [ "$fail" ] && exit 1
+exit 0
