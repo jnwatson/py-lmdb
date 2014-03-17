@@ -1556,6 +1556,7 @@ class Cursor(object):
     def _cursor_get(self, op):
         rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
+        self._last_mutation = self.txn._mutations
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
