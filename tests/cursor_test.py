@@ -20,6 +20,8 @@
 # <http://www.openldap.org/>.
 #
 
+# test delete(dupdata)
+
 from __future__ import absolute_import
 import unittest
 
