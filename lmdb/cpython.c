@@ -1837,30 +1837,39 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
 }
 
 /**
- * Cursor.delete() -> bool
+ * Cursor.delete(dupdata=False) -> bool
  */
 static PyObject *
-cursor_delete(CursorObject *self)
+cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
 {
-    if(! self->valid) {
-        return err_invalid();
+    struct cursor_delete {
+        int dupdata;
+    } arg = {0};
+
+    static const struct argspec argspec[] = {
+        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_delete, dupdata)}
+    };
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
     }
-    PyObject *res = Py_False;
+
+    int res = 0;
     if(self->positioned) {
         DEBUG("deleting key '%.*s'",
               (int) self->key.mv_size,
               (char*) self->key.mv_data)
         int rc;
-        UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
+        int flags = arg.dupdata ? MDB_NODUPDATA : 0;
+        UNLOCKED(rc, mdb_cursor_del(self->curs, flags));
         self->trans->mutations++;
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
-        res = Py_True;
+        res = 1;
         _cursor_get_c(self, MDB_GET_CURRENT);
     }
-    Py_INCREF(res);
-    return res;
+    return py_bool(res);
 }
 
 /**
@@ -2433,7 +2442,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
 
 static struct PyMethodDef cursor_methods[] = {
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
-    {"delete", (PyCFunction)cursor_delete, METH_NOARGS},
+    {"delete", (PyCFunction)cursor_delete, METH_VARARGS|METH_KEYWORDS},
     {"first", (PyCFunction)cursor_first, METH_NOARGS},
     {"first_dup", (PyCFunction)cursor_first_dup, METH_NOARGS},
     {"get", (PyCFunction)cursor_get, METH_VARARGS|METH_KEYWORDS},
