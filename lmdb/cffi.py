@@ -1873,10 +1873,13 @@ class Cursor(object):
 
     def replace(self, key, val):
         """Store a record, returning its previous value if one existed. Returns
-        ``None`` if no previous value existed.
+        ``None`` if no previous value existed. This uses the best available
+        mechanism to minimize the cost of a `set-and-return-previous`
+        operation.
 
-        This uses the best available mechanism to minimize the cost of a
-        `set-and-return-previous` operation.
+        For databases opened with `dupsort=True`, only the first data element
+        ("duplicate") is returned if it existed, all data elements are removed
+        and the new `(key, data)` pair is inserted.
 
             `key`:
                 Bytestring key to store.
@@ -1884,6 +1887,15 @@ class Cursor(object):
             `value`:
                 Bytestring value to store.
         """
+        if self.db._flags & _lib.MDB_DUPSORT:
+            if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+                old = _mvstr(self._val)
+                self.delete(True)
+            else:
+                old = None
+            self.put(key, val)
+            return old
+
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
         rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
