@@ -36,6 +36,9 @@ import lmdb
 
 
 class InitTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_closed(self):
         _, env = testlib.temp_env()
         env.close()
@@ -134,6 +137,9 @@ class InitTest(unittest.TestCase):
 
 
 class StatTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_stat(self):
         _, env = testlib.temp_env()
         db1 = env.open_db('db1')
@@ -168,6 +174,9 @@ class StatTest(unittest.TestCase):
 
 
 class DropTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_empty(self):
         _, env = testlib.temp_env()
         db1 = env.open_db('db1')
@@ -192,6 +201,9 @@ class DropTest(unittest.TestCase):
 
 
 class CommitTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_bad_txn(self):
         _, env = testlib.temp_env()
         txn = env.begin()
@@ -226,6 +238,9 @@ class CommitTest(unittest.TestCase):
 
 
 class AbortTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_abort_ro(self):
         _, env = testlib.temp_env()
         txn = env.begin()
@@ -247,6 +262,9 @@ class AbortTest(unittest.TestCase):
 
 
 class GetTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_bad_txn(self):
         _, env = testlib.temp_env()
         txn = env.begin()
@@ -316,6 +334,9 @@ class GetTest(unittest.TestCase):
 
 
 class PutTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_bad_txn(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=True)

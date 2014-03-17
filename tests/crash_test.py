@@ -51,6 +51,9 @@ except NameError: # Python2.5.
 
 
 class CrashTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     # Various efforts to cause segfaults.
 
     def setUp(self):
@@ -91,6 +94,9 @@ class CrashTest(unittest.TestCase):
 
 
 class IteratorTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def setUp(self):
         self.path, self.env = testlib.temp_env()
         self.txn = self.env.begin(write=True)
@@ -127,6 +133,9 @@ class IteratorTest(unittest.TestCase):
 
 
 class BigReverseTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     # Test for issue with MDB_LAST+MDB_PREV skipping chunks of database.
     def test_big_reverse(self):
         path, env = testlib.temp_env()
@@ -138,6 +147,9 @@ class BigReverseTest(unittest.TestCase):
 
 
 class MultiCursorDeleteTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def setUp(self):
         self.path, self.env = testlib.temp_env()
 

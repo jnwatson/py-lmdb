@@ -28,6 +28,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import traceback
 
 try:
     import __builtin__
@@ -37,11 +38,24 @@ except ImportError:
 import lmdb
 
 
+_cleanups = []
+
+def cleanup():
+    while _cleanups:
+        func = _cleanups.pop()
+        try:
+            func()
+        except Exception:
+            traceback.print_exc()
+
+atexit.register(cleanup)
+
+
 def temp_dir(create=True):
     path = tempfile.mkdtemp(prefix='lmdb_test')
     if not create:
         os.rmdir(path)
-    atexit.register(shutil.rmtree, path, ignore_errors=True)
+    _cleanups.append(lambda: shutil.rmtree(path, ignore_errors=True))
     if hasattr(path, 'decode'):
         path = path.decode(sys.getfilesystemencoding())
     return path
@@ -52,9 +66,9 @@ def temp_file(create=True):
     os.close(fd)
     if not create:
         os.unlink(path)
-    atexit.register(lambda: os.path.exists(path) and os.unlink(path))
+    _cleanups.append(lambda: os.path.exists(path) and os.unlink(path))
     pathlock = path + '-lock'
-    atexit.register(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
+    _cleanups.append(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
     if hasattr(path, 'decode'):
         path = path.decode(sys.getfilesystemencoding())
     return path
@@ -64,6 +78,7 @@ def temp_env(path=None, max_dbs=10, **kwargs):
     if not path:
         path = temp_dir()
     env = lmdb.open(path, max_dbs=max_dbs, **kwargs)
+    _cleanups.append(env.close)
     return path, env
 
 

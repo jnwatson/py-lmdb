@@ -29,6 +29,9 @@ from testlib import BT
 
 
 class CursorTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def setUp(self):
         self.path, self.env = testlib.temp_env()
         self.txn = self.env.begin(write=True)

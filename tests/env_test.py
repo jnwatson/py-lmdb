@@ -40,6 +40,9 @@ NO_READERS = UnicodeType('(no active readers)\n')
 
 
 class VersionTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_version(self):
         ver = lmdb.version()
         assert len(ver) == 3
@@ -48,6 +51,9 @@ class VersionTest(unittest.TestCase):
 
 
 class OpenTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_bad_paths(self):
         self.assertRaises(Exception,
             lambda: lmdb.open('/doesnt/exist/at/all'))
@@ -200,6 +206,9 @@ class OpenTest(unittest.TestCase):
 
 
 class CloseTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_close(self):
         _, env = testlib.temp_env()
         # Attempting things should be ok.
@@ -226,6 +235,9 @@ class CloseTest(unittest.TestCase):
 
 
 class InfoMethodsTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_path(self):
         path, env = testlib.temp_env()
         assert path == env.path()
@@ -321,6 +333,9 @@ class InfoMethodsTest(unittest.TestCase):
 
 
 class OtherMethodsTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_copy(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=True)
@@ -395,6 +410,9 @@ class OtherMethodsTest(unittest.TestCase):
 
 
 class BeginTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_begin_closed(self):
         _, env = testlib.temp_env()
         env.close()
@@ -479,6 +497,9 @@ class BeginTest(unittest.TestCase):
 
 
 class OpenDbTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
     def test_main(self):
         _, env = testlib.temp_env()
         # Start write txn, so we cause deadlock if open_db attempts txn.
