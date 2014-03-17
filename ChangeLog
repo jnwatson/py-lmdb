@@ -1,5 +1,5 @@
 
-2014-03-31 v0.79
+2014-03-17 v0.79
 
 * CPython Cursor.delete() lacked dupdata argument, fixed.
 
