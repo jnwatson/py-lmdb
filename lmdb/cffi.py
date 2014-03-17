@@ -1007,18 +1007,22 @@ class _Database(object):
         if rc:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
+        self._load_flags(txn)
 
-    def flags(self, txn):
-        """Return the database's associated flags as a dict of _Database
-        constructor kwargs."""
+    def _load_flags(self, txn):
+        """Load MDB's notion of the database flags."""
         flags_ = _ffi.new('unsigned int[]', 1)
         rc = _lib.mdb_dbi_flags(txn._txn, self._dbi, flags_)
         if rc:
             raise _error("mdb_dbi_flags", rc)
-        flags = flags_[0]
+        self._flags = flags_[0]
+
+    def flags(self, txn):
+        """Return the database's associated flags as a dict of _Database
+        constructor kwargs."""
         return {
-            'reverse_key': bool(flags & _lib.MDB_REVERSEKEY),
-            'dupsort': bool(flags & _lib.MDB_DUPSORT),
+            'reverse_key': bool(self._flags & _lib.MDB_REVERSEKEY),
+            'dupsort': bool(self._flags & _lib.MDB_DUPSORT),
         }
 
     def _invalidate(self):

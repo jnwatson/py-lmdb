@@ -267,6 +267,8 @@ struct DbObject {
     struct EnvObject *env; /* Not refcounted. */
     /** MDB database handle. */
     MDB_dbi dbi;
+    /** Flags at time of creation. */
+    unsigned int flags;
 };
 
 /** lmdb.Environment */
@@ -983,12 +985,18 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
              unsigned int flags)
 {
     MDB_dbi dbi;
+    unsigned int f;
     int rc;
     DbObject *dbo;
 
     UNLOCKED(rc, mdb_dbi_open(txn, name, flags, &dbi));
     if(rc) {
         err_set("mdb_dbi_open", rc);
+        return NULL;
+    }
+    if((rc = mdb_dbi_flags(txn, dbi, &f))) {
+        err_set("mdb_dbi_flags", rc);
+        mdb_dbi_close(env, dbi);
         return NULL;
     }
 
@@ -1000,6 +1008,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     LINK_CHILD(env, dbo)
     dbo->env = env; /* no refcount */
     dbo->dbi = dbi;
+    dbo->flags = f;
     DEBUG("DbObject '%s' opened at %p", name, dbo)
     return dbo;
 }
@@ -1055,7 +1064,6 @@ db_clear(DbObject *self)
 static PyObject *
 db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 {
-    unsigned int f;
     PyObject *dct;
     int rc;
 
@@ -1076,12 +1084,9 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     if(! arg.txn->valid) {
         return err_invalid();
     }
-    if((rc = mdb_dbi_flags(arg.txn->txn, self->dbi, &f))) {
-        err_set("mdb_dbi_flags", rc);
-        return NULL;
-    }
 
     dct = PyDict_New();
+    unsigned int f = self->flags;
     PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
     PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
     return dct;
