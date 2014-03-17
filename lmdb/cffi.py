@@ -1899,10 +1899,11 @@ class Cursor(object):
 
     def pop(self, key):
         """Fetch a record's value then delete it. Returns ``None`` if no
-        previous value existed.
+        previous value existed. This uses the best available mechanism to
+        minimize the cost of a `delete-and-return-previous` operation.
 
-        This uses the best available mechanism to minimize the cost of a
-        `delete-and-return-previous` operation.
+        For databases opened with `dupsort=True`, the first data element
+        ("duplicate") for the key will be popped.
 
             `key`:
                 Bytestring key to delete.
