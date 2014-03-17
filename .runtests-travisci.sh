@@ -32,7 +32,7 @@ quiet pypy ez_setup.py
 quiet python2.5 -measy_install pytest
 quiet python2.6 -measy_install pytest cffi
 quiet python2.7 -measy_install pytest cffi
-quiet python3.1 -measy_install pytest cffi
+quiet python3.1 -measy_install pytest cffi argparse
 quiet python3.2 -measy_install pytest cffi
 quiet python3.3 -measy_install pytest cffi
 
