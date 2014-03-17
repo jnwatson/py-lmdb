@@ -374,5 +374,54 @@ class PutTest(unittest.TestCase):
         txn.get(B('a'))
 
 
+class ReplaceTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_bad_txn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.abort()
+        self.assertRaises(Exception,
+            lambda: txn.replace(B('a'), B('a')))
+
+    def test_bad_env(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        env.close()
+        self.assertRaises(Exception,
+            lambda: txn.replace(B('a'), B('a')))
+
+    def test_ro_txn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: txn.replace(B('a'), B('a')))
+
+    def test_empty_key_value(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        self.assertRaises(lmdb.BadValsizeError,
+            lambda: txn.replace(B(''), B('a')))
+
+    def test_dupsort_noexist(self):
+        _, env = testlib.temp_env()
+        db = env.open_db('db1', dupsort=True)
+        txn = env.begin(write=True, db=db)
+        assert None == txn.replace(B('a'), B('x'))
+        assert B('x') == txn.replace(B('a'), B('y'))
+        assert B('y') == txn.replace(B('a'), B('z'))
+        cur = txn.cursor()
+        assert cur.set_key(B('a'))
+        assert [B('z')] == list(cur.iternext_dup())
+
+    def test_dupdata_no_dupsort(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        assert txn.put(B('a'), B('a'), dupdata=True)
+        assert txn.put(B('a'), B('b'), dupdata=True)
+        txn.get(B('a'))
+
+
 if __name__ == '__main__':
     unittest.main()
