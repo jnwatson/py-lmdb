@@ -327,6 +327,8 @@ struct CursorObject {
     /** If TransObject.mutations!=last_mutation, must MDB_GET_CURRENT to
      * refresh `key' and `val'. */
     int last_mutation;
+    /** DBI flags at time of creation. */
+    unsigned int dbi_flags;
 };
 
 
@@ -971,6 +973,7 @@ make_cursor(DbObject *db, TransObject *trans)
     self->val.mv_size = 0;
     self->trans = trans;
     self->last_mutation = trans->mutations;
+    self->dbi_flags = db->flags;
     Py_INCREF(self->trans);
     return (PyObject *) self;
 }
@@ -2101,6 +2104,59 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 }
 
 /**
+ * Shared between Cursor.replace() and Transaction.replace()
+ */
+static PyObject *
+do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
+{
+    int rc;
+    PyObject *old;
+    MDB_val newval = *val;
+
+    if(self->dbi_flags & MDB_DUPSORT) {
+        self->key = *key;
+        if(_cursor_get_c(self, MDB_SET_KEY)) {
+            return NULL;
+        }
+        if(self->positioned) {
+            if(! ((old = obj_from_val(&self->val, 0)))) {
+                return NULL;
+            }
+            UNLOCKED(rc, mdb_cursor_del(self->curs, MDB_NODUPDATA));
+            self->trans->mutations++;
+            if(rc) {
+                Py_CLEAR(old);
+                return err_set("mdb_cursor_del", rc);
+            }
+        } else {
+            old = Py_None;
+            Py_INCREF(old);
+        }
+    } else {
+        /* val is updated if MDB_KEYEXIST. */
+        int flags = MDB_NOOVERWRITE;
+        UNLOCKED(rc, mdb_cursor_put(self->curs, key, val, flags));
+        self->trans->mutations++;
+        if(! rc) {
+            Py_RETURN_NONE;
+        } else if(rc != MDB_KEYEXIST) {
+            return err_set("mdb_put", rc);
+        }
+
+        if(! ((old = obj_from_val(val, 0)))) {
+            return NULL;
+        }
+    }
+
+    UNLOCKED(rc, mdb_cursor_put(self->curs, key, &newval, 0));
+    if(rc) {
+        Py_DECREF(old);
+        return err_set("mdb_put", rc);
+    }
+    return old;
+}
+
+/**
  * Cursor.replace() -> None|result
  */
 static PyObject *
@@ -2120,30 +2176,7 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    /* arg.val is updated if MDB_KEYEXIST. */
-    MDB_val newval = arg.val;
-    int flags = MDB_NOOVERWRITE;
-    int rc;
-    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
-    self->trans->mutations++;
-    if(! rc) {
-        Py_RETURN_NONE;
-    } else if(rc != MDB_KEYEXIST) {
-        return err_set("mdb_put", rc);
-    }
-
-    PyObject *old = obj_from_val(&arg.val, 0);
-    if(! old) {
-        return NULL;
-    }
-
-    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &newval, 0));
-    if(rc) {
-        Py_DECREF(old);
-        return err_set("mdb_put", rc);
-    }
-
-    return old;
+    return do_cursor_replace(self, &arg.key, &arg.val);
 }
 
 /**
@@ -2865,6 +2898,8 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
 
 static PyObject *
 make_cursor(DbObject *db, TransObject *trans);
+static PyObject *
+do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val);
 
 /**
  * Transaction.replace() -> None|result
@@ -2891,38 +2926,13 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+    PyObject *ret = NULL;
     CursorObject *cursor = (CursorObject *) make_cursor(arg.db, self);
-    if(! cursor) {
-        return NULL;
+    if(cursor) {
+        ret = do_cursor_replace(cursor, &arg.key, &arg.value);
+        Py_DECREF(cursor);
     }
-
-    /* arg.val is updated if MDB_KEYEXIST. */
-    MDB_val newval = arg.value;
-    int flags = MDB_NOOVERWRITE;
-    self->mutations++;
-    int rc;
-    UNLOCKED(rc, mdb_cursor_put(cursor->curs, &arg.key, &arg.value, flags));
-    if(! rc) {
-        Py_DECREF((PyObject *) cursor);
-        Py_RETURN_NONE;
-    } else if(rc != MDB_KEYEXIST) {
-        Py_DECREF((PyObject *) cursor);
-        return err_set("mdb_put", rc);
-    }
-
-    PyObject *old = obj_from_val(&arg.value, 0);
-    if(! old) {
-        Py_DECREF((PyObject *) cursor);
-        return NULL;
-    }
-
-    UNLOCKED(rc, mdb_cursor_put(cursor->curs, &arg.key, &newval, 0));
-    Py_DECREF((PyObject *) cursor);
-    if(rc) {
-        Py_DECREF(old);
-        return err_set("mdb_put", rc);
-    }
-    return old;
+    return ret;
 }
 
 static int
