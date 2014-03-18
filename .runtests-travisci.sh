@@ -10,7 +10,7 @@ find /usr/lib -name '*setuptools*' | xargs rm -rf
 find /usr/local/lib -name '*setuptools*' | xargs rm -rf
 
 quiet add-apt-repository -y ppa:fkrull/deadsnakes
-quiet add-apt-repository -y ppa:pypy/pypy-weekly
+quiet add-apt-repository -y ppa:pypy/pypy
 quiet apt-get -qq update
 quiet apt-get install --force-yes -qq \
     python{2.5,2.6,2.7,3.1,3.2,3.3}-dev \
