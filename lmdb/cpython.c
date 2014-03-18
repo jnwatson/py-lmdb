@@ -175,8 +175,6 @@ static PyObject *py_int_max;
 static PyObject *py_size_max;
 /** lmdb.Error type. */
 static PyObject *Error;
-/** If 1, save_thread() and restore_thread() drop GIL. */
-static int drop_gil = 0;
 
 /** Typedefs and forward declarations. */
 static PyTypeObject PyDatabase_Type;
@@ -596,34 +594,10 @@ val_from_buffer(MDB_val *val, PyObject *buf)
 /* Concurrency control */
 /* ------------------- */
 
-static NOINLINE PyThreadState *save_thread(void)
-{
-    PyThreadState *s = NULL;
-    if(drop_gil) {
-        s = PyEval_SaveThread();
-    }
-    return s;
-}
-
-static NOINLINE void restore_thread(PyThreadState *state)
-{
-    if(drop_gil) {
-        PyEval_RestoreThread(state);
-    }
-}
-
-/* Like Py_BEGIN_ALLOW_THREADS */
-#define DROP_GIL \
-    { PyThreadState *_save; _save = save_thread();
-
-/* Like Py_END_ALLOW_THREADS */
-#define LOCK_GIL \
-    restore_thread(_save); }
-
 #define UNLOCKED(out, e) \
-    DROP_GIL \
+    Py_BEGIN_ALLOW_THREADS \
     out = (e); \
-    LOCK_GIL
+    Py_END_ALLOW_THREADS
 
 
 /* ---------- */
@@ -1036,9 +1010,9 @@ txn_db_from_name(EnvObject *env, const char *name,
     }
 
     if(! ((dbo = db_from_name(env, txn, name, flags)))) {
-        DROP_GIL
+        Py_BEGIN_ALLOW_THREADS
         mdb_txn_abort(txn);
-        LOCK_GIL
+        Py_END_ALLOW_THREADS
         return NULL;
     }
 
@@ -1132,9 +1106,9 @@ env_clear(EnvObject *self)
     if(self->env) {
         INVALIDATE(self)
         DEBUG("Closing env")
-        DROP_GIL
+        Py_BEGIN_ALLOW_THREADS
         mdb_env_close(self->env);
-        LOCK_GIL
+        Py_END_ALLOW_THREADS
         self->env = NULL;
     }
     if(self->main_db) {
@@ -1349,9 +1323,9 @@ env_close(EnvObject *self)
         INVALIDATE(self)
         self->valid = 0;
         DEBUG("Closing env")
-        DROP_GIL
+        Py_BEGIN_ALLOW_THREADS
         mdb_env_close(self->env);
-        LOCK_GIL
+        Py_END_ALLOW_THREADS
         self->env = NULL;
     }
     Py_RETURN_NONE;
@@ -1731,9 +1705,9 @@ cursor_clear(CursorObject *self)
     if(self->valid) {
         INVALIDATE(self)
         UNLINK_CHILD(self->trans, self)
-        DROP_GIL
+        Py_BEGIN_ALLOW_THREADS
         mdb_cursor_close(self->curs);
-        LOCK_GIL
+        Py_END_ALLOW_THREADS
         self->valid = 0;
     }
     Py_CLEAR(self->trans);
@@ -2602,9 +2576,9 @@ trans_clear(TransObject *self)
 #endif
         if(self->txn) {
             DEBUG("aborting")
-            DROP_GIL
+            Py_BEGIN_ALLOW_THREADS
             mdb_txn_abort(self->txn);
-            LOCK_GIL
+            Py_END_ALLOW_THREADS
             self->txn = NULL;
         }
         Py_CLEAR(self->db);
@@ -2669,9 +2643,9 @@ trans_abort(TransObject *self)
 #ifdef HAVE_MEMSINK
         ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        DROP_GIL
+        Py_BEGIN_ALLOW_THREADS
         mdb_txn_abort(self->txn);
-        LOCK_GIL
+        Py_END_ALLOW_THREADS
         self->txn = NULL;
         self->valid = 0;
     }
@@ -3082,7 +3056,6 @@ static PyTypeObject PyTransaction_Type = {
 static PyObject *
 enable_drop_gil(void)
 {
-    drop_gil = 1;
     Py_RETURN_NONE;
 }
 

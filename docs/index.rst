@@ -342,12 +342,6 @@ Exceptions
 .. autoclass:: lmdb.DiskError ()
 
 
-Threading control
-#################
-
-.. autofunction:: lmdb.enable_drop_gil
-
-
 Command line tools
 ++++++++++++++++++
 

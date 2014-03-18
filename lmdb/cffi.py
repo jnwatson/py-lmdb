@@ -504,18 +504,7 @@ def _mvstr(mv):
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
 def enable_drop_gil():
-    """
-    Arrange for the global interpreter lock to be released during database IO.
-    This flag is ignored and always assumed to be ``True`` on CFFI. Note this
-    can only be set once per process.
-
-    Continually dropping and reacquiring the GIL may incur unnecessary overhead
-    in single-threaded programs. Since Python intra-process concurrency is
-    already limited, and LMDB supports inter-process access, programs using
-    LMDB will achieve better throughput by forking rather than using threads.
-
-    *Caution:* this function should be invoked before any threads are created.
-    """
+    """Deprecated."""
 
 def version():
     """
