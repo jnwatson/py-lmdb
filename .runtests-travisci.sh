@@ -5,7 +5,7 @@ quiet() {
 }
 
 # Delete Travis PyPy or it'll supercede the PPA version.
-rm -rf /usr/local/pypy/bin
+rm -rf /usr/local/pypy/bin /usr/local/lib/pypy2.7
 find /usr/lib -name '*setuptools*' | xargs rm -rf
 find /usr/local/lib -name '*setuptools*' | xargs rm -rf
 
