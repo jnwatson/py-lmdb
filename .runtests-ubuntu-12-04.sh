@@ -26,7 +26,7 @@ native python2.5 py.test-2.5
 native python2.6 py.test-2.6
 native python2.7 py.test-2.7
 native python3.3 py.test-3.3
-#cffi pypy "pypy -mpy.test"
+cffi pypy "pypy -mpy.test"
 cffi python2.6 py.test-2.6
 cffi python2.7 py.test-2.7
 cffi python3.1 py.test-3.1
