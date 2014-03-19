@@ -1005,6 +1005,7 @@ class _Database(object):
         if rc:
             raise _error("mdb_dbi_flags", rc)
         self._flags = flags_[0]
+        self._dupsort = self._flags & _lib.MDB_DUPSORT
 
     def flags(self, txn):
         """Return the database's associated flags as a dict of _Database
@@ -1244,14 +1245,14 @@ class Transaction(object):
             raise _error("mdb_put", rc)
         return True
 
-    def replace(self, key, value, db=None):
+    def replace(self, key, value, oldval=None, db=None):
         """Use a temporary cursor to invoke :py:meth:`Cursor.replace`.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
                 database given to the :py:class:`Transaction` constructor.
         """
-        return Cursor(db or self._db, self).replace(key, value)
+        return Cursor(db or self._db, self).replace(key, value, oldval)
 
     def pop(self, key, db=None):
         """Use a temporary cursor to invoke :py:meth:`Cursor.pop`.
@@ -1860,43 +1861,53 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
 
-    def replace(self, key, val):
+    def replace(self, key, val, oldval=None):
         """Store a record, returning its previous value if one existed. Returns
         ``None`` if no previous value existed. This uses the best available
         mechanism to minimize the cost of a `set-and-return-previous`
         operation.
 
-        For databases opened with `dupsort=True`, only the first data element
-        ("duplicate") is returned if it existed, all data elements are removed
-        and the new `(key, data)` pair is inserted.
+        For databases opened with `dupsort=True`, the first value ("duplicate")
+        is selected if it existed, unless `oldval` is provided.
 
             `key`:
                 Bytestring key to store.
 
             `value`:
                 Bytestring value to store.
+
+            `oldval`:
+                For `dupsort=True` databases, the duplicate value to be
+                replaced. If ``None`, then select the first duplicate.
         """
-        if self.db._flags & _lib.MDB_DUPSORT:
-            if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
-                old = _mvstr(self._val)
-                self.delete(True)
-            else:
-                old = None
-            self.put(key, val)
-            return old
-
-        flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
-        self.txn._mutations += 1
-        if not rc:
-            return
-        if rc != _lib.MDB_KEYEXIST:
-            raise _error("mdb_cursor_put", rc)
+        vallen = len(val)
+        old = None
 
-        self._cursor_get(_lib.MDB_GET_CURRENT)
-        old = _mvstr(self._val)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        if self.db._dupsort:
+            if oldval:
+                if self._cursor_get_kv(_lib.MDB_GET_BOTH, key, oldval):
+                    old = oldval
+            else:
+                if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+                    old = _mvstr(self._val)
+            if old:
+                rc = _lib.mdb_cursor_del(self._cur, 0)
+                if rc:
+                    raise _error("mdb_cursor_del", rc)
+        else:
+            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, vallen,
+                                       _lib.MDB_NOOVERWRITE)
+            if not rc:
+                self.txn._mutations += 1
+                return
+            if rc != _lib.MDB_KEYEXIST:
+                raise _error("mdb_cursor_put", rc)
+
+            self._cursor_get(_lib.MDB_GET_CURRENT)
+            old = _mvstr(self._val)
+
+        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, vallen, 0)
         self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
