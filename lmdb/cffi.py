@@ -1878,7 +1878,7 @@ class Cursor(object):
 
             `oldval`:
                 For `dupsort=True` databases, the duplicate value to be
-                replaced. If ``None`, then select the first duplicate.
+                replaced. If ``None``, then select the first duplicate.
         """
         keylen = len(key)
         vallen = len(val)
