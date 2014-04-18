@@ -32,8 +32,33 @@ LMDB is a tiny database with some excellent properties:
 * No application-level caching is required: LMDB relies entirely on the
   operating system's buffer cache.
 
-Installation
-++++++++++++
+
+Installation: Windows
++++++++++++++++++++++
+
+Binary eggs and wheels are published via PyPI for Windows, allowing the binding
+to be installed via pip and easy_install without the need for a compiler to be
+present. The binary releases statically link against the bundled version of
+LMDB.
+
+Initially 32-bit and 64-bit binaries are provided for Python 2.7; in future
+binaries will be published for all supported versions of Python.
+
+To install, use a command like:
+
+    ::
+
+        C:\Python27\python -mpip install lmdb
+
+Or:
+
+    ::
+
+        C:\Python27\python -measy_install lmdb
+
+
+Installation: UNIX
+++++++++++++++++++
 
 For convenience, a supported version of LMDB is bundled with the binding and
 built statically by default. If your system distribution includes LMDB, set the
