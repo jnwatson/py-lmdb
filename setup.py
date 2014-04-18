@@ -36,12 +36,14 @@ except ImportError:
     memsink = None
 
 
+use_windows = sys.platform.startswith('win')
+
 if hasattr(platform, 'python_implementation'):
     use_cpython = platform.python_implementation() == 'CPython'
 else:
     use_cpython = True
 
-if os.getenv('LMDB_FORCE_CFFI') is not None:
+if use_windows or os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
 
 if sys.version[:3] < '2.5':
@@ -84,6 +86,13 @@ extra_compile_args = ['-UNDEBUG']
 # Disable some Clang/GCC warnings.
 if not os.getenv('LMDB_MAINTAINER'):
     extra_compile_args += ['-w']
+
+
+# Windows hacks.
+if use_windows:
+    extra_include_dirs += ['lib/win32']
+    extra_compile_args += ['-Dssize_t=signed long']
+    libraries += ['Advapi32']
 
 
 # Capture setup.py configuration for later use by cffi, otherwise the
