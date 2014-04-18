@@ -3353,8 +3353,7 @@ static int init_errors(PyObject *mod)
         snprintf(qualname, sizeof qualname, "lmdb.%s", error->name);
         qualname[sizeof qualname - 1] = '\0';
 
-        PyObject *klass = PyErr_NewException(qualname, Error, NULL);
-        if(! klass) {
+        if(! ((klass = PyErr_NewException(qualname, Error, NULL)))) {
             return -1;
         }
 
