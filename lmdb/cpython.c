@@ -975,7 +975,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     }
     if((rc = mdb_dbi_flags(txn, dbi, &f))) {
         err_set("mdb_dbi_flags", rc);
-        mdb_dbi_close(env, dbi);
+        mdb_dbi_close(env->env, dbi);
         return NULL;
     }
 
@@ -1045,7 +1045,6 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 {
     PyObject *dct;
     unsigned int f;
-    int rc;
 
     struct db_flags {
         TransObject *txn;
@@ -1089,6 +1088,7 @@ static struct PyMethodDef db_methods[] = {
 
 static PyTypeObject PyDatabase_Type = {
     PyObject_HEAD_INIT(NULL)
+    0,                          /*ob_size*/
     "_Database",                /*tp_name*/
     sizeof(DbObject),           /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -1713,6 +1713,7 @@ static struct PyMethodDef env_methods[] = {
 
 static PyTypeObject PyEnvironment_Type = {
     PyObject_HEAD_INIT(NULL)
+    0,                          /*ob_size*/
     "Environment",              /*tp_name*/
     sizeof(EnvObject),          /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -2550,6 +2551,7 @@ static struct PyMethodDef cursor_methods[] = {
 
 static PyTypeObject PyCursor_Type = {
     PyObject_HEAD_INIT(NULL)
+    0,                          /*ob_size*/
     "Cursor",                   /*tp_name*/
     sizeof(CursorObject),       /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -2650,6 +2652,7 @@ static struct PyMethodDef iter_methods[] = {
 
 static PyTypeObject PyIterator_Type = {
     PyObject_HEAD_INIT(NULL)
+    0,                          /*ob_size*/
     "Iterator",                 /*tp_name*/
     sizeof(IterObject),         /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -3176,6 +3179,7 @@ static struct PyMethodDef trans_methods[] = {
 
 static PyTypeObject PyTransaction_Type = {
     PyObject_HEAD_INIT(NULL)
+    0,                          /*ob_size*/
     "Transaction",              /*tp_name*/
     sizeof(TransObject),        /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -3351,7 +3355,6 @@ static int init_errors(PyObject *mod)
         const struct error_map *error = &error_map[i];
         PyObject *klass;
 
-        klass = PyErr_NewException(qualname, Error, NULL);
         snprintf(qualname, sizeof qualname, "lmdb.%s", error->name);
         qualname[sizeof qualname - 1] = '\0';
 
