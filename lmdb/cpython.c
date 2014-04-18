@@ -1042,6 +1042,7 @@ static PyObject *
 db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 {
     PyObject *dct;
+	unsigned int f;
     int rc;
 
     struct db_flags {
@@ -1063,7 +1064,7 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     }
 
     dct = PyDict_New();
-    unsigned int f = self->flags;
+    f = self->flags;
     PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
     PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
     return dct;
@@ -1086,12 +1087,33 @@ static struct PyMethodDef db_methods[] = {
 
 static PyTypeObject PyDatabase_Type = {
     PyObject_HEAD_INIT(NULL)
-    .tp_basicsize = sizeof(DbObject),
-    .tp_dealloc = (destructor) db_dealloc,
-    .tp_clear = (inquiry) db_clear,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = db_methods,
-    .tp_name = "_Database"
+    "_Database",                /*tp_name*/
+    sizeof(DbObject),           /*tp_basicsize*/
+    0,                          /*tp_itemsize*/
+    (destructor)db_dealloc,     /*tp_dealloc*/
+    0,                          /*tp_print*/
+    0,                          /*tp_getattr*/
+    0,                          /*tp_setattr*/
+    0,                          /*tp_compare*/
+    0,                          /*tp_repr*/
+    0,                          /*tp_as_number*/
+    0,                          /*tp_as_sequence*/
+    0,                          /*tp_as_mapping*/
+    0,                          /*tp_hash*/
+    0,                          /*tp_call*/
+    0,                          /*tp_str*/
+    0,                          /*tp_getattro*/
+    0,                          /*tp_setattro*/
+    0,                          /*tp_as_buffer*/
+    Py_TPFLAGS_DEFAULT,         /*tp_flags*/
+    0,                          /*tp_doc*/
+    0,                          /*tp_traverse*/
+    (inquiry)db_clear,          /*tp_clear*/
+    0,                          /*tp_richcompare*/
+    0,                          /*tp_weaklistoffset*/
+    0,                          /*tp_iter*/
+    0,                          /*tp_iternext*/
+    db_methods                  /*tp_methods*/
 };
 
 
@@ -1375,6 +1397,7 @@ env_copyfd(EnvObject *self, PyObject *args)
     struct env_copyfd {
         int fd;
     } arg = {-1};
+    int rc;
 
     static const struct argspec argspec[] = {
         {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
@@ -1386,7 +1409,6 @@ env_copyfd(EnvObject *self, PyObject *args)
     if(arg.fd == -1) {
         return type_error("fd argument required");
     }
-    int rc;
     UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
     if(rc) {
         return err_set("mdb_env_copyfd", rc);
@@ -1409,13 +1431,13 @@ env_info(EnvObject *self)
         {TYPE_UINT, "num_readers", offsetof(MDB_envinfo, me_numreaders)},
         {TYPE_EOF, NULL, 0}
     };
+    MDB_envinfo info;
+    int rc;
 
     if(! self->valid) {
         return err_invalid();
     }
 
-    MDB_envinfo info;
-    int rc;
     UNLOCKED(rc, mdb_env_info(self->env, &info));
     if(rc) {
         err_set("mdb_env_info", rc);
@@ -1461,10 +1483,11 @@ env_flags(EnvObject *self)
 static PyObject *
 env_max_key_size(EnvObject *self)
 {
+	int key_size;
     if(! self->valid) {
         return err_invalid();
     }
-    int key_size = mdb_env_get_maxkeysize(self->env);
+    key_size = mdb_env_get_maxkeysize(self->env);
     return PyLong_FromLongLong(key_size);
 }
 
@@ -1474,12 +1497,13 @@ env_max_key_size(EnvObject *self)
 static PyObject *
 env_max_readers(EnvObject *self)
 {
+    unsigned int readers;
+	int rc;
+
     if(! self->valid) {
         return err_invalid();
     }
-    unsigned int readers;
-    int rc = mdb_env_get_maxreaders(self->env, &readers);
-    if(rc) {
+    if((rc = mdb_env_get_maxreaders(self->env, &readers))) {
         return err_set("mdb_env_get_maxreaders", rc);
     }
     return PyLong_FromLongLong(readers);
@@ -1506,12 +1530,13 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, DUPSORT_S, OFFSET(env_open_db, dupsort)},
         {ARG_BOOL, CREATE_S, OFFSET(env_open_db, create)},
     };
+	int flags;
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
 
-    int flags = 0;
+    flags = 0;
     if(arg.reverse_key) {
         flags |= MDB_REVERSEKEY;
     }
@@ -1535,12 +1560,13 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 env_path(EnvObject *self)
 {
-    if(! self->valid) {
+    const char *path;
+    int rc;
+
+	if(! self->valid) {
         return err_invalid();
     }
 
-    const char *path;
-    int rc;
     if((rc = mdb_env_get_path(self->env, &path))) {
         return err_set("mdb_env_get_path", rc);
     }
