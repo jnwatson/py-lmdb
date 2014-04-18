@@ -22,11 +22,8 @@
 
 #define PY_SSIZE_T_CLEAN
 
-#ifdef _MSC_VER
-#   include "msvc-stdint.h"
-#else
-#   include <stdint.h>
-#endif
+/* Search lib/win32 first, then fallthrough to <stdint.h> as required.*/
+#include "stdint.h"
 
 #include <errno.h>
 #include <string.h>
