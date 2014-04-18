@@ -36,14 +36,12 @@ except ImportError:
     memsink = None
 
 
-use_windows = sys.platform.startswith('win')
-
 if hasattr(platform, 'python_implementation'):
     use_cpython = platform.python_implementation() == 'CPython'
 else:
     use_cpython = True
 
-if use_windows or os.getenv('LMDB_FORCE_CFFI') is not None:
+if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
 
 if sys.version[:3] < '2.5':
@@ -88,8 +86,11 @@ if not os.getenv('LMDB_MAINTAINER'):
     extra_compile_args += ['-w']
 
 
-# Windows hacks.
-if use_windows:
+# Microsoft Visual Studio 9 ships with neither inttypes.h, stdint.h, or a sane
+# definition for ssize_t, so here we add lib/win32 to the search path, which
+# contains emulation header files provided by a third party. Advapi32 is needed
+# for LMDB's use of Windows security APIs.
+if sys.platform.startswith('win'):
     extra_include_dirs += ['lib/win32']
     extra_compile_args += ['-Dssize_t=signed long']
     libraries += ['Advapi32']
