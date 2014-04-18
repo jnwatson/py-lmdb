@@ -790,7 +790,9 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
             type_error("too many positional arguments.");
             return -1;
         }
-        size = fmin(specsize, size);
+        if(specsize < size) {
+            size = specsize;
+        }
         for(i = 0; i < size; i++) {
             if(parse_arg(argspec + i, PyTuple_GET_ITEM(args, i), out)) {
                 return -1;
