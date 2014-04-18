@@ -88,11 +88,13 @@ if not os.getenv('LMDB_MAINTAINER'):
 
 # Microsoft Visual Studio 9 ships with neither inttypes.h, stdint.h, or a sane
 # definition for ssize_t, so here we add lib/win32 to the search path, which
-# contains emulation header files provided by a third party. Advapi32 is needed
-# for LMDB's use of Windows security APIs.
+# contains emulation header files provided by a third party. We force-include
+# Python.h everywhere since it has a portable definition of ssize_t, which
+# inttypes.h and stdint.h lack, and to avoid having to modify the LMDB source
+# code. Advapi32 is needed for LMDB's use of Windows security APIs.
 if sys.platform.startswith('win'):
     extra_include_dirs += ['lib/win32']
-    extra_compile_args += ['-Dssize_t=signed long']
+    extra_compile_args += [r'/FIPython.h']
     libraries += ['Advapi32']
 
 
