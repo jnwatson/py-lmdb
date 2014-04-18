@@ -2546,7 +2546,7 @@ static struct PyMethodDef cursor_methods[] = {
     {NULL, NULL}
 };
 
-static PyTypeObject _PyWeakref_RefType = {
+static PyTypeObject PyCursor_Type = {
     PyObject_HEAD_INIT(NULL)
     "Cursor",                   /*tp_name*/
     sizeof(CursorObject),       /*tp_basicsize*/
