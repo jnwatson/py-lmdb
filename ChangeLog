@@ -1,4 +1,12 @@
 
+2014-04-30 v0.80
+
+* The CFFI version now builds on Windows under Visual Studio 9.0, the compiler
+  for Python 2.7. If setup.py detects it is running on Windows, then the CFFI
+  version will be forced. This is temporary until the CPython extension source
+  can be downgraded to MSVC-compatible C9x.
+
+
 2014-03-17 v0.79
 
 * CPython Cursor.delete() lacked dupdata argument, fixed.
