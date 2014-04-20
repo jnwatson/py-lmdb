@@ -2624,6 +2624,7 @@ iter_next(IterObject *self)
     if(! self->curs->positioned) {
         return NULL;
     }
+
     if(self->started) {
         if(_cursor_get_c(self->curs, self->op)) {
             return NULL;
@@ -2631,11 +2632,10 @@ iter_next(IterObject *self)
         if(! self->curs->positioned) {
             return NULL;
         }
-    } else {
-        PyObject *val = self->val_func(self->curs);
-        self->started = 1;
-        return val;
     }
+
+    self->started = 1;
+    return self->val_func(self->curs);
 }
 
 static struct PyMethodDef iter_methods[] = {
