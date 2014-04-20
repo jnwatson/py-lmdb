@@ -1944,10 +1944,6 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
     };
 
-    if(! self->valid) {
-        return err_invalid();
-    }
-
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
     }
