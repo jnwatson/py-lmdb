@@ -83,7 +83,6 @@ import signal
 import string
 import struct
 import sys
-import termios
 import time
 
 # Python3.x bikeshedded trechery.
@@ -567,7 +566,8 @@ def cmd_stat(opts, args):
 
 def _get_term_width(default=80):
     try:
-        import fcntl  # No fcntl on win32
+        import fcntl    # No fcntl on win32
+        import termios  # No termios on win32
         s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
         height, width = struct.unpack('hh', s)
         return width, height
