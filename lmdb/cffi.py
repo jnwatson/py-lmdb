@@ -35,6 +35,10 @@ import sys
 import threading
 import weakref
 
+is_win32 = sys.platform == 'win32'
+if is_win32:
+    import msvcrt
+
 try:
     import __builtin__
 except ImportError:
@@ -733,6 +737,9 @@ class Environment(object):
         Equivalent to `mdb_env_copyfd()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
+        if is_win32:
+            # Convert C library handle to kernel handle.
+            fd = msvcrt.get_osfhandle(fd)
         rc = _lib.mdb_env_copyfd(self._env, fd)
         if rc:
             raise _error("mdb_env_copyfd", rc)
