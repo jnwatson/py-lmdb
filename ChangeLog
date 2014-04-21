@@ -1,5 +1,5 @@
 
-2014-04-30 v0.80
+2014-04-21 v0.80
 
 * Both variants now build successfully as 32 bit / 64bit binaries on on
   Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
@@ -12,6 +12,8 @@
 
 * The lmdb.enable_drop_gil() function was removed. Its purpose was
   experimental at best, confusing at worst.
+
+* LMDB 0.9.11 is bundled along with upstream Git fixes of 2014-04-21.
 
 
 2014-03-17 v0.79
