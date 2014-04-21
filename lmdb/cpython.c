@@ -228,6 +228,11 @@ typedef struct TransObject TransObject;
 #       define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
 #   endif
 
+#   ifndef PyVarObject_HEAD_INIT
+#       define PyVarObject_HEAD_INIT(x, y) \
+            PyObject_HEAD_INIT(x) y,
+#   endif
+
 #endif
 
 #if (PY_MAJOR_VERSION == 2) && (PY_MINOR_VERSION < 6)
