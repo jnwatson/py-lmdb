@@ -1098,8 +1098,7 @@ static struct PyMethodDef db_methods[] = {
 };
 
 static PyTypeObject PyDatabase_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                          /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "_Database",                /*tp_name*/
     sizeof(DbObject),           /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -1742,8 +1741,7 @@ static struct PyMethodDef env_methods[] = {
 };
 
 static PyTypeObject PyEnvironment_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                          /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "Environment",              /*tp_name*/
     sizeof(EnvObject),          /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -2576,8 +2574,7 @@ static struct PyMethodDef cursor_methods[] = {
 };
 
 static PyTypeObject PyCursor_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                          /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "Cursor",                   /*tp_name*/
     sizeof(CursorObject),       /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -2677,8 +2674,7 @@ static struct PyMethodDef iter_methods[] = {
 };
 
 static PyTypeObject PyIterator_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                          /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "Iterator",                 /*tp_name*/
     sizeof(IterObject),         /*tp_basicsize*/
     0,                          /*tp_itemsize*/
@@ -3204,8 +3200,7 @@ static struct PyMethodDef trans_methods[] = {
 };
 
 static PyTypeObject PyTransaction_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                          /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "Transaction",              /*tp_name*/
     sizeof(TransObject),        /*tp_basicsize*/
     0,                          /*tp_itemsize*/
