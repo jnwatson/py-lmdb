@@ -404,14 +404,6 @@ class ReplaceTest(unittest.TestCase):
         self.assertRaises(lmdb.BadValsizeError,
             lambda: txn.replace(B(''), B('a')))
 
-    def test_simple(self):
-        _, env = testlib.temp_env()
-        txn = env.begin(write=True)
-        assert None is txn.replace(B('a'), B('a'))
-        assert B('a') == txn.replace(B('a'), B('a'))
-        assert B('a') == txn.replace(B('a'), B('b'))
-        assert B('b') == txn.replace(B('a'), B('b'))
-
     def test_dupsort_noexist(self):
         _, env = testlib.temp_env()
         db = env.open_db('db1', dupsort=True)
@@ -423,39 +415,12 @@ class ReplaceTest(unittest.TestCase):
         assert cur.set_key(B('a'))
         assert [B('z')] == list(cur.iternext_dup())
 
-    def test_dupsort_exist(self):
+    def test_dupdata_no_dupsort(self):
         _, env = testlib.temp_env()
-        db = env.open_db('db1', dupsort=True)
-        txn = env.begin(write=True, db=db)
-        assert txn.put(B('a'), B('1'))
-        assert txn.put(B('a'), B('2'))
-        assert txn.put(B('a'), B('3'))
-
-        assert B('1') == txn.replace(B('a'), B('8'))
-        assert B('2') == txn.replace(B('a'), B('9'))
-        assert B('3') == txn.replace(B('a'), B('A'))
-
-        assert [B('a')] == list(txn.cursor().iternext_nodup())
-        curs = txn.cursor()
-        assert curs.set_key(B('a'))
-        assert [B('8'), B('9'), B('A')] == list(curs.iternext_dup())
-
-    def test_dupsort_exist_oldval(self):
-        _, env = testlib.temp_env()
-        db = env.open_db('db1', dupsort=True)
-        txn = env.begin(write=True, db=db)
-        assert txn.put(B('a'), B('1'))
-        assert txn.put(B('a'), B('2'))
-        assert txn.put(B('a'), B('3'))
-
-        assert B('3') == txn.replace(B('a'), B('9'), B('3'))
-        assert B('2') == txn.replace(B('a'), B('A'), B('2'))
-        assert B('1') == txn.replace(B('a'), B('B'), B('1'))
-
-        assert [B('a')] == list(txn.cursor().iternext_nodup())
-        curs = txn.cursor()
-        assert curs.set_key(B('a'))
-        assert [B('9'), B('A'), B('B')] == list(curs.iternext_dup())
+        txn = env.begin(write=True)
+        assert txn.put(B('a'), B('a'), dupdata=True)
+        assert txn.put(B('a'), B('b'), dupdata=True)
+        txn.get(B('a'))
 
 
 if __name__ == '__main__':
