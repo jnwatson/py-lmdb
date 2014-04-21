@@ -75,7 +75,6 @@ import array
 import collections
 import contextlib
 import csv
-import fcntl
 import functools
 import optparse
 import os
@@ -568,6 +567,7 @@ def cmd_stat(opts, args):
 
 def _get_term_width(default=80):
     try:
+        import fcntl  # No fcntl on win32
         s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
         height, width = struct.unpack('hh', s)
         return width, height
