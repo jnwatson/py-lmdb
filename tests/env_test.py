@@ -22,8 +22,9 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
-import signal
 import os
+import signal
+import sys
 import unittest
 
 import testlib
@@ -390,17 +391,19 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.readers() != NO_READERS
         assert env.reader_check() == 0
 
-        # Start a child, open a txn, then crash the child.
-        child_pid = os.fork()
-        if not child_pid:
-            env2 = lmdb.open(path)
-            txn = env2.begin()
-            os.kill(os.getpid(), signal.SIGKILL)
+        if sys.platform != 'win32':
+            # Start a child, open a txn, then crash the child.
+            child_pid = os.fork()
+            if not child_pid:
+                env2 = lmdb.open(path)
+                txn = env2.begin()
+                os.kill(os.getpid(), signal.SIGKILL)
 
-        assert os.waitpid(child_pid, 0) == (child_pid, signal.SIGKILL)
-        assert env.reader_check() == 1
-        assert env.reader_check() == 0
-        assert env.readers() != NO_READERS
+            assert os.waitpid(child_pid, 0) == (child_pid, signal.SIGKILL)
+            assert env.reader_check() == 1
+            assert env.reader_check() == 0
+            assert env.readers() != NO_READERS
+
         txn1.abort()
         assert env.readers() == NO_READERS
 
