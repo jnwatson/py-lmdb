@@ -2,7 +2,7 @@ language: c
 install:
 setup:
 script:
-    - "sudo ./.runtests-travisci.sh"
+    - "sudo ./misc/runtests-travisci.sh"
 
 notifications:
   email: false

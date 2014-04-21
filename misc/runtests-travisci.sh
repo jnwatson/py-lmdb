@@ -37,4 +37,4 @@ quiet python3.2 -measy_install pytest cffi
 quiet python3.3 -measy_install pytest cffi
 quiet pypy -measy_install pytest
 
-source .runtests-ubuntu-12-04.sh
+source misc/runtests-ubuntu-12-04.sh
