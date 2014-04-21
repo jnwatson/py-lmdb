@@ -32,14 +32,13 @@
 #include "Python.h"
 #include "structmember.h"
 
-#ifdef _WIN32
-#include <io.h>        /* _get_osfhandle */
-#include <windows.h>   /* GetLastError() */
-#endif
-
 #ifdef HAVE_MEMSINK
 #define USING_MEMSINK
 #include "memsink.h"
+#endif
+
+#ifdef _WIN32
+#include <windows.h> /* HANDLE */
 #endif
 
 #include "lmdb.h"
@@ -62,6 +61,16 @@
 #   define NOINLINE
 #endif
 
+
+/**
+ * On Win32, Environment.copyfd() needs _get_osfmodule() from the C library,
+ * except that function performs no input validation. So instead we import
+ * msvcrt standard library module, which wraps _get_osfmodule() in a way that
+ * is crash-safe.
+ */
+#ifdef _WIN32
+static PyObject *msvcrt;
+#endif
 
 /**
  * Integer indices into `string_tbl', representing an associated string. We
@@ -1403,7 +1412,8 @@ env_copyfd(EnvObject *self, PyObject *args)
     } arg = {-1};
     int rc;
 #ifdef _WIN32
-    HANDLE handle;
+    PyObject *temp;
+    Py_ssize_t handle;
 #endif
 
     static const struct argspec argspec[] = {
@@ -1418,11 +1428,16 @@ env_copyfd(EnvObject *self, PyObject *args)
     }
 
 #ifdef _WIN32
-    handle = _get_osfhandle(arg.fd);
-    if(handle == INVALID_HANDLE_VALUE) {
-        return err_set("_get_osfhandle", GetLastError());
+    temp = PyObject_CallMethod(msvcrt, "get_osfhandle", "i", arg.fd);
+    if(! temp) {
+        return NULL;
     }
-    UNLOCKED(rc, mdb_env_copyfd(self->env, handle));
+    handle = PyNumber_AsSsize_t(temp, PyExc_OverflowError);
+    Py_DECREF(temp);
+    if(PyErr_Occurred()) {
+        return NULL;
+    }
+    UNLOCKED(rc, mdb_env_copyfd(self->env, (HANDLE)handle));
 #else
     UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
 #endif
@@ -3403,6 +3418,12 @@ MODINIT_NAME(void)
 #ifdef HAVE_MEMSINK
     MemSink_IMPORT;
     if(ms_init_source(&PyTransaction_Type, offsetof(TransObject, sink_head))) {
+        MOD_RETURN(NULL);
+    }
+#endif
+
+#ifdef _WIN32
+    if(! ((msvcrt = PyImport_ImportModule("msvcrt")))) {
         MOD_RETURN(NULL);
     }
 #endif
