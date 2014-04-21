@@ -1,19 +1,17 @@
 
 2014-04-21 v0.80
 
-* Both variants now build successfully as 32 bit / 64bit binaries on on
-  Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
+* Both variants now build successfully as 32 bit / 64bit binaries on
+  eindows under Visual Studio 9.0, the compiler for Python 2.7. This enables
   py-lmdb to be installed via pip on Windows without requiring a compiler to
-  be available. In future, .egg/.whl releases releases will be pre-built for
-  all recent Python versions on Windows.
+  be available. In future, .egg/.whl releases will be pre-built for all recent
+  Python versions on Windows.
 
   Known bugs: Environment.copy() and Environment.copyfd() currently produce a
   database that cannot be reopened.
 
 * The lmdb.enable_drop_gil() function was removed. Its purpose was
   experimental at best, confusing at worst.
-
-* LMDB 0.9.11 is bundled along with upstream Git fixes of 2014-04-21.
 
 
 2014-03-17 v0.79
