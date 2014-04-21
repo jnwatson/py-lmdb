@@ -668,7 +668,8 @@ void mdb_env_close(MDB_env *env);
 	/** @brief Set environment flags.
 	 *
 	 * This may be used to set some flags in addition to those from
-	 * #mdb_env_open(), or to unset these flags.
+	 * #mdb_env_open(), or to unset these flags.  If several threads
+	 * change the flags at the same time, the result is undefined.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] flags The flags to change, bitwise OR'ed together
 	 * @param[in] onoff A non-zero value sets the flags, zero clears them.
@@ -829,7 +830,7 @@ typedef void MDB_assert_func(MDB_env *env, const char *msg);
 	 * Disabled if liblmdb is buillt with NDEBUG.
 	 * @note This hack should become obsolete as lmdb's error handling matures.
 	 * @param[in] env An environment handle returned by #mdb_env_create().
-	 * @parem[in] func An #MDB_assert_func function, or 0.
+	 * @param[in] func An #MDB_assert_func function, or 0.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
@@ -1333,7 +1334,9 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	 * <ul>
 	 *	<li>#MDB_CURRENT - overwrite the data of the key/data pair to which
 	 *		the cursor refers with the specified data item. The \b key
-	 *		parameter is ignored.  The \b data size must match the original.
+	 *		parameter is not used for positioning the cursor, but should
+	 *		still be provided. If using sorted duplicates (#MDB_DUPSORT)
+	 *		the data item must still sort into the same place.
 	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
 	 *		already appear in the database. This flag may only be specified
 	 *		if the database was opened with #MDB_DUPSORT. The function will
