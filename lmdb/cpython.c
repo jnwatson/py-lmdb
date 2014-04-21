@@ -32,6 +32,11 @@
 #include "Python.h"
 #include "structmember.h"
 
+#ifdef _WIN32
+#include <io.h>        /* _get_osfhandle */
+#include <windows.h>   /* GetLastError() */
+#endif
+
 #ifdef HAVE_MEMSINK
 #define USING_MEMSINK
 #include "memsink.h"
@@ -1397,6 +1402,9 @@ env_copyfd(EnvObject *self, PyObject *args)
         int fd;
     } arg = {-1};
     int rc;
+#ifdef _WIN32
+    HANDLE handle;
+#endif
 
     static const struct argspec argspec[] = {
         {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
@@ -1408,7 +1416,17 @@ env_copyfd(EnvObject *self, PyObject *args)
     if(arg.fd == -1) {
         return type_error("fd argument required");
     }
+
+#ifdef _WIN32
+    handle = _get_osfhandle(arg.fd);
+    if(handle == INVALID_HANDLE_VALUE) {
+        return err_set("_get_osfhandle", GetLastError());
+    }
+    UNLOCKED(rc, mdb_env_copyfd(self->env, handle));
+#else
     UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
+#endif
+
     if(rc) {
         return err_set("mdb_env_copyfd", rc);
     }
