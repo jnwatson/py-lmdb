@@ -128,7 +128,7 @@ if use_cpython:
     )]
 else:
     print('Using cffi extension.')
-    install_requires = ['cffi>=0.8.0']
+    install_requires = ['cffi>=0.8']
     try:
         import lmdb.cffi
         ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
