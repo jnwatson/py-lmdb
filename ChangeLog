@@ -1,4 +1,13 @@
 
+2014-05-21 v0.81
+
+* On Python 2.x the extension module would silently interpret Unicode
+  instances as buffer objects, causing UCS-2/UCS-4 string data to end up in
+  the database. This was never intentional and now raises TypeError. Any
+  Unicode data passed to py-lmdb must explicitly be encoded with .encode()
+  first.
+
+
 2014-04-21 v0.80
 
 * Both variants now build successfully as 32 bit / 64bit binaries on
