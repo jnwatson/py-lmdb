@@ -477,6 +477,67 @@ static const struct error_map error_map[] = {
     {ENOSPC, "DiskError"}
 };
 
+
+/* ---------- */
+/* Exceptions */
+/* ---------- */
+
+/**
+ * Raise an exception appropriate for the given `rc` MDB error code.
+ */
+static void * NOINLINE
+err_set(const char *what, int rc)
+{
+    size_t count = sizeof error_map / sizeof error_map[0];
+    PyObject *klass = Error;
+    size_t i;
+
+    if(rc) {
+        for(i = 0; i < count; i++) {
+            if(error_map[i].code == rc) {
+                klass = error_tbl[i];
+                break;
+            }
+        }
+    }
+
+    PyErr_Format(klass, "%s: %s", what, mdb_strerror(rc));
+    return NULL;
+}
+
+static void * NOINLINE
+err_invalid(void)
+{
+    PyErr_Format(Error, "Attempt to operate on closed/deleted/dropped object.");
+    return NULL;
+}
+
+static void * NOINLINE
+type_error(const char *what)
+{
+    PyErr_Format(PyExc_TypeError, "%s", what);
+    return NULL;
+}
+
+/**
+ * Convert a PyObject to filesystem bytes. Must call fspath_fini() when done.
+ * Return 0 on success, or set an exception and return -1 on failure.
+ */
+static PyObject *
+get_fspath(PyObject *src)
+{
+    if(PyBytes_CheckExact(src)) {
+        Py_INCREF(src);
+        return src;
+    }
+    if(! PyUnicode_CheckExact(src)) {
+        type_error("Filesystem path must be Unicode or bytes.");
+        return NULL;
+    }
+    return PyUnicode_AsEncodedString(src, Py_FileSystemDefaultEncoding,
+                                     "strict");
+}
+
 /* ------- */
 /* Helpers */
 /* ------- */
@@ -614,67 +675,6 @@ val_from_buffer(MDB_val *val, PyObject *buf)
     Py_BEGIN_ALLOW_THREADS \
     out = (e); \
     Py_END_ALLOW_THREADS
-
-
-/* ---------- */
-/* Exceptions */
-/* ---------- */
-
-/**
- * Raise an exception appropriate for the given `rc` MDB error code.
- */
-static void * NOINLINE
-err_set(const char *what, int rc)
-{
-    size_t count = sizeof error_map / sizeof error_map[0];
-    PyObject *klass = Error;
-    size_t i;
-
-    if(rc) {
-        for(i = 0; i < count; i++) {
-            if(error_map[i].code == rc) {
-                klass = error_tbl[i];
-                break;
-            }
-        }
-    }
-
-    PyErr_Format(klass, "%s: %s", what, mdb_strerror(rc));
-    return NULL;
-}
-
-static void * NOINLINE
-err_invalid(void)
-{
-    PyErr_Format(Error, "Attempt to operate on closed/deleted/dropped object.");
-    return NULL;
-}
-
-static void * NOINLINE
-type_error(const char *what)
-{
-    PyErr_Format(PyExc_TypeError, "%s", what);
-    return NULL;
-}
-
-/**
- * Convert a PyObject to filesystem bytes. Must call fspath_fini() when done.
- * Return 0 on success, or set an exception and return -1 on failure.
- */
-static PyObject *
-get_fspath(PyObject *src)
-{
-    if(PyBytes_CheckExact(src)) {
-        Py_INCREF(src);
-        return src;
-    }
-    if(! PyUnicode_CheckExact(src)) {
-        type_error("Filesystem path must be Unicode or bytes.");
-        return NULL;
-    }
-    return PyUnicode_AsEncodedString(src, Py_FileSystemDefaultEncoding,
-                                     "strict");
-}
 
 
 /* ---------------- */
