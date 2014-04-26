@@ -1,5 +1,5 @@
 
-2014-05-21 v0.81
+2014-04-26 v0.81
 
 * On Python 2.x the extension module would silently interpret Unicode
   instances as buffer objects, causing UCS-2/UCS-4 string data to end up in
@@ -10,6 +10,8 @@
 * open_db()'s name argument was renamed to key, and its semantics now match
   get() and put(): in other words the key must be a bytestring, and passing
   Unicode will raise TypeError.
+
+* The extension module now builds under Python 3.4 on Windows.
 
 
 2014-04-21 v0.80
