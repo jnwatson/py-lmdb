@@ -29,12 +29,14 @@ import tempfile
 INTERPS = (
     ('Python27', False),
     ('Python27-64', False),
-    ('Python31', False),
-    ('Python31-64', False),
+    #('Python31', False),
+    #('Python31-64', False),
     ('Python32', False),
     ('Python32-64', False),
     ('Python33', False),
     ('Python33-64', False),
+    ('Python34', False),
+    ('Python34-64', False),
 )
 
 
@@ -43,11 +45,7 @@ def interp_path(interp):
 
 
 def interp_has_module(path, module):
-    try:
-        run(path, '-c', 'import ' + module)
-    except subprocess.CalledProcessError:
-        return False
-    return True
+    return run_or_false(path, '-c', 'import ' + module)
 
 
 def run(*args):
@@ -60,6 +58,14 @@ def run(*args):
         raise
 
 
+def run_or_false(*args):
+    try:
+        run(*args)
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
 def main():
     run('git', 'clean', '-dfx', 'dist')
     for interp, is_cffi in INTERPS:
@@ -67,8 +73,8 @@ def main():
         run('git', 'clean', '-dfx', 'build', 'temp', 'lmdb')
         run(path, '-mpip', 'install', '-e', '.')
         #run(path, '-mpy.test')
-        run(path, 'setup.py', 'bdist_egg')
-        run(path, 'setup.py', 'bdist_wheel')
+        run(path, 'setup.py', 'bdist_egg', 'upload')
+        run(path, 'setup.py', 'bdist_wheel', 'upload')
 
 
 if __name__ == '__main__':

@@ -28,6 +28,7 @@ from windows_build import interp_has_module
 from windows_build import interp_path
 from windows_build import INTERPS
 from windows_build import run
+from windows_build import run_or_false
 
 EZSETUP_URL = ('https://bitbucket.org/pypa/setuptools'
                '/raw/bootstrap/ez_setup.py')
@@ -51,6 +52,7 @@ def easy_install_path(interp):
 def main():
     for interp, is_cffi in INTERPS:
         path = interp_path(interp)
+        run_or_false(path, '-m', 'ensurepip')
         if not interp_has_module(path, 'easy_install'):
             run(path, ezsetup_path())
         for pkg in 'pip', 'cffi', 'pytest', 'wheel':
