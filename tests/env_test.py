@@ -201,9 +201,9 @@ class OpenTest(unittest.TestCase):
             lambda: testlib.temp_env(max_dbs=-1))
         for val in 0, 10, 20:
             _, env = testlib.temp_env(max_dbs=val)
-            dbs = [env.open_db('db%d' % i) for i in range(val)]
+            dbs = [env.open_db(B('db%d' % i)) for i in range(val)]
             self.assertRaises(lmdb.DbsFullError,
-                lambda: env.open_db('toomany'))
+                lambda: env.open_db(B('toomany')))
 
 
 class CloseTest(unittest.TestCase):
@@ -444,7 +444,7 @@ class BeginTest(unittest.TestCase):
     def test_bind_db(self):
         _, env = testlib.temp_env()
         main = env.open_db(None)
-        sub = env.open_db('db1')
+        sub = env.open_db(B('db1'))
 
         txn = env.begin(write=True, db=sub)
         assert txn.put(B('b'), B(''))           # -> sub
@@ -520,12 +520,18 @@ class OpenDbTest(unittest.TestCase):
         assert not flags['dupsort']
         txn.abort()
 
+    def test_unicode(self):
+        _, env = testlib.temp_env()
+        assert env.open_db(B('myindex')) is not None
+        self.assertRaises(TypeError,
+            lambda: env.open_db(UnicodeType('myindex')))
+
     def test_sub_notxn(self):
         _, env = testlib.temp_env()
         assert env.info()['last_txnid'] == 0
-        db1 = env.open_db('subdb1')
+        db1 = env.open_db(B('subdb1'))
         assert env.info()['last_txnid'] == 1
-        db2 = env.open_db('subdb2')
+        db2 = env.open_db(B('subdb2'))
         assert env.info()['last_txnid'] == 2
 
         env.close()
@@ -536,23 +542,23 @@ class OpenDbTest(unittest.TestCase):
         _, env = testlib.temp_env()
         txn = env.begin(write=False)
         self.assertRaises(lmdb.ReadonlyError,
-            lambda: env.open_db('subdb', txn=txn))
+            lambda: env.open_db(B('subdb'), txn=txn))
 
     def test_sub_txn(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=True)
-        db1 = env.open_db('subdb1', txn=txn)
-        db2 = env.open_db('subdb2', txn=txn)
+        db1 = env.open_db(B('subdb1'), txn=txn)
+        db2 = env.open_db(B('subdb2'), txn=txn)
         for db in db1, db2:
             assert db.flags(txn) == {'reverse_key': False, 'dupsort': False}
         txn.commit()
 
     def test_reopen(self):
         path, env = testlib.temp_env()
-        db1 = env.open_db('subdb1')
+        db1 = env.open_db(B('subdb1'))
         env.close()
         env = lmdb.open(path, max_dbs=10)
-        db1 = env.open_db('subdb1')
+        db1 = env.open_db(B('subdb1'))
 
     FLAG_SETS = [(flag, val)
                  for flag in ('reverse_key', 'dupsort')
@@ -563,8 +569,8 @@ class OpenDbTest(unittest.TestCase):
         txn = env.begin(write=True)
 
         for flag, val in self.FLAG_SETS:
-            name = '%s-%s' % (flag, val)
-            db = env.open_db(name, txn=txn, **{flag: val})
+            key = B('%s-%s' % (flag, val))
+            db = env.open_db(key, txn=txn, **{flag: val})
             assert db.flags(txn)[flag] == val
 
         txn.commit()
@@ -574,8 +580,8 @@ class OpenDbTest(unittest.TestCase):
         txn = env.begin(write=True)
 
         for flag, val in self.FLAG_SETS:
-            name = '%s-%s' % (flag, val)
-            db = env.open_db(name, txn=txn)
+            key = B('%s-%s' % (flag, val))
+            db = env.open_db(key, txn=txn)
             assert db.flags(txn)[flag] == val
 
 

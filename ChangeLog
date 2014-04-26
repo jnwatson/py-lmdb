@@ -7,6 +7,10 @@
   Unicode data passed to py-lmdb must explicitly be encoded with .encode()
   first.
 
+* open_db()'s name argument was renamed to key, and its semantics now match
+  get() and put(): in other words the key must be a bytestring, and passing
+  Unicode will raise TypeError.
+
 
 2014-04-21 v0.80
 

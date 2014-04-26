@@ -63,7 +63,7 @@ class InitTest(unittest.TestCase):
     def test_bind_db(self):
         _, env = testlib.temp_env()
         main = env.open_db(None)
-        sub = env.open_db('db1')
+        sub = env.open_db(B('db1'))
 
         txn = lmdb.Transaction(env, write=True, db=sub)
         assert txn.put(B('b'), B(''))           # -> sub
@@ -80,7 +80,7 @@ class InitTest(unittest.TestCase):
     def test_bind_db_methods(self):
         _, env = testlib.temp_env()
         maindb = env.open_db(None)
-        db1 = env.open_db('d1')
+        db1 = env.open_db(B('d1'))
         txn = lmdb.Transaction(env, write=True, db=db1)
         assert txn.put(B('a'), B('d1'))
         assert txn.get(B('a'), db=db1) == B('d1')
@@ -142,8 +142,8 @@ class StatTest(unittest.TestCase):
 
     def test_stat(self):
         _, env = testlib.temp_env()
-        db1 = env.open_db('db1')
-        db2 = env.open_db('db2')
+        db1 = env.open_db(B('db1'))
+        db2 = env.open_db(B('db2'))
 
         txn = lmdb.Transaction(env)
         for db in db1, db2:
@@ -179,7 +179,7 @@ class DropTest(unittest.TestCase):
 
     def test_empty(self):
         _, env = testlib.temp_env()
-        db1 = env.open_db('db1')
+        db1 = env.open_db(B('db1'))
         txn = env.begin(write=True)
         txn.put(B('a'), B('a'), db=db1)
         assert txn.get(B('a'), db=db1) == B('a')
@@ -190,7 +190,7 @@ class DropTest(unittest.TestCase):
 
     def test_delete(self):
         _, env = testlib.temp_env()
-        db1 = env.open_db('db1')
+        db1 = env.open_db(B('db1'))
         txn = env.begin(write=True)
         txn.put(B('a'), B('a'), db=db1)
         txn.drop(db1)
@@ -294,7 +294,7 @@ class GetTest(unittest.TestCase):
     def test_db(self):
         _, env = testlib.temp_env()
         maindb = env.open_db(None)
-        db1 = env.open_db('db1')
+        db1 = env.open_db(B('db1'))
 
         txn = env.begin()
         assert txn.get(B('a'), db=db1) is None
@@ -326,7 +326,7 @@ class GetTest(unittest.TestCase):
 
     def test_dupsort(self):
         _, env = testlib.temp_env()
-        db1 = env.open_db('db1', dupsort=True)
+        db1 = env.open_db(B('db1'), dupsort=True)
         txn = env.begin(write=True, db=db1)
         assert txn.put(B('a'), B('a'))
         assert txn.put(B('a'), B('b'))
@@ -406,7 +406,7 @@ class ReplaceTest(unittest.TestCase):
 
     def test_dupsort_noexist(self):
         _, env = testlib.temp_env()
-        db = env.open_db('db1', dupsort=True)
+        db = env.open_db(B('db1'), dupsort=True)
         txn = env.begin(write=True, db=db)
         assert None == txn.replace(B('a'), B('x'))
         assert B('x') == txn.replace(B('a'), B('y'))

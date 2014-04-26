@@ -108,7 +108,6 @@ enum string_id {
     MEMINIT_S,
     METASYNC_S,
     MODE_S,
-    NAME_S,
     OVERWRITE_S,
     PARENT_S,
     PATH_S,
@@ -159,7 +158,6 @@ static const char *strings = (
     "meminit\0"
     "metasync\0"
     "mode\0"
-    "name\0"
     "overwrite\0"
     "parent\0"
     "path\0"
@@ -1544,7 +1542,7 @@ static PyObject *
 env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     struct env_open_db {
-        const char *name;
+        const char *key;
         TransObject *txn;
         int reverse_key;
         int dupsort;
@@ -1552,7 +1550,7 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     } arg = {NULL, NULL, 0, 0, 1};
 
     static const struct argspec argspec[] = {
-        {ARG_STR, NAME_S, OFFSET(env_open_db, name)},
+        {ARG_STR, KEY_S, OFFSET(env_open_db, key)},
         {ARG_TRANS, TXN_S, OFFSET(env_open_db, txn)},
         {ARG_BOOL, REVERSE_KEY_S, OFFSET(env_open_db, reverse_key)},
         {ARG_BOOL, DUPSORT_S, OFFSET(env_open_db, dupsort)},
@@ -1576,9 +1574,9 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     if(arg.txn) {
-        return (PyObject *) db_from_name(self, arg.txn->txn, arg.name, flags);
+        return (PyObject *) db_from_name(self, arg.txn->txn, arg.key, flags);
     } else {
-        return (PyObject *) txn_db_from_name(self, arg.name, flags);
+        return (PyObject *) txn_db_from_name(self, arg.key, flags);
     }
 }
 

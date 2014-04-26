@@ -76,7 +76,7 @@ class CrashTest(unittest.TestCase):
         self.env.close()
 
     def testDbDoubleClose(self):
-        db = self.env.open_db(name='dave3')
+        db = self.env.open_db(key=B('dave3'))
         #db.close()
         #db.close()
 
@@ -86,7 +86,7 @@ class CrashTest(unittest.TestCase):
         self.assertRaises(Exception, (lambda: list(it)))
 
     def testDbCloseActiveIter(self):
-        db = self.env.open_db(name='dave3')
+        db = self.env.open_db(key=B('dave3'))
         with self.env.begin(write=True) as txn:
             txn.put(B('a'), B('b'), db=db)
             it = txn.cursor(db=db).iternext()

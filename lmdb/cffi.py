@@ -894,7 +894,7 @@ class Environment(object):
             raise _error('mdb_reader_check', rc)
         return reaped[0]
 
-    def open_db(self, name=None, txn=None, reverse_key=False, dupsort=False,
+    def open_db(self, key=None, txn=None, reverse_key=False, dupsort=False,
                 create=True):
         """
         Open a database, returning an opaque handle. Repeat
@@ -931,12 +931,14 @@ class Environment(object):
         Preexisting transactions, other than the current transaction and any
         parents, must not use the new handle, nor must their children.
 
-            `name`:
-                Database name. If ``None``, indicates the main database should
-                be returned, otherwise indicates a named database should be
-                created inside the main database. In other words, **a key
-                representing the database will be visible in the main database,
-                and the database name cannot conflict with any existing key**
+            `key`:
+                Bytestring database name. If ``None``, indicates the main
+                database should be returned, otherwise indicates a named
+                database should be created inside the main database.
+
+                In other words, *a key representing the database will be
+                visible in the main database, and the database name cannot
+                conflict with any existing key.*
 
             `txn`:
                 Transaction used to create the database if it does not exist.
@@ -961,21 +963,21 @@ class Environment(object):
                 If ``True``, create the database if it doesn't exist, otherwise
                 raise an exception.
         """
-        if isinstance(name, UnicodeType):
-            name = name.encode(sys.getfilesystemencoding())
+        if isinstance(key, UnicodeType):
+            raise TypeError('key must be bytes')
 
-        ref = self._dbs.get(name)
+        ref = self._dbs.get(key)
         if ref:
             db = ref()
             if db:
                 return db
 
         if txn:
-            db = _Database(self, txn, name, reverse_key, dupsort, create)
+            db = _Database(self, txn, key, reverse_key, dupsort, create)
         else:
             with self.begin(write=True) as txn:
-                db = _Database(self, txn, name, reverse_key, dupsort, create)
-        self._dbs[name] = weakref.ref(db)
+                db = _Database(self, txn, key, reverse_key, dupsort, create)
+        self._dbs[key] = weakref.ref(db)
         return db
 
     def begin(self, db=None, parent=None, write=False, buffers=False):
