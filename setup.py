@@ -92,8 +92,15 @@ if not os.getenv('LMDB_MAINTAINER'):
 # Python.h everywhere since it has a portable definition of ssize_t, which
 # inttypes.h and stdint.h lack, and to avoid having to modify the LMDB source
 # code. Advapi32 is needed for LMDB's use of Windows security APIs.
+p = sys.version.find('MSC v.')
+msvc_ver = int(sys.version[p+6:p+10]) if p != -1 else None
+
 if sys.platform.startswith('win'):
-    extra_include_dirs += ['lib/win32']
+    # If running on Visual Studio<=2010 we must provide <stdint.h>. Newer
+    # versions provide it out of the box.
+    if msvc_ver and not msvc_ver >= 1600:
+        extra_include_dirs += ['lib\\win32-stdint']
+    extra_include_dirs += ['lib\\win32']
     extra_compile_args += [r'/FIPython.h']
     libraries += ['Advapi32']
 
