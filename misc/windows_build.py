@@ -27,6 +27,8 @@ import subprocess
 import tempfile
 
 INTERPS = (
+    ('Python26', False),
+    ('Python26-64', False),
     ('Python27', False),
     ('Python27-64', False),
     #('Python31', False),
@@ -43,6 +45,9 @@ INTERPS = (
 def interp_path(interp):
     return r'C:\%s\Python' % (interp,)
 
+def pip_path(interp):
+    return os.path.join(os.path.dirname(interp),
+                        'scripts', 'pip.exe')
 
 def interp_has_module(path, module):
     return run_or_false(path, '-c', 'import ' + module)
@@ -71,7 +76,13 @@ def main():
     for interp, is_cffi in INTERPS:
         path = interp_path(interp)
         run('git', 'clean', '-dfx', 'build', 'temp', 'lmdb')
-        run(path, '-mpip', 'install', '-e', '.')
+        run(pip_path(path), 'install', '-e', '.')
+        if is_cffi:
+            os.environ['LMDB_FORCE_CFFI'] = '1'
+        else:
+            os.environ.pop('LMDB_FORCE_CFFI', '')
+        if os.path.exists('lmdb\\cpython.pyd'):
+            os.unlink('lmdb\\cpython.pyd'):
         #run(path, '-mpy.test')
         run(path, 'setup.py', 'bdist_egg', 'upload')
         run(path, 'setup.py', 'bdist_wheel', 'upload')
