@@ -382,6 +382,14 @@ class OtherMethodsTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.sync(False))
 
+    @staticmethod
+    def _test_reader_check_child(path):
+        """Function to run in child process since we can't use fork() on
+        win32."""
+        env = lmdb.open(path)
+        txn = env.begin()
+        os._exit(0)
+
     def test_reader_check(self):
         path, env = testlib.temp_env()
         rc = env.reader_check()
@@ -391,18 +399,14 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.readers() != NO_READERS
         assert env.reader_check() == 0
 
-        if sys.platform != 'win32':
-            # Start a child, open a txn, then crash the child.
-            child_pid = os.fork()
-            if not child_pid:
-                env2 = lmdb.open(path)
-                txn = env2.begin()
-                os.kill(os.getpid(), signal.SIGKILL)
+        # Start a child, open a txn, then crash the child.
+        rc = os.spawnl(os.P_WAIT, sys.executable, sys.executable,
+                       __file__, 'test_reader_check_child', path)
 
-            assert os.waitpid(child_pid, 0) == (child_pid, signal.SIGKILL)
-            assert env.reader_check() == 1
-            assert env.reader_check() == 0
-            assert env.readers() != NO_READERS
+        assert rc == 0
+        assert env.reader_check() == 1
+        assert env.reader_check() == 0
+        assert env.readers() != NO_READERS
 
         txn1.abort()
         assert env.readers() == NO_READERS
@@ -576,4 +580,7 @@ class OpenDbTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if len(sys.argv) > 1 and sys.argv[1] == 'test_reader_check_child':
+        OtherMethodsTest._test_reader_check_child(sys.argv[2])
+    else:
+        unittest.main()
