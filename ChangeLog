@@ -1,4 +1,13 @@
 
+2014-05-26 v0.82
+
+* The native extension now implements the freelist for read-only transactions,
+  reducing the cost of creating an ephemeral reader 4x for an uncontended
+  database and by up to 20x for very read-busy environments. By default only 1
+  read-only transaction is cached, adjust max_spare_txns= parameter if your
+  script operates multiple simultaneous read transactions.
+
+
 2014-04-26 v0.81
 
 * On Python 2.x the extension module would silently interpret Unicode
