@@ -308,7 +308,7 @@ enum trans_flags {
     /** Transaction can be can go on freelist instead of deallocation. */
     TRANS_RDONLY        = 2,
     /** Transaction is spare, ready for mdb_txn_renew() */
-    TRANS_SPARE         = 3
+    TRANS_SPARE         = 4
 };
 
 /** lmdb.Transaction */
