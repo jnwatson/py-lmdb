@@ -395,6 +395,10 @@ class OtherMethodsTest(unittest.TestCase):
         rc = env.reader_check()
         assert rc == 0
 
+        # We need to open a separate env since Transaction.abort() always calls
+        # reset for a read-only txn, the actual abort doesn't happen until
+        # __del__, when Transaction discovers there is no room for it on the
+        # freelist.
         env1 = lmdb.open(path)
         txn1 = env1.begin()
         assert env.readers() != NO_READERS
