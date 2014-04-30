@@ -386,16 +386,17 @@ class OtherMethodsTest(unittest.TestCase):
     def _test_reader_check_child(path):
         """Function to run in child process since we can't use fork() on
         win32."""
-        env = lmdb.open(path)
+        env = lmdb.open(path, max_spare_txns=0)
         txn = env.begin()
         os._exit(0)
 
     def test_reader_check(self):
-        path, env = testlib.temp_env()
+        path, env = testlib.temp_env(max_spare_txns=0)
         rc = env.reader_check()
         assert rc == 0
 
-        txn1 = env.begin()
+        env1 = lmdb.open(path)
+        txn1 = env1.begin()
         assert env.readers() != NO_READERS
         assert env.reader_check() == 0
 
@@ -409,6 +410,7 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.readers() != NO_READERS
 
         txn1.abort()
+        env1.close()
         assert env.readers() == NO_READERS
 
         env.close()
