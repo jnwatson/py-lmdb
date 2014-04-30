@@ -2741,7 +2741,7 @@ static PyTypeObject PyIterator_Type = {
 static int
 trans_clear(TransObject *self)
 {
-    if(self->valid) {
+    if(self->valid || self->flags & TRANS_SPARE) {
         INVALIDATE(self)
 #ifdef HAVE_MEMSINK
         ms_notify((PyObject *) self, &self->sink_head);
@@ -2767,7 +2767,8 @@ trans_clear(TransObject *self)
 static void
 trans_dealloc(TransObject *self)
 {
-    if((self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
+    if(self->env &&
+       (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
         DEBUG("caching trans")
         if(! (self->flags & TRANS_SPARE)) {
             mdb_txn_reset(self->txn);
