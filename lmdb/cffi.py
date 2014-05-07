@@ -216,6 +216,7 @@ _CFFI_CDEF = '''
     #define MDB_NOSYNC ...
     #define MDB_NOTLS ...
     #define MDB_RDONLY ...
+    #define MDB_NOLOCK ...
     #define MDB_REVERSEKEY ...
     #define MDB_WRITEMAP ...
     #define MDB_NOMEMINIT ...
@@ -633,12 +634,16 @@ class Environment(object):
             one allocation per :py:class:`Cursor` ``iter*`` method invocation.
 
             *Note:* ignored on CFFI.
+
+        `nolock`:
+            If ``True``, disallow to use lock table - do not create lock file.
+
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=O_0755, create=True, readahead=True, writemap=False,
             meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-            max_spare_cursors=32, max_spare_iters=32):
+            max_spare_cursors=32, max_spare_iters=32, nolock=False):
         envpp = _ffi.new('MDB_env **')
 
         rc = _lib.mdb_env_create(envpp)
@@ -680,6 +685,11 @@ class Environment(object):
             flags |= _lib.MDB_WRITEMAP
         if not meminit:
             flags |= _lib.MDB_NOMEMINIT
+        if not nolock:
+            flags |= _lib.MDB_NOLOCK
+
+
+
 
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
@@ -853,7 +863,8 @@ class Environment(object):
             'map_async': bool(flags & _lib.MDB_MAPASYNC),
             'readahead': not (flags & _lib.MDB_NORDAHEAD),
             'writemap': bool(flags & _lib.MDB_WRITEMAP),
-            'meminit': not (flags & _lib.MDB_NOMEMINIT)
+            'meminit': not (flags & _lib.MDB_NOMEMINIT),
+            'nolock':  not (flags & _lib.MDB_NOLOCK),
         }
 
     def max_key_size(self):
