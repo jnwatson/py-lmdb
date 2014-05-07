@@ -154,7 +154,7 @@ class OpenTest(unittest.TestCase):
     def test_nolock(self):
         for flag in True, False:
             path, env = testlib.temp_env(nolock=flag)
-            assert env.flags()['metasync'] == flag
+            assert env.flags()['nolock'] == flag
 
     def test_sync(self):
         for flag in True, False:
