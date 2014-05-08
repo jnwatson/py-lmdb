@@ -134,10 +134,27 @@ class OpenTest(unittest.TestCase):
         # Flag should be set.
         assert env2.flags()['readonly']
 
+    def test_readonly_nolock_true_exist(self):
+        path, env = testlib.temp_env()
+        env2 = lmdb.open(path, readonly=True, nolock=True)
+        assert env2.path() == path
+        # Attempting a write txn should fail.
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: env2.begin(write=True))
+        # Flag should be set.
+        assert env2.flags()['readonly']
+        assert env2.flags()['nolock']
+
+
     def test_metasync(self):
         for flag in True, False:
             path, env = testlib.temp_env(metasync=flag)
             assert env.flags()['metasync'] == flag
+
+    def test_nolock(self):
+        for flag in True, False:
+            path, env = testlib.temp_env(nolock=flag)
+            assert env.flags()['nolock'] == flag
 
     def test_sync(self):
         for flag in True, False:
