@@ -98,6 +98,7 @@ enum string_id {
     ITERITEMS_S,
     KEY_S,
     KEYS_S,
+    LOCK_S,
     MAP_ASYNC_S,
     MAP_SIZE_S,
     MAX_DBS_S,
@@ -122,7 +123,6 @@ enum string_id {
     VALUES_S,
     WRITE_S,
     WRITEMAP_S,
-    NOLOCK_S,
 
     /* Must be last. */
     STRING_ID_COUNT
@@ -149,6 +149,7 @@ static const char *strings = (
     "iteritems\0"
     "key\0"
     "keys\0"
+    "lock\0"
     "map_async\0"
     "map_size\0"
     "max_dbs\0"
@@ -173,7 +174,6 @@ static const char *strings = (
     "values\0"
     "write\0"
     "writemap\0"
-    "nolock\0"
 );
 
 /** Interned string array corresponding to `string_ids'. */
@@ -1202,8 +1202,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         ssize_t max_spare_txns;
         ssize_t max_spare_cursors;
         ssize_t max_spare_iters;
-        int nolock;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 32, 32, 0};
+        int lock;
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 32, 32, 1};
 
     static const struct argspec argspec[] = {
         {ARG_OBJ, PATH_S, OFFSET(env_new, path)},
@@ -1223,7 +1223,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_SIZE, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
         {ARG_SIZE, MAX_SPARE_CURSORS_S, OFFSET(env_new, max_spare_cursors)},
         {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)},
-        {ARG_SIZE, NOLOCK_S, OFFSET(env_new, nolock)}
+        {ARG_BOOL, LOCK_S, OFFSET(env_new, lock)}
     };
 
     PyObject *fspath_obj = NULL;
@@ -1315,7 +1315,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if(! arg.meminit) {
         flags |= MDB_NOMEMINIT;
     }
-    if(! arg.nolock) {
+    if(! arg.lock) {
         flags |= MDB_NOLOCK;
     }
 
@@ -1529,7 +1529,7 @@ env_flags(EnvObject *self)
     PyDict_SetItemString(dct, "readahead", py_bool(!(flags & MDB_NORDAHEAD)));
     PyDict_SetItemString(dct, "writemap", py_bool(flags & MDB_WRITEMAP));
     PyDict_SetItemString(dct, "meminit", py_bool(!(flags & MDB_NOMEMINIT)));
-    PyDict_SetItemString(dct, "nolock", py_bool(!(flags & MDB_NOLOCK)));
+    PyDict_SetItemString(dct, "lock", py_bool(!(flags & MDB_NOLOCK)));
     return dct;
 }
 

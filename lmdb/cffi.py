@@ -635,15 +635,19 @@ class Environment(object):
 
             *Note:* ignored on CFFI.
 
-        `nolock`:
-            If ``True``, disallow to use lock table - do not create lock file.
-
+        `lock`:
+            If ``False``, don't do any locking. If concurrent access is
+            anticipated, the caller must manage all concurrency itself. For
+            proper operation the caller must enforce single-writer semantics,
+            and must ensure that no readers are using old transactions while a
+            writer is active. The simplest approach is to use an exclusive lock
+            so that no readers may be active at all when a writer begins.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=O_0755, create=True, readahead=True, writemap=False,
             meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-            max_spare_cursors=32, max_spare_iters=32, nolock=False):
+            max_spare_cursors=32, max_spare_iters=32, lock=True):
         envpp = _ffi.new('MDB_env **')
 
         rc = _lib.mdb_env_create(envpp)
@@ -685,11 +689,8 @@ class Environment(object):
             flags |= _lib.MDB_WRITEMAP
         if not meminit:
             flags |= _lib.MDB_NOMEMINIT
-        if not nolock:
+        if not lock:
             flags |= _lib.MDB_NOLOCK
-
-
-
 
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
@@ -864,7 +865,7 @@ class Environment(object):
             'readahead': not (flags & _lib.MDB_NORDAHEAD),
             'writemap': bool(flags & _lib.MDB_WRITEMAP),
             'meminit': not (flags & _lib.MDB_NOMEMINIT),
-            'nolock':  not (flags & _lib.MDB_NOLOCK),
+            'lock':  not (flags & _lib.MDB_NOLOCK),
         }
 
     def max_key_size(self):
