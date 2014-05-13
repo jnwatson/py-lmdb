@@ -1345,9 +1345,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 fail:
     DEBUG("initialization failed")
     Py_CLEAR(fspath_obj);
-    if(self) {
-        env_dealloc(self);
-    }
+    Py_CLEAR(self);
     return NULL;
 }
 
