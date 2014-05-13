@@ -277,8 +277,11 @@ struct lmdb_object {
 /** lmdb._Database */
 struct DbObject {
     LmdbObject_HEAD
-    /** Python Environment reference. */
-    struct EnvObject *env; /* Not refcounted. */
+    /** Python Environment reference. Not refcounted; when the last strong ref
+     * to Environment is released, DbObject.tp_clear() will be called, causing
+     * DbObject.env and DbObject.dbi to be cleared. This is to prevent a
+     * cyclical reference from DB->Env keeping the environment alive. */
+    struct EnvObject *env;
     /** MDB database handle. */
     MDB_dbi dbi;
     /** Flags at time of creation. */
