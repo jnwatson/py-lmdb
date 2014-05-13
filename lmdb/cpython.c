@@ -2746,23 +2746,25 @@ static PyTypeObject PyIterator_Type = {
 static int
 trans_clear(TransObject *self)
 {
-    if(self->valid || self->flags & TRANS_SPARE) {
-        INVALIDATE(self)
+    INVALIDATE(self)
 #ifdef HAVE_MEMSINK
-        ms_notify((PyObject *) self, &self->sink_head);
+    ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        if(self->txn) {
-            DEBUG("aborting")
-            Py_BEGIN_ALLOW_THREADS
-            mdb_txn_abort(self->txn);
-            Py_END_ALLOW_THREADS
-            self->txn = NULL;
-        }
-        Py_CLEAR(self->db);
-        self->valid = 0;
+
+    if(self->txn) {
+        Py_BEGIN_ALLOW_THREADS
+        MDEBUG("aborting")
+        mdb_txn_abort(self->txn);
+        Py_END_ALLOW_THREADS
+        self->txn = NULL;
     }
-    UNLINK_CHILD(self->env, self)
-    Py_CLEAR(self->env);
+    MDEBUG("db is/was %p", self->db)
+    Py_CLEAR(self->db);
+    self->valid = 0;
+    if(self->env) {
+        UNLINK_CHILD(self->env, self)
+        Py_CLEAR(self->env);
+    }
     return 0;
 }
 
