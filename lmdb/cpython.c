@@ -1186,6 +1186,16 @@ env_dealloc(EnvObject *self)
 }
 
 /**
+ * Environment.close()
+ */
+static PyObject *
+env_close(EnvObject *self)
+{
+    env_clear(self);
+    Py_RETURN_NONE;
+}
+
+/**
  * Environment() -> new object.
  */
 static PyObject *
@@ -1374,24 +1384,6 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
-}
-
-/**
- * Environment.close()
- */
-static PyObject *
-env_close(EnvObject *self)
-{
-    if(self->valid) {
-        INVALIDATE(self)
-        self->valid = 0;
-        DEBUG("Closing env")
-        Py_BEGIN_ALLOW_THREADS
-        mdb_env_close(self->env);
-        Py_END_ALLOW_THREADS
-        self->env = NULL;
-    }
-    Py_RETURN_NONE;
 }
 
 /**
