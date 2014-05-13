@@ -1157,20 +1157,32 @@ static PyTypeObject PyDatabase_Type = {
 /* Environment */
 /* ----------- */
 
+static void
+trans_dealloc(TransObject *self);
+
 static int
 env_clear(EnvObject *self)
 {
-    DEBUG("killing env..")
+    MDEBUG("killing env..")
+    INVALIDATE(self)
+    self->valid = 0;
+    Py_CLEAR(self->main_db);
+
+    /* Force trans_dealloc() to free by setting avail size to 0 */
+    self->max_spare_txns = 0;
+    while(self->spare_txns) {
+        MDEBUG("killing spare txn %p", self->spare_txns)
+        TransObject *cur = self->spare_txns;
+        self->spare_txns = cur->spare_next;
+        trans_dealloc(cur);
+    }
+
     if(self->env) {
-        INVALIDATE(self)
         DEBUG("Closing env")
         Py_BEGIN_ALLOW_THREADS
         mdb_env_close(self->env);
         Py_END_ALLOW_THREADS
         self->env = NULL;
-    }
-    if(self->main_db) {
-        Py_CLEAR(self->main_db);
     }
     return 0;
 }
