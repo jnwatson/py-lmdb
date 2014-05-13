@@ -911,6 +911,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         env->spare_txns = self->spare_next;
         env->max_spare_txns++;
         self->flags &= ~TRANS_SPARE;
+        _Py_NewReference(self);
         UNLOCKED(rc, mdb_txn_renew(self->txn));
     } else {
         if(write && env->readonly) {
@@ -2795,7 +2796,6 @@ trans_dealloc(TransObject *self)
         Py_DECREF(self->env);
         self->db = NULL;
         self->env = NULL;
-        Py_INCREF(self); /* Prevent deallocation */
     } else {
         DEBUG("deleting trans")
         trans_clear(self);
