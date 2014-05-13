@@ -2774,8 +2774,9 @@ trans_dealloc(TransObject *self)
 {
     if(self->env &&
        (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
-        DEBUG("caching trans")
+        MDEBUG("caching trans")
         if(! (self->flags & TRANS_SPARE)) {
+            MDEBUG("resetting")
             mdb_txn_reset(self->txn);
             self->flags |= TRANS_SPARE;
         }
@@ -2783,13 +2784,11 @@ trans_dealloc(TransObject *self)
         self->env->spare_txns = self;
         self->env->max_spare_txns--;
 
+        Py_CLEAR(self->db);
         UNLINK_CHILD(self->env, self)
-        Py_DECREF(self->db);
-        Py_DECREF(self->env);
-        self->db = NULL;
-        self->env = NULL;
+        Py_CLEAR(self->env);
     } else {
-        DEBUG("deleting trans")
+        MDEBUG("deleting trans")
         trans_clear(self);
         PyObject_Del(self);
     }
