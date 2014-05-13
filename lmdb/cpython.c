@@ -54,6 +54,9 @@
     "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, ## __VA_ARGS__);
 #endif
 
+#define MDEBUG(s, ...) DEBUG("%p: " s, self, ## __VA_ARGS__);
+
+
 /* Inlining control for compatible compilers. */
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
 #   define NOINLINE __attribute__((noinline))
