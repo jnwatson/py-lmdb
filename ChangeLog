@@ -7,6 +7,8 @@
   read-only transaction is cached, adjust max_spare_txns= parameter if your
   script operates multiple simultaneous read transactions.
 
+* Patch from Vladimir Vladimirov implementing MDB_NOLOCK.
+
 
 2014-04-26 v0.81
 
