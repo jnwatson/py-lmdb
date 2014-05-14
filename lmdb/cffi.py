@@ -1099,6 +1099,10 @@ class Transaction(object):
     _txn = _invalid
     _parent = None
 
+    # Mutations occurred since transaction start. Required to know when Cursor
+    # key/value must be refreshed.
+    _mutations = 0
+
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         _depend(env, self)
         self.env = env # hold ref
@@ -1126,9 +1130,6 @@ class Transaction(object):
         if rc:
             raise _error("mdb_txn_begin", rc)
         self._txn = txnpp[0]
-        # Number of mutations occurred since start of transaction. Required to
-        # know when Cursor key/value must be refreshed.
-        self._mutations = 0
 
     def _invalidate(self):
         self.abort()
