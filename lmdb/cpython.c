@@ -777,12 +777,12 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
         }
         case ARG_INT:
             if(! (ret = parse_ulong(val, &l, py_int_max))) {
-                *((int *) dst) = l;
+                *((int *) dst) = (int)l;
             }
             break;
         case ARG_SIZE:
             if(! (ret = parse_ulong(val, &l, py_size_max))) {
-                *((size_t *) dst) = l;
+                *((size_t *) dst) = (size_t)l;
             }
             break;
         }
@@ -1227,7 +1227,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int meminit;
         int max_readers;
         int max_dbs;
-        ssize_t max_spare_txns;
+        int max_spare_txns;
         int lock;
     } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 1};
 
@@ -1246,7 +1246,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_INT, MEMINIT_S, OFFSET(env_new, meminit)},
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
-        {ARG_SIZE, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
+        {ARG_INT, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
         {ARG_BOOL, LOCK_S, OFFSET(env_new, lock)}
     };
 
