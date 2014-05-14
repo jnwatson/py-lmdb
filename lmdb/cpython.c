@@ -1226,7 +1226,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int max_dbs;
         ssize_t max_spare_txns;
         int lock;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 32, 32, 1};
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 1};
 
     static const struct argspec argspec[] = {
         {ARG_OBJ, PATH_S, OFFSET(env_new, path)},
