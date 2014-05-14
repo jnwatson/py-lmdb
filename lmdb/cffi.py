@@ -1132,6 +1132,7 @@ class Transaction(object):
 
     def _invalidate(self):
         self.abort()
+        self._parent = None
         self._env = _invalid
 
     def __del__(self):
