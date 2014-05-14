@@ -622,21 +622,6 @@ class Environment(object):
             :py:meth:`cursor`. Should match the process's maximum expected
             concurrent transactions (e.g. thread count).
 
-            *Note:* ignored on CFFI.
-
-        `max_spare_cursors`:
-            Read-only cursors to cache after becoming unused. Caching cursors
-            avoids two allocations per :py:class:`Cursor` or :py:meth:`cursor`
-            or :py:meth:`Transaction.cursor` invocation.
-
-            *Note:* ignored on CFFI.
-
-        `max_spare_iters`:
-            Iterators to cache after becoming unused. Caching iterators avoids
-            one allocation per :py:class:`Cursor` ``iter*`` method invocation.
-
-            *Note:* ignored on CFFI.
-
         `lock`:
             If ``False``, don't do any locking. If concurrent access is
             anticipated, the caller must manage all concurrency itself. For
@@ -649,7 +634,7 @@ class Environment(object):
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=O_0755, create=True, readahead=True, writemap=False,
             meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-            max_spare_cursors=32, max_spare_iters=32, lock=True):
+            lock=True):
         self._max_spare_txns = max_spare_txns
         self._spare_txns = []
 

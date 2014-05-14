@@ -106,8 +106,6 @@ enum string_id {
     MAP_SIZE_S,
     MAX_DBS_S,
     MAX_READERS_S,
-    MAX_SPARE_CURSORS_S,
-    MAX_SPARE_ITERS_S,
     MAX_SPARE_TXNS_S,
     MEMINIT_S,
     METASYNC_S,
@@ -157,8 +155,6 @@ static const char *strings = (
     "map_size\0"
     "max_dbs\0"
     "max_readers\0"
-    "max_spare_cursors\0"
-    "max_spare_iters\0"
     "max_spare_txns\0"
     "meminit\0"
     "metasync\0"
@@ -1229,8 +1225,6 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int max_readers;
         int max_dbs;
         ssize_t max_spare_txns;
-        ssize_t max_spare_cursors;
-        ssize_t max_spare_iters;
         int lock;
     } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 32, 32, 1};
 
@@ -1250,8 +1244,6 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
         {ARG_SIZE, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
-        {ARG_SIZE, MAX_SPARE_CURSORS_S, OFFSET(env_new, max_spare_cursors)},
-        {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)},
         {ARG_BOOL, LOCK_S, OFFSET(env_new, lock)}
     };
 

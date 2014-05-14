@@ -1,13 +1,16 @@
 
 2014-05-26 v0.82
 
-* Both variants now implements the freelist for read-only transactions,
-  reducing the cost of creating an ephemeral reader 4x for an uncontended
-  database and by up to 20x for very read-busy environments. By default only 1
-  read-only transaction is cached, adjust max_spare_txns= parameter if your
-  script operates multiple simultaneous read transactions.
+* Both variants now implement max_spare_txns, reducing the cost of creating a
+  read-only transaction 4x for an uncontended database and by up to 20x for
+  very read-busy environments. By default only 1 read-only transaction is
+  cached, adjust max_spare_txns= parameter if your script operates multiple
+  simultaneous read transactions.
 
 * Patch from Vladimir Vladimirov implementing MDB_NOLOCK.
+
+* The max_spare_iters and max_spare_cursors parameters were removed, neither
+  ever had any effect.
 
 
 2014-04-26 v0.81
