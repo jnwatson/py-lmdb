@@ -325,7 +325,7 @@ class InfoMethodsTest(unittest.TestCase):
             lambda: env.max_readers())
 
     def test_readers(self):
-        _, env = testlib.temp_env()
+        _, env = testlib.temp_env(max_spare_txns=0)
         r = env.readers()
         assert isinstance(r, UnicodeType)
         assert r == NO_READERS
@@ -624,7 +624,8 @@ class SpareTxnTest(unittest.TestCase):
 
     def test_one(self):
         _, env = testlib.temp_env(max_spare_txns=1)
-        assert 0 == reader_count(env)
+        # 1 here, since CFFI uses a temporary reader during init.
+        assert 1 >= reader_count(env)
 
         t1 = env.begin()
         assert 1 == reader_count(env)
