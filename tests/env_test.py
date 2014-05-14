@@ -598,6 +598,56 @@ class OpenDbTest(unittest.TestCase):
             assert db.flags(txn)[flag] == val
 
 
+reader_count = lambda env: env.readers().count('\n') - 1
+
+class SpareTxnTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_none(self):
+        _, env = testlib.temp_env(max_spare_txns=0)
+        assert 0 == reader_count(env)
+
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+
+        t2 = env.begin()
+        assert 2 == reader_count(env)
+
+        t1.abort()
+        del t1
+        assert 1 == reader_count(env)
+
+        t2.abort()
+        del t2
+        assert 0 == reader_count(env)
+
+    def test_one(self):
+        _, env = testlib.temp_env(max_spare_txns=1)
+        assert 0 == reader_count(env)
+
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+
+        t2 = env.begin()
+        assert 2 == reader_count(env)
+
+        t1.abort()
+        del t1
+        assert 2 == reader_count(env)  # 1 live, 1 cached
+
+        t2.abort()
+        del t2
+        assert 1 == reader_count(env)  # 1 cached
+
+        t3 = env.begin()
+        assert 1 == reader_count(env)  # 1 live
+
+        t3.abort()
+        del t3
+        assert 1 == reader_count(env)  # 1 cached
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test_reader_check_child':
         OtherMethodsTest._test_reader_check_child(sys.argv[2])
