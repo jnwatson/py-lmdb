@@ -220,7 +220,10 @@ typedef struct TransObject TransObject;
 #   define MOD_RETURN(mod) return
 #   define MODINIT_NAME initcpython
 #   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
-#   define PyBUF_READ 0
+
+#   ifndef PyBUF_READ
+#       define PyBUF_READ 0
+#   endif
 
 /* Python 2.5 */
 #   ifndef Py_TYPE
