@@ -912,6 +912,11 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         self->flags &= ~TRANS_SPARE;
         _Py_NewReference(self);
         UNLOCKED(rc, mdb_txn_renew(self->txn));
+
+        if(rc) {
+            mdb_txn_abort(self->txn);
+            self->txn = NULL;
+        }
     } else {
         if(write && env->readonly) {
             const char *msg = "Cannot start write transaction with read-only env";
