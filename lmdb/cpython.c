@@ -2786,7 +2786,7 @@ trans_clear(TransObject *self)
 static void
 trans_dealloc(TransObject *self)
 {
-    if(self->env &&
+    if(self->env && self->txn &&
        (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
         MDEBUG("caching trans")
         if(! (self->flags & TRANS_SPARE)) {
