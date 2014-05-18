@@ -2153,6 +2153,75 @@ cursor_prev_nodup(CursorObject *self)
 }
 
 /**
+ * Cursor.putmulti() -> bool
+ */
+static PyObject *
+cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_put {
+        PyObject *items;
+        int dupdata;
+        int overwrite;
+        int append;
+    } arg = {Py_None, 1, 1, 0};
+
+    MDB_val mkey, mval;
+    PyObject *seq;
+    PyObject *item;
+    int i, len;
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, DEFAULT_S, OFFSET(cursor_put, items)},
+        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_put, dupdata)},
+        {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
+        {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
+    };
+    int flags;
+    int rc;
+
+    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    flags = 0;
+    if(! arg.dupdata) {
+        flags |= MDB_NODUPDATA;
+    }
+    if(! arg.overwrite) {
+        flags |= MDB_NOOVERWRITE;
+    }
+    if(arg.append) {
+        flags |= MDB_APPEND;
+    }
+
+    seq = PySequence_Fast(arg.items, "expected a sequence");
+    len = PySequence_Size(arg.items);
+    for (i = 0; i < len; i++) {
+        item = PySequence_Fast_GET_ITEM(seq, i);
+        if(!PyTuple_Check(item) ||
+             PyTuple_GETSIZE(item) != 2) {
+            Py_DECREF(seq);
+            return err_set("mdb_putmulti", EINVAL);
+        }
+        if(val_from_buffer((MDB_val *)&mkey, PyTuple_GET_ITEM(item, 0)) ||
+            val_from_buffer((MDB_val *)&mval, PyTuple_GET_ITEM(item, 1))) {
+            Py_DECREF(seq);
+            return err_set("mdb_putmulti", EINVAL);
+        }
+        UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
+        self->trans->mutations++;
+        if(rc) {
+            if(rc == MDB_KEYEXIST) {
+                Py_RETURN_FALSE;
+            }
+            return err_set("mdb_putmulti", rc);
+        }
+    }
+    Py_DECREF(seq);
+    Py_RETURN_TRUE;
+}
+
+/**
  * Cursor.put() -> bool
  */
 static PyObject *
@@ -2596,6 +2665,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"prev_dup", (PyCFunction)cursor_prev_dup, METH_NOARGS},
     {"prev_nodup", (PyCFunction)cursor_prev_nodup, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
+    {"putmulti", (PyCFunction)cursor_put_multi, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)cursor_replace, METH_VARARGS|METH_KEYWORDS},
     {"pop", (PyCFunction)cursor_pop, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
