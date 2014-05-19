@@ -1908,6 +1908,57 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
 
+    def putmulti(self, it, dupdata=True, overwrite=True, append=False):
+        """Invoke :py:meth:`put` for each `(key, value)` 2-tuple from the
+        iterable `it`. Elements must be exactly 2-tuples, they may not be of
+        any other type, or tuple subclass.
+
+        Returns a tuple `(consumed, added)`, where `consumed` is the number of
+        elements read from the iterable, and `added` is the number of new
+        entries added to the database. `added` may be less than `consumed` when
+        `overwrite=False`.
+
+            `it`:
+                Iterable to read records from.
+
+            `dupdata`:
+                If ``True`` and database was opened with `dupsort=True`, add
+                pair as a duplicate if the given key already exists. Otherwise
+                overwrite any existing matching key.
+
+            `overwrite`:
+                If ``False``, do not overwrite the value for the key if it
+                exists, just return ``False``. For databases opened with
+                `dupsort=True`, ``False`` will always be returned if a
+                duplicate key/value pair is inserted, regardless of the setting
+                for `overwrite`.
+
+            `append`:
+                If ``True``, append records to the end of the database without
+                comparing their order first. Appending a key that is not
+                greater than the highest existing key will cause corruption.
+        """
+        flags = 0
+        if not dupdata:
+            flags |= _lib.MDB_NODUPDATA
+        if not overwrite:
+            flags |= _lib.MDB_NOOVERWRITE
+        if append:
+            flags |= _lib.MDB_APPEND
+
+        added = 0
+        skipped = 0
+        for key, value in it:
+            rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
+                                       val, len(val), flags)
+            self.txn._mutations += 1
+            if rc:
+                if rc == _lib.MDB_KEYEXIST:
+                    skipped += 1
+                raise _error("mdb_cursor_put", rc)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
+        return added, added-skipped
+
     def replace(self, key, val):
         """Store a record, returning its previous value if one existed. Returns
         ``None`` if no previous value existed. This uses the best available
