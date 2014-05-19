@@ -97,8 +97,6 @@ enum string_id {
     ENV_S,
     FD_S,
     FORCE_S,
-    ITEMS_S,
-    ITERITEMS_S,
     KEY_S,
     KEYS_S,
     LOCK_S,
@@ -146,8 +144,6 @@ static const char *strings = (
     "env\0"
     "fd\0"
     "force\0"
-    "items\0"
-    "iteritems\0"
     "key\0"
     "keys\0"
     "lock\0"
