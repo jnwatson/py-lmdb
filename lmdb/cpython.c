@@ -2164,7 +2164,7 @@ cursor_prev_nodup(CursorObject *self)
 }
 
 /**
- * Cursor.putmulti() -> bool
+ * Cursor.putmulti(iter|dict) -> (consumed, added)
  */
 static PyObject *
 cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
@@ -2176,10 +2176,8 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         int append;
     } arg = {Py_None, 1, 1, 0};
 
-    MDB_val mkey, mval;
-    PyObject *seq;
+    PyObject *iter;
     PyObject *item;
-    int i, len;
 
     static const struct argspec argspec[] = {
         {ARG_OBJ, DEFAULT_S, OFFSET(cursor_put, items)},
@@ -2189,6 +2187,9 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     };
     int flags;
     int rc;
+    Py_ssize_t consumed;
+    Py_ssize_t added;
+    PyObject *ret = NULL;
 
     if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
         return NULL;
@@ -2205,31 +2206,52 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_APPEND;
     }
 
-    seq = PySequence_Fast(arg.items, "expected a sequence");
-    len = PySequence_Size(arg.items);
-    for (i = 0; i < len; i++) {
-        item = PySequence_Fast_GET_ITEM(seq, i);
-        if(!PyTuple_Check(item) ||
-             PyTuple_GETSIZE(item) != 2) {
-            Py_DECREF(seq);
-            return err_set("mdb_putmulti", EINVAL);
+    if(! ((iter = PyObject_GetIter(arg.items)))) {
+        return NULL;
+    }
+
+    consumed = 0;
+    added = 0;
+    while((item = PyIter_Next(iter))) {
+        MDB_val mkey, mval;
+        if(! (PyTuple_CheckExact(item) && PyTuple_GET_SIZE(item) == 2)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "putmulti() elements must be 2-tuples");
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL;
         }
-        if(val_from_buffer((MDB_val *)&mkey, PyTuple_GET_ITEM(item, 0)) ||
-            val_from_buffer((MDB_val *)&mval, PyTuple_GET_ITEM(item, 1))) {
-            Py_DECREF(seq);
-            return err_set("mdb_putmulti", EINVAL);
+
+        if(val_from_buffer(&mkey, PyTuple_GET_ITEM(item, 0)) ||
+           val_from_buffer(&mval, PyTuple_GET_ITEM(item, 1))) {
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL; /* val_from_buffer sets exception */
         }
+
         UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
         self->trans->mutations++;
-        if(rc) {
-            if(rc == MDB_KEYEXIST) {
-                Py_RETURN_FALSE;
-            }
-            return err_set("mdb_putmulti", rc);
+        switch(rc) {
+        case MDB_SUCCESS:
+            added++;
+            break;
+        case MDB_KEYEXIST:
+            break;
+        default:
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return err_format(rc, "mdb_cursor_put() element #%d", consumed);
         }
+
+        Py_DECREF(item);
+        consumed++;
     }
-    Py_DECREF(seq);
-    Py_RETURN_TRUE;
+
+    Py_DECREF(iter);
+    if(! PyErr_Occurred()) {
+        ret = Py_BuildValue("(nn)", consumed, added);
+    }
+    return ret;
 }
 
 /**
