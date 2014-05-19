@@ -1952,6 +1952,7 @@ class Cursor(object):
             rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
                                        val, len(val), flags)
             self.txn._mutations += 1
+            added += 1
             if rc:
                 if rc == _lib.MDB_KEYEXIST:
                     skipped += 1
