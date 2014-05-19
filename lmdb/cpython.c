@@ -98,6 +98,7 @@ enum string_id {
     ENV_S,
     FD_S,
     FORCE_S,
+    ITEMS_S,
     KEY_S,
     KEYS_S,
     LOCK_S,
@@ -145,6 +146,7 @@ static const char *strings = (
     "env\0"
     "fd\0"
     "force\0"
+    "items\0"
     "key\0"
     "keys\0"
     "lock\0"
@@ -2181,7 +2183,7 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     PyObject *item;
 
     static const struct argspec argspec[] = {
-        {ARG_OBJ, DEFAULT_S, OFFSET(cursor_put, items)},
+        {ARG_OBJ, ITEMS_S, OFFSET(cursor_put, items)},
         {ARG_BOOL, DUPDATA_S, OFFSET(cursor_put, dupdata)},
         {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
         {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}

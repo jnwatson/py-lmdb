@@ -1908,9 +1908,9 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
 
-    def putmulti(self, it, dupdata=True, overwrite=True, append=False):
+    def putmulti(self, items, dupdata=True, overwrite=True, append=False):
         """Invoke :py:meth:`put` for each `(key, value)` 2-tuple from the
-        iterable `it`. Elements must be exactly 2-tuples, they may not be of
+        iterable `items`. Elements must be exactly 2-tuples, they may not be of
         any other type, or tuple subclass.
 
         Returns a tuple `(consumed, added)`, where `consumed` is the number of
@@ -1918,7 +1918,7 @@ class Cursor(object):
         entries added to the database. `added` may be less than `consumed` when
         `overwrite=False`.
 
-            `it`:
+            `items`:
                 Iterable to read records from.
 
             `dupdata`:
@@ -1948,7 +1948,7 @@ class Cursor(object):
 
         added = 0
         skipped = 0
-        for key, value in it:
+        for key, value in items:
             rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
                                        val, len(val), flags)
             self.txn._mutations += 1
