@@ -515,6 +515,21 @@ err_set(const char *what, int rc)
     return NULL;
 }
 
+/**
+ * Raise an exception from a format string.
+ */
+static void * NOINLINE
+err_format(int rc, const char *fmt, ...)
+{
+    char buf[128];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    buf[sizeof buf - 1] = '\0';
+    va_end(ap);
+    return err_set(buf, rc);
+}
+
 static void * NOINLINE
 err_invalid(void)
 {
