@@ -26,6 +26,7 @@
 #include "stdint.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 
