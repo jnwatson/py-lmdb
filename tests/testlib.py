@@ -53,6 +53,7 @@ atexit.register(cleanup)
 
 def temp_dir(create=True):
     path = tempfile.mkdtemp(prefix='lmdb_test')
+    assert path is not None, 'tempfile.mkdtemp failed'
     if not create:
         os.rmdir(path)
     _cleanups.append(lambda: shutil.rmtree(path, ignore_errors=True))
@@ -63,6 +64,7 @@ def temp_dir(create=True):
 
 def temp_file(create=True):
     fd, path = tempfile.mkstemp(prefix='lmdb_test')
+    assert path is not None, 'tempfile.mkstemp failed'
     os.close(fd)
     if not create:
         os.unlink(path)
