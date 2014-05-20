@@ -318,6 +318,39 @@ def x():
     print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
     last = t1
 
+    print
+    print
+    print '--- MDB_APPEND mode multi ---'
+    print
+
+    env.close()
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE)
+
+    items = [(w, big or w) for w in sorted(words)]
+    itt = iter(items)
+    import itertools
+
+    run = True
+    t0 = now()
+    last = t0
+    while run:
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            consumed, added = curs.putmulti(itertools.islice(itt, 50000),
+                                            append=True)
+            run = added > 0
+
+        t1 = now()
+        if (t1 - last) > 2:
+            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+            last = t1
+
+    t1 = now()
+    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+    last = t1
+
     st = env.stat()
     print 'stat:', st
     print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
