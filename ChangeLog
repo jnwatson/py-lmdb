@@ -12,6 +12,10 @@
 * The max_spare_iters and max_spare_cursors parameters were removed, neither
   ever had any effect.
 
+ * Cursor.putmulti() implemented based on a patch from Luke Kenneth Casson
+   Leighton. This function moves the loop required to batch populate a
+   database out of Python and into C.
+
 
 2014-04-26 v0.81
 
