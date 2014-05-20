@@ -3,6 +3,7 @@ from pprint import pprint
 import itertools
 import os
 import shutil
+import sys
 
 from time import time as now
 import random
@@ -10,12 +11,13 @@ import lmdb
 
 MAP_SIZE = 1048576 * 400
 DB_PATH = '/ram/testdb'
+USE_SPARSE_FILES = sys.platform != 'darwin'
 
 
 def reopen_env(**kwargs):
     if os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH)
-    return lmdb.open(DB_PATH, map_size=MAP_SIZE, **kwargs)
+    return lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=USE_SPARSE_FILES, **kwargs)
 
 
 def case(title, **params):
@@ -152,17 +154,8 @@ def x():
         return len(words)
 
 
-    env = reopen_env(writemap=True)
-    @case('writemap insert')
-    def test():
-        with env.begin(write=True) as txn:
-            for word in words:
-                txn.put(word, big or word)
-        return len(words)
-
-
-    env = reopen_env(writemap=True)
-    @case('writemap + one cursor')
+    env = reopen_env()
+    @case('insert, reuse cursor')
     def test():
         with env.begin(write=True) as txn:
             curs = txn.cursor()
@@ -171,16 +164,16 @@ def x():
         return len(words)
 
 
-    env = reopen_env(writemap=True)
-    @case('writemap+putmulti')
+    env = reopen_env()
+    @case('insert, putmulti')
     def test():
         with env.begin(write=True) as txn:
             txn.cursor().putmulti(items)
         return len(words)
 
 
-    env = reopen_env(writemap=True)
-    @case('writemap+putmulti+generator')
+    env = reopen_env()
+    @case('insert, putmulti+generator')
     def test():
         with env.begin(write=True) as txn:
             txn.cursor().putmulti((w, big or w) for w in words)
