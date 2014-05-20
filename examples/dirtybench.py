@@ -155,11 +155,39 @@ def x():
 
 
     env = reopen_env()
-    @case('insert, reuse cursor')
+    @case('insert (rand)')
+    def test():
+        with env.begin(write=True) as txn:
+            for word in words:
+                txn.put(word, big or word)
+        return len(words)
+
+
+    env = reopen_env()
+    @case('insert (seq)')
+    def test():
+        with env.begin(write=True) as txn:
+            for word in words_sorted:
+                txn.put(word, big or word)
+        return len(words)
+
+
+    env = reopen_env()
+    @case('insert (rand), reuse cursor')
     def test():
         with env.begin(write=True) as txn:
             curs = txn.cursor()
             for word in words:
+                curs.put(word, big or word)
+        return len(words)
+    env = reopen_env()
+
+
+    @case('insert (seq), reuse cursor')
+    def test():
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            for word in words_sorted:
                 curs.put(word, big or word)
         return len(words)
 
