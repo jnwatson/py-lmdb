@@ -194,7 +194,7 @@ def x():
     env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
 
 
-    getword = iter(sorted(words)).next
+    getword = iter(words).next
     run = True
     t0 = now()
     last = t0
@@ -203,7 +203,7 @@ def x():
             try:
                 for _ in xrange(50000):
                     word = getword()
-                    txn.put(word, big or word, append=True)
+                    txn.put(word, big or word)
             except StopIteration:
                 run = False
 
@@ -228,7 +228,7 @@ def x():
     env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
 
 
-    getword = iter(sorted(words)).next
+    getword = iter(words).next
     run = True
     t0 = now()
     last = t0
@@ -238,9 +238,42 @@ def x():
             try:
                 for _ in xrange(50000):
                     word = getword()
-                    curs.put(word, big or word, append=True)
+                    curs.put(word, big or word)
             except StopIteration:
                 run = False
+
+        t1 = now()
+        if (t1 - last) > 2:
+            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
+            last = t1
+
+    t1 = now()
+    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
+
+
+    print
+    print
+    print '--- MDB_WRITEMAP + putmulti mode ---'
+    print
+
+    env.close()
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
+
+
+    items = [(w, big or w) for w in words]
+    itt = iter(items)
+    import itertools
+
+    run = True
+    t0 = now()
+    last = t0
+    while run:
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            consumed, added = curs.putmulti(itertools.islice(itt, 50000))
+            run = added > 0
 
         t1 = now()
         if (t1 - last) > 2:
