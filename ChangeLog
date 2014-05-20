@@ -16,6 +16,9 @@
   Leighton. This function moves the loop required to batch populate a
   database out of Python and into C.
 
+* The bundled LMDB 0.9.11 has been updated with several fixes from upstream
+  Git.
+
 
 2014-04-26 v0.81
 
