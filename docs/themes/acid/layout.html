@@ -2,12 +2,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset={{ encoding }}">
 
 {# Strip out the default script files we provide, but keep some, like mathjax. #}
-{% set script_files = script_files[3:] + [
-    "http://cdnjs.cloudflare.com/ajax/libs/jquery/1.8.2/jquery.min.js",
-    "http://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.5.2/underscore-min.js",
-    "http://media.readthedocs.org/javascript/doctools.js",
-    "http://media.readthedocs.org/javascript/rtd.js"
-] %}
+{% set script_files = [] %}
 {%- set url_root = pathto('', 1) %}
 {%- if url_root == '#' %}{% set url_root = '' %}{% endif %}
 {%- set titlesuffix = " &mdash; "|safe + docstitle|e %}
@@ -23,9 +18,17 @@
 
     {% if theme_github_repo %}
     <p>
-    <a href="{{ theme_github_repo }}">Github Repository</a>
+    <a href="{{ theme_github_repo }}">GitHub Repository</a>
     </p>
     {% endif %}
+
+    <p>
+    <a href="/en/release/">Docs for last release</a>
+    </p>
+
+    <p>
+    <a href="/en/master/">Docs for master branch</a>
+    </p>
 
     {%- block sidebartoc %}
     {%- include "localtoc.html" %}
@@ -83,17 +86,6 @@ var page_name = "{{ pagename }}";
 
 {% macro relbar() %}{% endmacro %}
 {%- block relbar2 %}{{ relbar() }}{% endblock %}
-
-<div class="rtd_doc_footer">
-  <div class="footer_popout">
-    <a href="//{{ PRODUCTION_DOMAIN }}/projects/{{ slug }}/?fromdocs={{ slug }}" class="rtd-badge rtd"> Brought to you by Read the Docs</a>
-    <ul id="version_menu">
-      {% for slug, url in versions %}
-        <li><a href="{{ url }}">{{ slug }}</a></li>
-      {% endfor %}
-    </ul>
-  </div>
-</div>
 
 
 <div class="footer">
