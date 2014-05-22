@@ -82,7 +82,16 @@ def x():
             return sum(1 for _ in txn.cursor().iterprev())
 
 
-    @case('rand lookup all keys')
+    @case('enum (key, value) buffers')
+    def test():
+        with env.begin(buffers=True) as txn:
+            return sum(1 for _ in txn.cursor())
+
+
+    print
+
+
+    @case('rand lookup')
     def test():
         with env.begin() as txn:
             for word in words:
@@ -90,15 +99,15 @@ def x():
         return len(words)
 
 
-    @case('per txn rand lookup+hash all keys')
+    @case('per txn rand lookup')
     def test():
         for word in words:
             with env.begin() as txn:
-                hash(txn.get(word))
+                txn.get(word)
         return len(words)
 
 
-    @case('rand lookup+hash all keys')
+    @case('rand lookup+hash')
     def test():
         with env.begin() as txn:
             for word in words:
@@ -106,7 +115,7 @@ def x():
         return len(words)
 
 
-    @case('rand lookup all buffers')
+    @case('rand lookup buffers')
     def test():
         with env.begin(buffers=True) as txn:
             for word in words:
@@ -114,7 +123,7 @@ def x():
         return len(words)
 
 
-    @case('rand lookup+hash all buffers')
+    @case('rand lookup+hash buffers')
     def test():
         with env.begin(buffers=True) as txn:
             for word in words:
@@ -131,10 +140,7 @@ def x():
         return len(words)
 
 
-    @case('enum (key, value) buffers')
-    def test():
-        with env.begin(buffers=True) as txn:
-            return sum(1 for _ in txn.cursor())
+    print
 
 
     @case('get+put')
@@ -146,12 +152,15 @@ def x():
             return len(words)
 
 
-    @case('replace all')
+    @case('replace')
     def test():
         with env.begin(write=True) as txn:
             for word in words:
                 txn.replace(word, word)
         return len(words)
+
+
+    print
 
 
     env = reopen_env()
@@ -208,12 +217,25 @@ def x():
         return len(words)
 
 
+    print
+
+
     env = reopen_env()
     @case('append')
     def test():
         with env.begin(write=True) as txn:
             for word in words_sorted:
                 txn.put(word, big or word, append=True)
+        return len(words)
+
+
+    env = reopen_env()
+    @case('append, reuse cursor')
+    def test():
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            for word in words_sorted:
+                curs.put(word, big or word, append=True)
         return len(words)
 
 
