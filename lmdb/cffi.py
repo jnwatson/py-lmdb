@@ -962,8 +962,6 @@ class Environment(object):
                 sorted order.) By default keys must be unique and may have only
                 a single data item.
 
-                *dupsort* is not yet fully supported.
-
             `create`:
                 If ``True``, create the database if it doesn't exist, otherwise
                 raise an exception.
