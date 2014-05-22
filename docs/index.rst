@@ -29,8 +29,8 @@ LMDB is a tiny database with some excellent properties:
 * Memory mapped, allowing for zero copy lookup and iteration. This is
   optionally exposed to Python using the :py:func:`buffer` interface.
 * Maintenance requires no external process or background threads.
-* No application-level caching is required: LMDB relies entirely on the
-  operating system's buffer cache.
+* No application-level caching is required: LMDB fully exploits the operating
+  system's buffer cache.
 
 
 Installation: Windows
@@ -93,6 +93,22 @@ existing installation:
 
         >>> # CFFI variant is loaded.
         >>> import lmdb
+
+
+Getting Help
+++++++++++++
+
+Before getting in contact, please ensure you have thoroughly reviewed this
+documentation, and if applicable, the associated
+`official Doxygen documentation <http://symas.com/mdb/doc/>`_.
+
+If you have found a bug, please report it on the `GitHub issue tracker
+<https://github.com/dw/py-lmdb/issues>`_, or mail it to the list below if
+you're allergic to GitHub.
+
+For all other problems and related discussion, please direct it to
+`the py-lmdb@freelists.org mailing list <http://www.freelists.org/list/py-lmdb>`_.
+You must be subscribed to post.
 
 
 Named Databases
