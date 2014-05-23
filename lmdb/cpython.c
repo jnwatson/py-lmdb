@@ -805,12 +805,38 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
 }
 
 /**
+ * Walk `argspec`, building a Python dictionary mapping keyword arguments to a
+ * PyInt describing their offset in the array. Used to reduce keyword argument
+ * parsing from O(specsize) to O(number of supplied kwargs).
+ */
+static int NOINLINE
+make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
+{
+    Py_ssize_t i;
+
+    if(! ((*cache = PyDict_New()))) {
+        return -1;
+    }
+
+    for(i = 0; i < specsize; i++) {
+        const struct argspec *spec = argspec + i;
+        PyObject *key = string_tbl[spec->string_id];
+        PyObject *val = PyInt_FromLong((long) i);
+        if(PyDict_SetItem(*cache, key, val)) {
+            return -1;
+        }
+        Py_DECREF(val);
+    }
+    return 0;
+}
+
+/**
  * Like PyArg_ParseTupleAndKeywords except types are specialized for this
  * module, keyword strings aren't dup'd every call and the code is >3x smaller.
  */
 static int NOINLINE
 parse_args(int valid, int specsize, const struct argspec *argspec,
-           PyObject *args, PyObject *kwds, void *out)
+           PyObject **cache, PyObject *args, PyObject *kwds, void *out)
 {
     unsigned set = 0;
     unsigned i;
@@ -838,29 +864,33 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
     }
 
     if(kwds) {
-        int size = PyDict_Size(kwds);
-        int c = 0;
+        Py_ssize_t ppos = 0;
+        PyObject *pkey;
+        PyObject *pvalue;
 
-        for(i = 0; i < specsize && c != size; i++) {
-            const struct argspec *spec = argspec + i;
-            PyObject *kwd = string_tbl[spec->string_id];
-            PyObject *val = PyDict_GetItem(kwds, kwd);
-            if(val) {
-                if(set & (1 << i)) {
-                    PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
-                                 PyBytes_AS_STRING(kwd));
-                    return -1;
-                }
-                if(parse_arg(spec, val, out)) {
-                    return -1;
-                }
-                c++;
-            }
+        if((! *cache) && make_arg_cache(specsize, argspec, cache)) {
+            return -1;
         }
 
-        if(c != size) {
-            type_error("unrecognized keyword argument");
-            return -1;
+        while(PyDict_Next(kwds, &ppos, &pkey, &pvalue)) {
+            PyObject *specidx;
+            int i;
+
+            if(! ((specidx = PyDict_GetItem(*cache, pkey)))) {
+                type_error("unrecognized keyword argument");
+                return -1;
+            }
+
+            i = PyInt_AS_LONG(specidx);
+            if(set & (1 << i)) {
+                PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
+                             PyBytes_AS_STRING(pkey));
+                return -1;
+            }
+
+            if(parse_arg(argspec + i, pvalue, out)) {
+                return -1;
+            }
         }
     }
     return 0;
@@ -1107,7 +1137,8 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
         {ARG_TRANS, TXN_S, OFFSET(db_flags, txn)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.txn) {
@@ -1276,7 +1307,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int rc;
     int mode;
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1406,7 +1438,8 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
@@ -1429,7 +1462,8 @@ env_copy(EnvObject *self, PyObject *args)
     PyObject *fspath_obj;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
     if(! arg.path) {
@@ -1466,7 +1500,8 @@ env_copyfd(EnvObject *self, PyObject *args)
         {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
     if(arg.fd == -1) {
@@ -1611,7 +1646,8 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     };
     int flags;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1759,7 +1795,8 @@ env_sync(EnvObject *self, PyObject *args)
     };
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
 
@@ -1876,7 +1913,8 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_TRANS, TXN_S, OFFSET(cursor_new, trans)}
     };
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1964,7 +2002,8 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
     };
     int res;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2023,7 +2062,8 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2194,7 +2234,8 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     Py_ssize_t added;
     PyObject *ret = NULL;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2281,7 +2322,8 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     int flags;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2376,7 +2418,8 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_replace, val)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2399,7 +2442,8 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     PyObject *old;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2454,7 +2498,8 @@ cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_set_key_dup, value)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     self->key = arg.key;
@@ -2496,7 +2541,8 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_set_range_dup, value)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     self->key = arg.key;
@@ -2551,7 +2597,8 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
     };
     void *val_func;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2649,7 +2696,8 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     enum MDB_cursor_op op;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
 
@@ -2936,7 +2984,8 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
     };
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.env) {
@@ -3021,7 +3070,8 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     return make_cursor(arg.db, self);
@@ -3047,7 +3097,8 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_val *val_ptr;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3082,7 +3133,8 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     };
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.db) {
@@ -3119,7 +3171,8 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_val val;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3167,7 +3220,8 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     int flags;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3228,7 +3282,8 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     PyObject *ret;
     CursorObject *cursor;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3266,7 +3321,8 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
     PyObject *old;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3344,7 +3400,8 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_stat st;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
