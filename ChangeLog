@@ -19,6 +19,9 @@
 * The bundled LMDB 0.9.11 has been updated with several fixes from upstream
   Git.
 
+* The cost of using keyword arguments in the CPython extension was
+  significantly reduced.
+
 
 2014-04-26 v0.81
 
