@@ -1,4 +1,28 @@
 
+2014-05-26 v0.82
+
+* Both variants now implement max_spare_txns, reducing the cost of creating a
+  read-only transaction 4x for an uncontended database and by up to 20x for
+  very read-busy environments. By default only 1 read-only transaction is
+  cached, adjust max_spare_txns= parameter if your script operates multiple
+  simultaneous read transactions.
+
+* Patch from Vladimir Vladimirov implementing MDB_NOLOCK.
+
+* The max_spare_iters and max_spare_cursors parameters were removed, neither
+  ever had any effect.
+
+* Cursor.putmulti() implemented based on a patch from Luke Kenneth Casson
+  Leighton. This function moves the loop required to batch populate a
+  database out of Python and into C.
+
+* The bundled LMDB 0.9.11 has been updated with several fixes from upstream
+  Git.
+
+* The cost of using keyword arguments in the CPython extension was
+  significantly reduced.
+
+
 2014-04-26 v0.81
 
 * On Python 2.x the extension module would silently interpret Unicode
@@ -17,7 +41,7 @@
 2014-04-21 v0.80
 
 * Both variants now build successfully as 32 bit / 64bit binaries on
-  eindows under Visual Studio 9.0, the compiler for Python 2.7. This enables
+  Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
   py-lmdb to be installed via pip on Windows without requiring a compiler to
   be available. In future, .egg/.whl releases will be pre-built for all recent
   Python versions on Windows.

@@ -1,7 +1,9 @@
 
 from pprint import pprint
+import itertools
 import os
 import shutil
+import sys
 
 from time import time as now
 import random
@@ -9,16 +11,30 @@ import lmdb
 
 MAP_SIZE = 1048576 * 400
 DB_PATH = '/ram/testdb'
+USE_SPARSE_FILES = sys.platform != 'darwin'
+
+
+def reopen_env(**kwargs):
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
+    return lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=USE_SPARSE_FILES, **kwargs)
+
+
+def case(title, **params):
+    def wrapper(func):
+        t0 = now()
+        count = func()
+        t1 = now()
+        print('%40s:  %2.3fs   %8d/sec' % (title, t1-t0, count/(t1-t0)))
+        return func
+    return wrapper
 
 
 def x():
     big = '' # '*' * 400
 
-    if os.path.exists(DB_PATH):
-        shutil.rmtree(DB_PATH)
-
     t0 = now()
-    words = set(file('/usr/share/dict/words').readlines())
+    words = set(file('/usr/share/dict/words'))
     words.update([w.upper() for w in words])
     words.update([w[::-1] for w in words])
     words.update([w[::-1].upper() for w in words])
@@ -30,261 +46,208 @@ def x():
     avglen = alllen  / len(words)
     print 'permutate %d words avglen %d took %.2fsec' % (len(words), avglen, now()-t0)
 
-    getword = iter(words).next
+    words_sorted = sorted(words)
+    items = [(w, big or w) for w in words]
+    items_sorted = [(w, big or w) for w in words_sorted]
 
-    env = lmdb.open(DB_PATH, map_size=MAP_SIZE)
-    print 'stat:', env.stat()
+    env = reopen_env()
 
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+    @case('insert')
+    def test():
         with env.begin(write=True) as txn:
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    txn.put(word, big or word)
-            except StopIteration:
-                run = False
+            for word in words:
+                txn.put(word, big or word)
+            return len(words)
 
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
-
-    t1 = now()
-    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
 
     st = env.stat()
+    print
     print 'stat:', st
     print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
         ((2*alllen) / 1024., (2*alllen)/len(words),
          (st['psize'] * st['leaf_pages']) / 1024.,
          (st['psize'] * st['leaf_pages']) / len(words))
+    print
 
 
-    with env.begin() as txn:
-        t0 = now()
-        lst = sum(1 for _ in txn.cursor())
-        t1 = now()
-        print 'enum %d (key, value) pairs took %.2f sec' % ((lst), t1-t0)
-
-    with env.begin() as txn:
-        t0 = now()
-        lst = sum(1 for _ in txn.cursor().iterprev())
-        t1 = now()
-        print 'reverse enum %d (key, value) pairs took %.2f sec' % ((lst), t1-t0)
-
-    with env.begin() as txn:
-        t0 = now()
-        for word in words:
-            txn.get(word)
-        t1 = now()
-        print 'rand lookup all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    t0 = now()
-    for word in words:
+    @case('enum (key, value) pairs')
+    def test():
         with env.begin() as txn:
-            hash(txn.get(word))
-    t1 = now()
-    print 'per txn rand lookup+hash all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
+            return sum(1 for _ in txn.cursor())
 
-    with env.begin() as txn:
-        t0 = now()
+
+    @case('reverse enum (key, value) pairs')
+    def test():
+        with env.begin() as txn:
+            return sum(1 for _ in txn.cursor().iterprev())
+
+
+    @case('enum (key, value) buffers')
+    def test():
+        with env.begin(buffers=True) as txn:
+            return sum(1 for _ in txn.cursor())
+
+
+    print
+
+
+    @case('rand lookup')
+    def test():
+        with env.begin() as txn:
+            for word in words:
+                txn.get(word)
+        return len(words)
+
+
+    @case('per txn rand lookup')
+    def test():
         for word in words:
-            hash(txn.get(word))
-        t1 = now()
-        print 'rand lookup+hash all keys %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    with env.begin(buffers=True) as txn:
-        t0 = now()
-        for word in words:
-            txn.get(word)
-        t1 = now()
-        print 'rand lookup all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    with env.begin(buffers=True) as txn:
-        t0 = now()
-        for word in words:
-            hash(txn.get(word))
-        t1 = now()
-        print 'rand lookup+hash all buffers %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    with env.begin(buffers=True) as txn:
-        cursget = txn.cursor().get
-        t0 = now()
-        for word in words:
-            cursget(word)
-        t1 = now()
-        print 'rand lookup all buffers (cursor) %.2f sec (%d/sec)' % (t1-t0, lst/(t1-t0))
-
-    with env.begin(buffers=True) as txn:
-        t0 = now()
-        lst = sum(1 for _ in txn.cursor())
-        t1 = now()
-        print 'enum %d (key, value) buffers took %.2f sec' % ((lst), t1-t0)
+            with env.begin() as txn:
+                txn.get(word)
+        return len(words)
 
 
+    @case('rand lookup+hash')
+    def test():
+        with env.begin() as txn:
+            for word in words:
+                hash(txn.get(word))
+        return len(words)
 
 
-    #
-    # get+put
-    #
+    @case('rand lookup buffers')
+    def test():
+        with env.begin(buffers=True) as txn:
+            for word in words:
+                txn.get(word)
+        return len(words)
 
-    getword = iter(sorted(words)).next
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+
+    @case('rand lookup+hash buffers')
+    def test():
+        with env.begin(buffers=True) as txn:
+            for word in words:
+                hash(txn.get(word))
+        return len(words)
+
+
+    @case('rand lookup buffers (cursor)')
+    def test():
+        with env.begin(buffers=True) as txn:
+            cursget = txn.cursor().get
+            for word in words:
+                cursget(word)
+        return len(words)
+
+
+    print
+
+
+    @case('get+put')
+    def test():
         with env.begin(write=True) as txn:
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    old = txn.get(word)
-                    txn.put(word, word)
-            except StopIteration:
-                run = False
-
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
-
-    t1 = now()
-    print 'get+put all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
+            for word in words:
+                txn.get(word)
+                txn.put(word, word)
+            return len(words)
 
 
-    #
-    # REPLACE
-    #
-
-    getword = iter(sorted(words)).next
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+    @case('replace')
+    def test():
         with env.begin(write=True) as txn:
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    old = txn.replace(word, word)
-            except StopIteration:
-                run = False
-
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
-
-    t1 = now()
-    print 'replace all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
+            for word in words:
+                txn.replace(word, word)
+        return len(words)
 
 
     print
-    print
-    print '--- MDB_WRITEMAP mode ---'
-    print
-
-    env.close()
-    if os.path.exists(DB_PATH):
-        shutil.rmtree(DB_PATH)
-    env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
 
 
-    getword = iter(sorted(words)).next
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+    env = reopen_env()
+    @case('insert (rand)')
+    def test():
         with env.begin(write=True) as txn:
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    txn.put(word, big or word, append=True)
-            except StopIteration:
-                run = False
-
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
-
-    t1 = now()
-    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
+            for word in words:
+                txn.put(word, big or word)
+        return len(words)
 
 
-    print
-    print
-    print '--- MDB_WRITEMAP + one cursor mode ---'
-    print
-
-    env.close()
-    if os.path.exists(DB_PATH):
-        shutil.rmtree(DB_PATH)
-    env = lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=True)
+    env = reopen_env()
+    @case('insert (seq)')
+    def test():
+        with env.begin(write=True) as txn:
+            for word in words_sorted:
+                txn.put(word, big or word)
+        return len(words)
 
 
-    getword = iter(sorted(words)).next
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+    env = reopen_env()
+    @case('insert (rand), reuse cursor')
+    def test():
         with env.begin(write=True) as txn:
             curs = txn.cursor()
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    curs.put(word, big or word, append=True)
-            except StopIteration:
-                run = False
-
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
-
-    t1 = now()
-    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
+            for word in words:
+                curs.put(word, big or word)
+        return len(words)
+    env = reopen_env()
 
 
-    print
-    print
-    print '--- MDB_APPEND mode ---'
-    print
-
-    env.close()
-    if os.path.exists(DB_PATH):
-        shutil.rmtree(DB_PATH)
-    env = lmdb.open(DB_PATH, map_size=MAP_SIZE)
-
-
-    getword = iter(sorted(words)).next
-    run = True
-    t0 = now()
-    last = t0
-    while run:
+    @case('insert (seq), reuse cursor')
+    def test():
         with env.begin(write=True) as txn:
-            try:
-                for _ in xrange(50000):
-                    word = getword()
-                    txn.put(word, big or word, append=True)
-            except StopIteration:
-                run = False
+            curs = txn.cursor()
+            for word in words_sorted:
+                curs.put(word, big or word)
+        return len(words)
 
-        t1 = now()
-        if (t1 - last) > 2:
-            print '%.2fs (%d/sec)' % (t1-t0, len(words)/(t1-t0))
-            last = t1
 
-    t1 = now()
-    print 'done all %d in %.2fs (%d/sec)' % (len(words), t1-t0, len(words)/(t1-t0))
-    last = t1
+    env = reopen_env()
+    @case('insert, putmulti')
+    def test():
+        with env.begin(write=True) as txn:
+            txn.cursor().putmulti(items)
+        return len(words)
 
+
+    env = reopen_env()
+    @case('insert, putmulti+generator')
+    def test():
+        with env.begin(write=True) as txn:
+            txn.cursor().putmulti((w, big or w) for w in words)
+        return len(words)
+
+
+    print
+
+
+    env = reopen_env()
+    @case('append')
+    def test():
+        with env.begin(write=True) as txn:
+            for word in words_sorted:
+                txn.put(word, big or word, append=True)
+        return len(words)
+
+
+    env = reopen_env()
+    @case('append, reuse cursor')
+    def test():
+        with env.begin(write=True) as txn:
+            curs = txn.cursor()
+            for word in words_sorted:
+                curs.put(word, big or word, append=True)
+        return len(words)
+
+
+    env = reopen_env()
+    @case('append+putmulti')
+    def test():
+        with env.begin(write=True) as txn:
+            txn.cursor().putmulti(items_sorted, append=True)
+        return len(words)
+
+
+    print
     st = env.stat()
     print 'stat:', st
     print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\

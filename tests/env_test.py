@@ -139,6 +139,13 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(metasync=flag)
             assert env.flags()['metasync'] == flag
 
+    def test_lock(self):
+        for flag in True, False:
+            path, env = testlib.temp_env(lock=flag)
+            lock_path = os.path.join(path, 'lock.mdb')
+            assert env.flags()['lock'] == flag
+            assert flag == os.path.exists(lock_path)
+
     def test_sync(self):
         for flag in True, False:
             path, env = testlib.temp_env(sync=flag)
@@ -318,7 +325,7 @@ class InfoMethodsTest(unittest.TestCase):
             lambda: env.max_readers())
 
     def test_readers(self):
-        _, env = testlib.temp_env()
+        _, env = testlib.temp_env(max_spare_txns=0)
         r = env.readers()
         assert isinstance(r, UnicodeType)
         assert r == NO_READERS
@@ -386,16 +393,21 @@ class OtherMethodsTest(unittest.TestCase):
     def _test_reader_check_child(path):
         """Function to run in child process since we can't use fork() on
         win32."""
-        env = lmdb.open(path)
+        env = lmdb.open(path, max_spare_txns=0)
         txn = env.begin()
         os._exit(0)
 
     def test_reader_check(self):
-        path, env = testlib.temp_env()
+        path, env = testlib.temp_env(max_spare_txns=0)
         rc = env.reader_check()
         assert rc == 0
 
-        txn1 = env.begin()
+        # We need to open a separate env since Transaction.abort() always calls
+        # reset for a read-only txn, the actual abort doesn't happen until
+        # __del__, when Transaction discovers there is no room for it on the
+        # freelist.
+        env1 = lmdb.open(path)
+        txn1 = env1.begin()
         assert env.readers() != NO_READERS
         assert env.reader_check() == 0
 
@@ -409,6 +421,7 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.readers() != NO_READERS
 
         txn1.abort()
+        env1.close()
         assert env.readers() == NO_READERS
 
         env.close()
@@ -583,6 +596,57 @@ class OpenDbTest(unittest.TestCase):
             key = B('%s-%s' % (flag, val))
             db = env.open_db(key, txn=txn)
             assert db.flags(txn)[flag] == val
+
+
+reader_count = lambda env: env.readers().count('\n') - 1
+
+class SpareTxnTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_none(self):
+        _, env = testlib.temp_env(max_spare_txns=0)
+        assert 0 == reader_count(env)
+
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+
+        t2 = env.begin()
+        assert 2 == reader_count(env)
+
+        t1.abort()
+        del t1
+        assert 1 == reader_count(env)
+
+        t2.abort()
+        del t2
+        assert 0 == reader_count(env)
+
+    def test_one(self):
+        _, env = testlib.temp_env(max_spare_txns=1)
+        # 1 here, since CFFI uses a temporary reader during init.
+        assert 1 >= reader_count(env)
+
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+
+        t2 = env.begin()
+        assert 2 == reader_count(env)
+
+        t1.abort()
+        del t1
+        assert 2 == reader_count(env)  # 1 live, 1 cached
+
+        t2.abort()
+        del t2
+        assert 1 == reader_count(env)  # 1 cached
+
+        t3 = env.begin()
+        assert 1 == reader_count(env)  # 1 live
+
+        t3.abort()
+        del t3
+        assert 1 == reader_count(env)  # 1 cached
 
 
 if __name__ == '__main__':

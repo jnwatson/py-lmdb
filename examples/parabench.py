@@ -8,7 +8,10 @@ import shutil
 import sys
 import time
 
-import affinity
+try:
+    import affinity
+except:
+    affinity = False
 import lmdb
 
 
@@ -70,7 +73,8 @@ env.close()
 
 
 def run(idx):
-    affinity.set_process_affinity_mask(os.getpid(), 1 << idx)
+    if affinity:
+        affinity.set_process_affinity_mask(os.getpid(), 1 << idx)
 
     env = open_env()
     k = list(keys)

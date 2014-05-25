@@ -1,0 +1,31 @@
+diff --git a/lmdb/cpython.c b/lmdb/cpython.c
+index dd1c8b9..ced5ea3 100644
+--- a/lmdb/cpython.c
++++ b/lmdb/cpython.c
+@@ -2319,11 +2319,25 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
+         {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
+         {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
+     };
++    static char *keywords[] = {
++        "key", "value", "dupdata", "overwrite", "append", NULL
++    };
++    PyObject *key, *val;
+     int flags;
+     int rc;
+ 
+     static PyObject *cache = NULL;
+-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
++    if(! self->valid) {
++        return err_invalid();
++    }
++    if(! PyArg_ParseTupleAndKeywords(args, kwds, "OO|iii", keywords,
++                                     &key, &val, &arg.dupdata, &arg.overwrite,
++                                     &arg.append)) {
++        return NULL;
++    }
++
++    if(val_from_buffer(&arg.key, key) ||
++       val_from_buffer(&arg.val, val)) {
+         return NULL;
+     }
+ 

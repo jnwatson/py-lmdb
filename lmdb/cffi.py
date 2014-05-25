@@ -157,6 +157,8 @@ _CFFI_CDEF = '''
     int mdb_txn_begin(MDB_env *env, MDB_txn *parent, unsigned int flags,
                       MDB_txn **txn);
     int mdb_txn_commit(MDB_txn *txn);
+    void mdb_txn_reset(MDB_txn *txn);
+    int mdb_txn_renew(MDB_txn *txn);
     void mdb_txn_abort(MDB_txn *txn);
     int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags,
                      MDB_dbi *dbi);
@@ -216,6 +218,7 @@ _CFFI_CDEF = '''
     #define MDB_NOSYNC ...
     #define MDB_NOTLS ...
     #define MDB_RDONLY ...
+    #define MDB_NOLOCK ...
     #define MDB_REVERSEKEY ...
     #define MDB_WRITEMAP ...
     #define MDB_NOMEMINIT ...
@@ -619,26 +622,22 @@ class Environment(object):
             :py:meth:`cursor`. Should match the process's maximum expected
             concurrent transactions (e.g. thread count).
 
-            *Note:* ignored on CFFI.
-
-        `max_spare_cursors`:
-            Read-only cursors to cache after becoming unused. Caching cursors
-            avoids two allocations per :py:class:`Cursor` or :py:meth:`cursor`
-            or :py:meth:`Transaction.cursor` invocation.
-
-            *Note:* ignored on CFFI.
-
-        `max_spare_iters`:
-            Iterators to cache after becoming unused. Caching iterators avoids
-            one allocation per :py:class:`Cursor` ``iter*`` method invocation.
-
-            *Note:* ignored on CFFI.
+        `lock`:
+            If ``False``, don't do any locking. If concurrent access is
+            anticipated, the caller must manage all concurrency itself. For
+            proper operation the caller must enforce single-writer semantics,
+            and must ensure that no readers are using old transactions while a
+            writer is active. The simplest approach is to use an exclusive lock
+            so that no readers may be active at all when a writer begins.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
             readonly=False, metasync=True, sync=True, map_async=False,
             mode=O_0755, create=True, readahead=True, writemap=False,
             meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-            max_spare_cursors=32, max_spare_iters=32):
+            lock=True):
+        self._max_spare_txns = max_spare_txns
+        self._spare_txns = []
+
         envpp = _ffi.new('MDB_env **')
 
         rc = _lib.mdb_env_create(envpp)
@@ -680,6 +679,8 @@ class Environment(object):
             flags |= _lib.MDB_WRITEMAP
         if not meminit:
             flags |= _lib.MDB_NOMEMINIT
+        if not lock:
+            flags |= _lib.MDB_NOLOCK
 
         if isinstance(path, UnicodeType):
             path = path.encode(sys.getfilesystemencoding())
@@ -687,6 +688,7 @@ class Environment(object):
         rc = _lib.mdb_env_open(self._env, path, flags, mode & ~O_0111)
         if rc:
             raise _error(path, rc)
+
         with self.begin(db=object()) as txn:
             self._db = _Database(self, txn, None, False, False, True)
         self._dbs = {None: weakref.ref(self._db)}
@@ -700,6 +702,8 @@ class Environment(object):
         """
         if self._env:
             _kill_dependents(self)
+            while self._spare_txns:
+                _lib.mdb_txn_abort(self._spare_txns.pop())
             _lib.mdb_env_close(self._env)
             self._env = _invalid
 
@@ -853,7 +857,8 @@ class Environment(object):
             'map_async': bool(flags & _lib.MDB_MAPASYNC),
             'readahead': not (flags & _lib.MDB_NORDAHEAD),
             'writemap': bool(flags & _lib.MDB_WRITEMAP),
-            'meminit': not (flags & _lib.MDB_NOMEMINIT)
+            'meminit': not (flags & _lib.MDB_NOMEMINIT),
+            'lock':  not (flags & _lib.MDB_NOLOCK),
         }
 
     def max_key_size(self):
@@ -956,8 +961,6 @@ class Environment(object):
                 perspective, keys may have multiple data items, stored in
                 sorted order.) By default keys must be unique and may have only
                 a single data item.
-
-                *dupsort* is not yet fully supported.
 
             `create`:
                 If ``True``, create the database if it doesn't exist, otherwise
@@ -1086,40 +1089,59 @@ class Transaction(object):
     _env = _invalid
     _txn = _invalid
     _parent = None
+    _write = False
+
+    # Mutations occurred since transaction start. Required to know when Cursor
+    # key/value must be refreshed.
+    _mutations = 0
 
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         _depend(env, self)
-        self.env = env # hold ref
+        self.env = env  # hold ref
         self._db = db or env._db
         self._env = env._env
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = {}
-        if write and env.readonly:
-            msg = 'Cannot start write transaction with read-only env'
-            raise _error(msg, _lib.EACCES)
-        if write:
-            flags = 0
-        else:
-            flags = _lib.MDB_RDONLY
-        txnpp = _ffi.new('MDB_txn **')
+
         if parent:
             self._parent = parent
             parent_txn = parent._txn
             _depend(parent, self)
         else:
             parent_txn = _ffi.NULL
-        rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
-        if rc:
-            raise _error("mdb_txn_begin", rc)
-        self._txn = txnpp[0]
-        # Number of mutations occurred since start of transaction. Required to
-        # know when Cursor key/value must be refreshed.
-        self._mutations = 0
+
+        if write:
+            if env.readonly:
+                msg = 'Cannot start write transaction with read-only env'
+                raise _error(msg, _lib.EACCES)
+
+            txnpp = _ffi.new('MDB_txn **')
+            rc = _lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
+            if rc:
+                raise _error("mdb_txn_begin", rc)
+            self._txn = txnpp[0]
+            self._write = True
+        else:
+            try:  # Exception catch in order to avoid racy 'if txns:' test
+                self._txn = env._spare_txns.pop()
+                env._max_spare_txns += 1
+                rc = _lib.mdb_txn_renew(self._txn)
+                if rc:
+                    _lib.mdb_txn_abort(self._txn)
+                    raise _error("mdb_txn_renew", rc)
+            except IndexError:
+                txnpp = _ffi.new('MDB_txn **')
+                flags = _lib.MDB_RDONLY
+                rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                if rc:
+                    raise _error("mdb_txn_begin", rc)
+                self._txn = txnpp[0]
 
     def _invalidate(self):
         self.abort()
+        self._parent = None
         self._env = _invalid
 
     def __del__(self):
@@ -1161,6 +1183,19 @@ class Transaction(object):
         if rc:
             raise _error("mdb_drop", rc)
 
+    def _cache_spare(self):
+        # In order to avoid taking and maintaining a lock, a race is allowed
+        # below which may result in more spare txns than desired. It seems
+        # unlikely the race could ever result in a large amount of spare txns,
+        # and in any case a correctly configured program should not be opening
+        # more read-only transactions than there are configured spares.
+        if self.env._max_spare_txns > 0:
+            _lib.mdb_txn_reset(self._txn)
+            self.env._spare_txns.append(self._txn)
+            self.env._max_spare_txns -= 1
+            self._txn = _invalid
+            return True
+
     def commit(self):
         """Commit the pending transaction.
 
@@ -1168,10 +1203,11 @@ class Transaction(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
         """
         _kill_dependents(self)
-        rc = _lib.mdb_txn_commit(self._txn)
-        self._txn = _invalid
-        if rc:
-            raise _error("mdb_txn_commit", rc)
+        if self._write or not self._cache_spare():
+            rc = _lib.mdb_txn_commit(self._txn)
+            self._txn = _invalid
+            if rc:
+                raise _error("mdb_txn_commit", rc)
 
     def abort(self):
         """Abort the pending transaction. Repeat calls to :py:meth:`abort` have
@@ -1184,10 +1220,11 @@ class Transaction(object):
         """
         if self._txn:
             _kill_dependents(self)
-            rc = _lib.mdb_txn_abort(self._txn)
-            self._txn = _invalid
-            if rc:
-                raise _error("mdb_txn_abort", rc)
+            if self._write or not self._cache_spare():
+                rc = _lib.mdb_txn_abort(self._txn)
+                self._txn = _invalid
+                if rc:
+                    raise _error("mdb_txn_abort", rc)
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, returning `default` if `key`
@@ -1868,6 +1905,58 @@ class Cursor(object):
             raise _error("mdb_cursor_put", rc)
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
+
+    def putmulti(self, items, dupdata=True, overwrite=True, append=False):
+        """Invoke :py:meth:`put` for each `(key, value)` 2-tuple from the
+        iterable `items`. Elements must be exactly 2-tuples, they may not be of
+        any other type, or tuple subclass.
+
+        Returns a tuple `(consumed, added)`, where `consumed` is the number of
+        elements read from the iterable, and `added` is the number of new
+        entries added to the database. `added` may be less than `consumed` when
+        `overwrite=False`.
+
+            `items`:
+                Iterable to read records from.
+
+            `dupdata`:
+                If ``True`` and database was opened with `dupsort=True`, add
+                pair as a duplicate if the given key already exists. Otherwise
+                overwrite any existing matching key.
+
+            `overwrite`:
+                If ``False``, do not overwrite the value for the key if it
+                exists, just return ``False``. For databases opened with
+                `dupsort=True`, ``False`` will always be returned if a
+                duplicate key/value pair is inserted, regardless of the setting
+                for `overwrite`.
+
+            `append`:
+                If ``True``, append records to the end of the database without
+                comparing their order first. Appending a key that is not
+                greater than the highest existing key will cause corruption.
+        """
+        flags = 0
+        if not dupdata:
+            flags |= _lib.MDB_NODUPDATA
+        if not overwrite:
+            flags |= _lib.MDB_NOOVERWRITE
+        if append:
+            flags |= _lib.MDB_APPEND
+
+        added = 0
+        skipped = 0
+        for key, value in items:
+            rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
+                                       val, len(val), flags)
+            self.txn._mutations += 1
+            added += 1
+            if rc:
+                if rc == _lib.MDB_KEYEXIST:
+                    skipped += 1
+                raise _error("mdb_cursor_put", rc)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
+        return added, added-skipped
 
     def replace(self, key, val):
         """Store a record, returning its previous value if one existed. Returns

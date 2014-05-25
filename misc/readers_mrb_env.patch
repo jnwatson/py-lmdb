@@ -1,0 +1,44 @@
+Store the address of the MDB_env structure that owns a reader in addition to
+its PID and TID, to allow multiple MDB_envs to be open on the same thread,
+since on mdb_env_close(), LMDB unconditionally obliterates any readers with a
+matching PID. This patch extends the test to (PID, MDB_env*).
+
+diff --git a/lib/mdb.c b/lib/mdb.c
+index fd0a3b5..f2ebdfa 100644
+--- a/lib/mdb.c
++++ b/lib/mdb.c
+@@ -536,6 +536,8 @@ typedef struct MDB_rxbody {
+ 	txnid_t		mrb_txnid;
+ 	/** The process ID of the process owning this reader txn. */
+ 	MDB_PID_T	mrb_pid;
++	/** MDB_env within the process owning this reader txn. */
++	void *      mrb_env;
+ 	/** The thread ID of the thread owning this txn. */
+ 	pthread_t	mrb_tid;
+ } MDB_rxbody;
+@@ -547,6 +549,7 @@ typedef struct MDB_reader {
+ 		/** shorthand for mrb_txnid */
+ #define	mr_txnid	mru.mrx.mrb_txnid
+ #define	mr_pid	mru.mrx.mrb_pid
++#define	mr_env	mru.mrx.mrb_env
+ #define	mr_tid	mru.mrx.mrb_tid
+ 		/** cache line alignment */
+ 		char pad[(sizeof(MDB_rxbody)+CACHELINE-1) & ~(CACHELINE-1)];
+@@ -2285,6 +2288,7 @@ mdb_txn_renew0(MDB_txn *txn)
+ 					return MDB_READERS_FULL;
+ 				}
+ 				ti->mti_readers[i].mr_pid = pid;
++				ti->mti_readers[i].mr_env = env;
+ 				ti->mti_readers[i].mr_tid = tid;
+ 				if (i == nr)
+ 					ti->mti_numreaders = ++nr;
+@@ -4254,7 +4258,8 @@ mdb_env_close0(MDB_env *env, int excl)
+ 		 * me_txkey with its destructor must be disabled first.
+ 		 */
+ 		for (i = env->me_numreaders; --i >= 0; )
+-			if (env->me_txns->mti_readers[i].mr_pid == pid)
++			if (env->me_txns->mti_readers[i].mr_pid == pid
++				&& env->me_txns->mti_readers[i].mr_env == env)
+ 				env->me_txns->mti_readers[i].mr_pid = 0;
+ #ifdef _WIN32
+ 		if (env->me_rmutex) {

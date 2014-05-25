@@ -26,6 +26,7 @@
 #include "stdint.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -53,6 +54,9 @@
 #   define DEBUG(s, ...) fprintf(stderr, \
     "lmdb.cpython: %s:%d: " s "\n", __func__, __LINE__, ## __VA_ARGS__);
 #endif
+
+#define MDEBUG(s, ...) DEBUG("%p: " s, self, ## __VA_ARGS__);
+
 
 /* Inlining control for compatible compilers. */
 #if (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4))
@@ -95,15 +99,13 @@ enum string_id {
     FD_S,
     FORCE_S,
     ITEMS_S,
-    ITERITEMS_S,
     KEY_S,
     KEYS_S,
+    LOCK_S,
     MAP_ASYNC_S,
     MAP_SIZE_S,
     MAX_DBS_S,
     MAX_READERS_S,
-    MAX_SPARE_CURSORS_S,
-    MAX_SPARE_ITERS_S,
     MAX_SPARE_TXNS_S,
     MEMINIT_S,
     METASYNC_S,
@@ -145,15 +147,13 @@ static const char *strings = (
     "fd\0"
     "force\0"
     "items\0"
-    "iteritems\0"
     "key\0"
     "keys\0"
+    "lock\0"
     "map_async\0"
     "map_size\0"
     "max_dbs\0"
     "max_readers\0"
-    "max_spare_cursors\0"
-    "max_spare_iters\0"
     "max_spare_txns\0"
     "meminit\0"
     "metasync\0"
@@ -219,7 +219,10 @@ typedef struct TransObject TransObject;
 #   define MOD_RETURN(mod) return
 #   define MODINIT_NAME initcpython
 #   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
-#   define PyBUF_READ 0
+
+#   ifndef PyBUF_READ
+#       define PyBUF_READ 0
+#   endif
 
 /* Python 2.5 */
 #   ifndef Py_TYPE
@@ -275,8 +278,11 @@ struct lmdb_object {
 /** lmdb._Database */
 struct DbObject {
     LmdbObject_HEAD
-    /** Python Environment reference. */
-    struct EnvObject *env; /* Not refcounted. */
+    /** Python Environment reference. Not refcounted; when the last strong ref
+     * to Environment is released, DbObject.tp_clear() will be called, causing
+     * DbObject.env and DbObject.dbi to be cleared. This is to prevent a
+     * cyclical reference from DB->Env keeping the environment alive. */
+    struct EnvObject *env;
     /** MDB database handle. */
     MDB_dbi dbi;
     /** Flags at time of creation. */
@@ -294,14 +300,21 @@ struct EnvObject {
     DbObject *main_db;
     /**  1 if env opened read-only; transactions must always be read-only. */
     int readonly;
+
+    /** Max free txns to keep on free_txn list. */
+    int max_spare_txns;
+    /** Spare read-only transaction list head. */
+    struct TransObject *spare_txns;
 };
 
 /** TransObject.flags bitfield values. */
 enum trans_flags {
     /** Buffers should be yielded by get. */
     TRANS_BUFFERS       = 1,
-    /** Transaction is read-only and go on the freelist at deallocation. */
-    TRANS_RDONLY        = 2
+    /** Transaction can be can go on freelist instead of deallocation. */
+    TRANS_RDONLY        = 2,
+    /** Transaction is spare, ready for mdb_txn_renew() */
+    TRANS_SPARE         = 4
 };
 
 /** lmdb.Transaction */
@@ -321,6 +334,8 @@ struct TransObject {
     /** Number of mutations occurred since start of transaction. Required to
      * know when cursor key/value must be refreshed. */
     int mutations;
+    /** Next free read-only txn, or NULL. */
+    struct TransObject *spare_next;
 };
 
 /** lmdb.Cursor */
@@ -501,6 +516,21 @@ err_set(const char *what, int rc)
 
     PyErr_Format(klass, "%s: %s", what, mdb_strerror(rc));
     return NULL;
+}
+
+/**
+ * Raise an exception from a format string.
+ */
+static void * NOINLINE
+err_format(int rc, const char *fmt, ...)
+{
+    char buf[128];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    buf[sizeof buf - 1] = '\0';
+    va_end(ap);
+    return err_set(buf, rc);
 }
 
 static void * NOINLINE
@@ -761,12 +791,12 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
         }
         case ARG_INT:
             if(! (ret = parse_ulong(val, &l, py_int_max))) {
-                *((int *) dst) = l;
+                *((int *) dst) = (int)l;
             }
             break;
         case ARG_SIZE:
             if(! (ret = parse_ulong(val, &l, py_size_max))) {
-                *((size_t *) dst) = l;
+                *((size_t *) dst) = (size_t)l;
             }
             break;
         }
@@ -775,12 +805,38 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
 }
 
 /**
+ * Walk `argspec`, building a Python dictionary mapping keyword arguments to a
+ * PyInt describing their offset in the array. Used to reduce keyword argument
+ * parsing from O(specsize) to O(number of supplied kwargs).
+ */
+static int NOINLINE
+make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
+{
+    Py_ssize_t i;
+
+    if(! ((*cache = PyDict_New()))) {
+        return -1;
+    }
+
+    for(i = 0; i < specsize; i++) {
+        const struct argspec *spec = argspec + i;
+        PyObject *key = string_tbl[spec->string_id];
+        PyObject *val = PyInt_FromLong((long) i);
+        if(PyDict_SetItem(*cache, key, val)) {
+            return -1;
+        }
+        Py_DECREF(val);
+    }
+    return 0;
+}
+
+/**
  * Like PyArg_ParseTupleAndKeywords except types are specialized for this
  * module, keyword strings aren't dup'd every call and the code is >3x smaller.
  */
 static int NOINLINE
 parse_args(int valid, int specsize, const struct argspec *argspec,
-           PyObject *args, PyObject *kwds, void *out)
+           PyObject **cache, PyObject *args, PyObject *kwds, void *out)
 {
     unsigned set = 0;
     unsigned i;
@@ -808,29 +864,33 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
     }
 
     if(kwds) {
-        int size = PyDict_Size(kwds);
-        int c = 0;
+        Py_ssize_t ppos = 0;
+        PyObject *pkey;
+        PyObject *pvalue;
 
-        for(i = 0; i < specsize && c != size; i++) {
-            const struct argspec *spec = argspec + i;
-            PyObject *kwd = string_tbl[spec->string_id];
-            PyObject *val = PyDict_GetItem(kwds, kwd);
-            if(val) {
-                if(set & (1 << i)) {
-                    PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
-                                 PyBytes_AS_STRING(kwd));
-                    return -1;
-                }
-                if(parse_arg(spec, val, out)) {
-                    return -1;
-                }
-                c++;
-            }
+        if((! *cache) && make_arg_cache(specsize, argspec, cache)) {
+            return -1;
         }
 
-        if(c != size) {
-            type_error("unrecognized keyword argument");
-            return -1;
+        while(PyDict_Next(kwds, &ppos, &pkey, &pvalue)) {
+            PyObject *specidx;
+            int i;
+
+            if(! ((specidx = PyDict_GetItem(*cache, pkey)))) {
+                type_error("unrecognized keyword argument");
+                return -1;
+            }
+
+            i = PyInt_AS_LONG(specidx);
+            if(set & (1 << i)) {
+                PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
+                             PyBytes_AS_STRING(pkey));
+                return -1;
+            }
+
+            if(parse_arg(argspec + i, pvalue, out)) {
+                return -1;
+            }
         }
     }
     return 0;
@@ -888,17 +948,33 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         parent_txn = parent->txn;
     }
 
-    if(write && env->readonly) {
-        const char *msg = "Cannot start write transaction with read-only env";
-        return err_set(msg, EACCES);
+    if((!write) && env->spare_txns) {
+        self = env->spare_txns;
+        DEBUG("found freelist txn; self=%p self->txn=%p", self, self->txn)
+        env->spare_txns = self->spare_next;
+        env->max_spare_txns++;
+        self->flags &= ~TRANS_SPARE;
+        _Py_NewReference(self);
+        UNLOCKED(rc, mdb_txn_renew(self->txn));
+
+        if(rc) {
+            mdb_txn_abort(self->txn);
+            self->txn = NULL;
+        }
+    } else {
+        if(write && env->readonly) {
+            const char *msg = "Cannot start write transaction with read-only env";
+            return err_set(msg, EACCES);
+        }
+
+        if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
+            return NULL;
+        }
+
+        flags = write ? 0 : MDB_RDONLY;
+        UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
     }
 
-    if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
-        return NULL;
-    }
-
-    flags = (write && !env->readonly) ? 0 : MDB_RDONLY;
-    UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
     if(rc) {
         PyObject_Del(self);
         return err_set("mdb_txn_begin", rc);
@@ -915,6 +991,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 #endif
 
     self->mutations = 0;
+    self->spare_next = NULL;
     self->flags = 0;
     if(! write) {
         self->flags |= TRANS_RDONLY;
@@ -1060,7 +1137,8 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
         {ARG_TRANS, TXN_S, OFFSET(db_flags, txn)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.txn) {
@@ -1128,20 +1206,32 @@ static PyTypeObject PyDatabase_Type = {
 /* Environment */
 /* ----------- */
 
+static void
+trans_dealloc(TransObject *self);
+
 static int
 env_clear(EnvObject *self)
 {
-    DEBUG("killing env..")
+    MDEBUG("killing env..")
+    INVALIDATE(self)
+    self->valid = 0;
+    Py_CLEAR(self->main_db);
+
+    /* Force trans_dealloc() to free by setting avail size to 0 */
+    self->max_spare_txns = 0;
+    while(self->spare_txns) {
+        MDEBUG("killing spare txn %p", self->spare_txns)
+        TransObject *cur = self->spare_txns;
+        self->spare_txns = cur->spare_next;
+        trans_dealloc(cur);
+    }
+
     if(self->env) {
-        INVALIDATE(self)
         DEBUG("Closing env")
         Py_BEGIN_ALLOW_THREADS
         mdb_env_close(self->env);
         Py_END_ALLOW_THREADS
         self->env = NULL;
-    }
-    if(self->main_db) {
-        Py_CLEAR(self->main_db);
     }
     return 0;
 }
@@ -1154,6 +1244,16 @@ env_dealloc(EnvObject *self)
 {
     env_clear(self);
     PyObject_Del(self);
+}
+
+/**
+ * Environment.close()
+ */
+static PyObject *
+env_close(EnvObject *self)
+{
+    env_clear(self);
+    Py_RETURN_NONE;
 }
 
 /**
@@ -1177,10 +1277,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int meminit;
         int max_readers;
         int max_dbs;
-        ssize_t max_spare_txns;
-        ssize_t max_spare_cursors;
-        ssize_t max_spare_iters;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 32, 32};
+        int max_spare_txns;
+        int lock;
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 1};
 
     static const struct argspec argspec[] = {
         {ARG_OBJ, PATH_S, OFFSET(env_new, path)},
@@ -1197,9 +1296,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_INT, MEMINIT_S, OFFSET(env_new, meminit)},
         {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
         {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
-        {ARG_SIZE, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
-        {ARG_SIZE, MAX_SPARE_CURSORS_S, OFFSET(env_new, max_spare_cursors)},
-        {ARG_SIZE, MAX_SPARE_ITERS_S, OFFSET(env_new, max_spare_iters)}
+        {ARG_INT, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
+        {ARG_BOOL, LOCK_S, OFFSET(env_new, lock)}
     };
 
     PyObject *fspath_obj = NULL;
@@ -1209,7 +1307,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int rc;
     int mode;
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1225,6 +1324,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->weaklist = NULL;
     self->main_db = NULL;
     self->env = NULL;
+    self->max_spare_txns = arg.max_spare_txns;
+    self->spare_txns = NULL;
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -1289,6 +1390,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     if(! arg.meminit) {
         flags |= MDB_NOMEMINIT;
     }
+    if(! arg.lock) {
+        flags |= MDB_NOLOCK;
+    }
 
     /* Strip +x. */
     mode = arg.mode & ~0111;
@@ -1310,9 +1414,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 fail:
     DEBUG("initialization failed")
     Py_CLEAR(fspath_obj);
-    if(self) {
-        env_dealloc(self);
-    }
+    Py_CLEAR(self);
     return NULL;
 }
 
@@ -1336,28 +1438,11 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
-}
-
-/**
- * Environment.close()
- */
-static PyObject *
-env_close(EnvObject *self)
-{
-    if(self->valid) {
-        INVALIDATE(self)
-        self->valid = 0;
-        DEBUG("Closing env")
-        Py_BEGIN_ALLOW_THREADS
-        mdb_env_close(self->env);
-        Py_END_ALLOW_THREADS
-        self->env = NULL;
-    }
-    Py_RETURN_NONE;
 }
 
 /**
@@ -1377,7 +1462,8 @@ env_copy(EnvObject *self, PyObject *args)
     PyObject *fspath_obj;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
     if(! arg.path) {
@@ -1414,7 +1500,8 @@ env_copyfd(EnvObject *self, PyObject *args)
         {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
     if(arg.fd == -1) {
@@ -1500,6 +1587,7 @@ env_flags(EnvObject *self)
     PyDict_SetItemString(dct, "readahead", py_bool(!(flags & MDB_NORDAHEAD)));
     PyDict_SetItemString(dct, "writemap", py_bool(flags & MDB_WRITEMAP));
     PyDict_SetItemString(dct, "meminit", py_bool(!(flags & MDB_NOMEMINIT)));
+    PyDict_SetItemString(dct, "lock", py_bool(!(flags & MDB_NOLOCK)));
     return dct;
 }
 
@@ -1558,7 +1646,8 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     };
     int flags;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1706,7 +1795,8 @@ env_sync(EnvObject *self, PyObject *args)
     };
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
 
@@ -1823,7 +1913,8 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_TRANS, TXN_S, OFFSET(cursor_new, trans)}
     };
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1911,7 +2002,8 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
     };
     int res;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -1970,7 +2062,8 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2114,6 +2207,98 @@ cursor_prev_nodup(CursorObject *self)
 }
 
 /**
+ * Cursor.putmulti(iter|dict) -> (consumed, added)
+ */
+static PyObject *
+cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_put {
+        PyObject *items;
+        int dupdata;
+        int overwrite;
+        int append;
+    } arg = {Py_None, 1, 1, 0};
+
+    PyObject *iter;
+    PyObject *item;
+
+    static const struct argspec argspec[] = {
+        {ARG_OBJ, ITEMS_S, OFFSET(cursor_put, items)},
+        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_put, dupdata)},
+        {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
+        {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
+    };
+    int flags;
+    int rc;
+    Py_ssize_t consumed;
+    Py_ssize_t added;
+    PyObject *ret = NULL;
+
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    flags = 0;
+    if(! arg.dupdata) {
+        flags |= MDB_NODUPDATA;
+    }
+    if(! arg.overwrite) {
+        flags |= MDB_NOOVERWRITE;
+    }
+    if(arg.append) {
+        flags |= MDB_APPEND;
+    }
+
+    if(! ((iter = PyObject_GetIter(arg.items)))) {
+        return NULL;
+    }
+
+    consumed = 0;
+    added = 0;
+    while((item = PyIter_Next(iter))) {
+        MDB_val mkey, mval;
+        if(! (PyTuple_CheckExact(item) && PyTuple_GET_SIZE(item) == 2)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "putmulti() elements must be 2-tuples");
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL;
+        }
+
+        if(val_from_buffer(&mkey, PyTuple_GET_ITEM(item, 0)) ||
+           val_from_buffer(&mval, PyTuple_GET_ITEM(item, 1))) {
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL; /* val_from_buffer sets exception */
+        }
+
+        UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
+        self->trans->mutations++;
+        switch(rc) {
+        case MDB_SUCCESS:
+            added++;
+            break;
+        case MDB_KEYEXIST:
+            break;
+        default:
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return err_format(rc, "mdb_cursor_put() element #%d", consumed);
+        }
+
+        Py_DECREF(item);
+        consumed++;
+    }
+
+    Py_DECREF(iter);
+    if(! PyErr_Occurred()) {
+        ret = Py_BuildValue("(nn)", consumed, added);
+    }
+    return ret;
+}
+
+/**
  * Cursor.put() -> bool
  */
 static PyObject *
@@ -2137,7 +2322,8 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     int flags;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2232,7 +2418,8 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_replace, val)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2255,7 +2442,8 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     PyObject *old;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2310,7 +2498,8 @@ cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_set_key_dup, value)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     self->key = arg.key;
@@ -2352,7 +2541,8 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {ARG_BUF, VALUE_S, OFFSET(cursor_set_range_dup, value)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     self->key = arg.key;
@@ -2407,7 +2597,8 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
     };
     void *val_func;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
 
@@ -2505,7 +2696,8 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     enum MDB_cursor_op op;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, NULL, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
         return NULL;
     }
 
@@ -2557,6 +2749,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"prev_dup", (PyCFunction)cursor_prev_dup, METH_NOARGS},
     {"prev_nodup", (PyCFunction)cursor_prev_nodup, METH_NOARGS},
     {"put", (PyCFunction)cursor_put, METH_VARARGS|METH_KEYWORDS},
+    {"putmulti", (PyCFunction)cursor_put_multi, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)cursor_replace, METH_VARARGS|METH_KEYWORDS},
     {"pop", (PyCFunction)cursor_pop, METH_VARARGS|METH_KEYWORDS},
     {"set_key", (PyCFunction)cursor_set_key, METH_O},
@@ -2719,23 +2912,25 @@ static PyTypeObject PyIterator_Type = {
 static int
 trans_clear(TransObject *self)
 {
-    if(self->valid) {
-        INVALIDATE(self)
+    INVALIDATE(self)
 #ifdef HAVE_MEMSINK
-        ms_notify((PyObject *) self, &self->sink_head);
+    ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        if(self->txn) {
-            DEBUG("aborting")
-            Py_BEGIN_ALLOW_THREADS
-            mdb_txn_abort(self->txn);
-            Py_END_ALLOW_THREADS
-            self->txn = NULL;
-        }
-        Py_CLEAR(self->db);
-        self->valid = 0;
+
+    if(self->txn) {
+        Py_BEGIN_ALLOW_THREADS
+        MDEBUG("aborting")
+        mdb_txn_abort(self->txn);
+        Py_END_ALLOW_THREADS
+        self->txn = NULL;
     }
-    UNLINK_CHILD(self->env, self)
-    Py_CLEAR(self->env);
+    MDEBUG("db is/was %p", self->db)
+    Py_CLEAR(self->db);
+    self->valid = 0;
+    if(self->env) {
+        UNLINK_CHILD(self->env, self)
+        Py_CLEAR(self->env);
+    }
     return 0;
 }
 
@@ -2745,9 +2940,26 @@ trans_clear(TransObject *self)
 static void
 trans_dealloc(TransObject *self)
 {
-    DEBUG("deleting trans")
-    trans_clear(self);
-    PyObject_Del(self);
+    if(self->env && self->txn &&
+       (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
+        MDEBUG("caching trans")
+        if(! (self->flags & TRANS_SPARE)) {
+            MDEBUG("resetting")
+            mdb_txn_reset(self->txn);
+            self->flags |= TRANS_SPARE;
+        }
+        self->spare_next = self->env->spare_txns;
+        self->env->spare_txns = self;
+        self->env->max_spare_txns--;
+
+        Py_CLEAR(self->db);
+        UNLINK_CHILD(self->env, self)
+        Py_CLEAR(self->env);
+    } else {
+        MDEBUG("deleting trans")
+        trans_clear(self);
+        PyObject_Del(self);
+    }
 }
 
 /**
@@ -2772,7 +2984,8 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
     };
 
-    if(parse_args(1, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.env) {
@@ -2788,15 +3001,23 @@ static PyObject *
 trans_abort(TransObject *self)
 {
     if(self->valid) {
-        DEBUG("aborting")
+        DEBUG("invalidate")
         INVALIDATE(self)
 #ifdef HAVE_MEMSINK
         ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        Py_BEGIN_ALLOW_THREADS
-        mdb_txn_abort(self->txn);
-        Py_END_ALLOW_THREADS
-        self->txn = NULL;
+        if(self->flags & TRANS_RDONLY) {
+            DEBUG("resetting")
+            /* Reset to spare state, ready for _dealloc to freelist it. */
+            mdb_txn_reset(self->txn);
+            self->flags |= TRANS_SPARE;
+        } else {
+            DEBUG("aborting")
+            Py_BEGIN_ALLOW_THREADS
+            mdb_txn_abort(self->txn);
+            Py_END_ALLOW_THREADS
+            self->txn = NULL;
+        }
         self->valid = 0;
     }
     Py_RETURN_NONE;
@@ -2813,17 +3034,25 @@ trans_commit(TransObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    DEBUG("committing")
+    DEBUG("invalidate")
     INVALIDATE(self)
 #ifdef HAVE_MEMSINK
     ms_notify((PyObject *) self, &self->sink_head);
 #endif
-    UNLOCKED(rc, mdb_txn_commit(self->txn));
-    self->txn = NULL;
-    self->valid = 0;
-    if(rc) {
-        return err_set("mdb_txn_commit", rc);
+    if(self->flags & TRANS_RDONLY) {
+        DEBUG("resetting")
+        /* Reset to spare state, ready for _dealloc to freelist it. */
+        mdb_txn_reset(self->txn);
+        self->flags |= TRANS_SPARE;
+    } else {
+        DEBUG("committing")
+        UNLOCKED(rc, mdb_txn_commit(self->txn));
+        self->txn = NULL;
+        if(rc) {
+            return err_set("mdb_txn_commit", rc);
+        }
     }
+    self->valid = 0;
     Py_RETURN_NONE;
 }
 
@@ -2841,7 +3070,8 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
         {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
     };
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     return make_cursor(arg.db, self);
@@ -2867,7 +3097,8 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_val *val_ptr;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -2902,7 +3133,8 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     };
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.db) {
@@ -2939,7 +3171,8 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_val val;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -2987,7 +3220,8 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     int flags;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3048,7 +3282,8 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     PyObject *ret;
     CursorObject *cursor;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3086,7 +3321,8 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
     PyObject *old;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3164,7 +3400,8 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     MDB_stat st;
     int rc;
 
-    if(parse_args(self->valid, SPECSIZE(), argspec, args, kwds, &arg)) {
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {

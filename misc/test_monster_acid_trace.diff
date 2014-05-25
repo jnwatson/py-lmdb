@@ -1,0 +1,48 @@
+diff --git a/tests/crash_test.py b/tests/crash_test.py
+index 1ac3b46..3785bd5 100644
+--- a/tests/crash_test.py
++++ b/tests/crash_test.py
+@@ -173,21 +173,43 @@ class MultiCursorDeleteTest(unittest.TestCase):
+         c2.delete()
+         assert next(c1f) == B('eeee')
+ 
++    def _trace(self, op, *args):
++        bits = []
++        for arg in args:
++            if isinstance(arg, bytes):
++                bits.append(arg.encode('hex'))
++            elif isinstance(arg, bool):
++                bits.append(bytes(int(arg)))
++        self.fp.write('%s %s %s\n' % (self.idx, op, ' '.join(bits)))
++
+     def test_monster(self):
+         # Generate predictable sequence of sizes.
+         rand = random.Random()
+         rand.seed(0)
+ 
++        self.fp = open('trace.out', 'w')
++        self._counter = 0
++        self.idx = 0
++
+         txn = self.env.begin(write=True)
+         keys = []
+         for i in range(20000):
+             key = B('%06x' % i)
+             val = B('x' * rand.randint(76, 350))
++            self._trace('put', key, val)
+             assert txn.put(key, val)
+             keys.append(key)
+ 
++
++        iter_id = self._counter
++        self._counter += 1
++        self._trace('iter', iter_id, '0', False)
++
+         deleted = 0
+         for key in txn.cursor().iternext(values=False):
++            self._trace('fetch', iter_id)
++            self._trace('yield', iter_id, key, '')
++            self._trace('delete', key)
+             assert txn.delete(key), key
+             deleted += 1
+ 
