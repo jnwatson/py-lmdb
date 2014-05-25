@@ -1220,8 +1220,8 @@ env_clear(EnvObject *self)
     /* Force trans_dealloc() to free by setting avail size to 0 */
     self->max_spare_txns = 0;
     while(self->spare_txns) {
-        MDEBUG("killing spare txn %p", self->spare_txns)
         TransObject *cur = self->spare_txns;
+        MDEBUG("killing spare txn %p", self->spare_txns)
         self->spare_txns = cur->spare_next;
         trans_dealloc(cur);
     }
