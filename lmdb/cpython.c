@@ -821,7 +821,7 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
     for(i = 0; i < specsize; i++) {
         const struct argspec *spec = argspec + i;
         PyObject *key = string_tbl[spec->string_id];
-        PyObject *val = PyInt_FromLong((long) i);
+        PyObject *val = PyCapsule_New((void *) 1+i, NULL, NULL);
         if(PyDict_SetItem(*cache, key, val)) {
             return -1;
         }
@@ -847,7 +847,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
     }
 
     if(args) {
-        int size = PyTuple_GET_SIZE(args);
+        int size = (int) PyTuple_GET_SIZE(args);
         if(size > specsize) {
             type_error("too many positional arguments.");
             return -1;
@@ -881,7 +881,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
                 return -1;
             }
 
-            i = PyInt_AS_LONG(specidx);
+            i = ((int) (long) PyCapsule_GetPointer(specidx, NULL)) - 1;
             if(set & (1 << i)) {
                 PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
                              PyBytes_AS_STRING(pkey));
