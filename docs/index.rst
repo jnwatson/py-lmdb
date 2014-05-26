@@ -594,6 +594,13 @@ ChangeLog
     :literal:
 
 
+License
++++++++
+
+.. include:: ../LICENSE
+    :literal:
+
+
 .. raw:: html
 
     <script type="text/javascript">
