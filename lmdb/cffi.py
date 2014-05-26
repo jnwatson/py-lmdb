@@ -564,15 +564,31 @@ class Environment(object):
             :py:meth:`begin` or :py:class:`Transaction` is ignored.
 
         `metasync`:
-            If ``False``, never explicitly flush metadata pages to disk. OS
-            will flush at its discretion, or user can flush with
-            :py:meth:`sync`.
+            If ``False``, flush system buffers to disk only once per
+            transaction, omit the metadata flush. Defer that until the system
+            flushes files to disk, or next commit or :py:meth:`sync`.
+
+            This optimization maintains database integrity, but a system crash
+            may undo the last committed transaction. I.e. it preserves the ACI
+            (atomicity, consistency, isolation) but not D (durability) database
+            property. time using #mdb_env_set_flags().
 
         `sync`:
-            If ``False``, never explicitly flush data pages to disk. OS will
-            flush at its discretion, or user can flush with :py:meth:`sync`.
-            This optimization means a system crash can corrupt the database or
-            lose the last transactions if buffers are not yet flushed to disk.
+            If ``False``, don't flush system buffers to disk when committing a
+            transaction. This optimization means a system crash can corrupt the
+            database or lose the last transactions if buffers are not yet
+            flushed to disk.
+
+            The risk is governed by how often the system flushes dirty buffers
+            to disk and how often :py:meth:`sync` is called.  However, if the
+            filesystem preserves write order and `writemap=False`, transactions
+            exhibit ACI (atomicity, consistency, isolation) properties and only
+            lose D (durability).  I.e. database integrity is maintained, but a
+            system crash may undo the final transactions.
+
+            Note that `sync=False, writemap=True` leaves the system with no
+            hint for when to write transactions to disk, unless :py:meth:`sync`
+            is called. `map_async=True, writemap=True` may be preferable.
 
         `mode`:
             File creation mode.
@@ -586,8 +602,13 @@ class Environment(object):
             database is larger than RAM.
 
         `writemap`:
-            If ``True`` LMDB will use a writeable memory map to update the
-            database. This option is incompatible with nested transactions.
+            If ``True``, use a writeable memory map unless `readonly=True`.
+            This is faster and uses fewer mallocs, but loses protection from
+            application bugs like wild pointer writes and other bad updates
+            into the database. Incompatible with nested transactions.
+
+            Processes with and without `writemap` on the same environment do
+            not cooperate well.
 
         `meminit`:
             If ``False`` LMDB will not zero-initialize buffers prior to writing
