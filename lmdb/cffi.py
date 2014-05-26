@@ -571,7 +571,7 @@ class Environment(object):
             This optimization maintains database integrity, but a system crash
             may undo the last committed transaction. I.e. it preserves the ACI
             (atomicity, consistency, isolation) but not D (durability) database
-            property. time using #mdb_env_set_flags().
+            property.
 
         `sync`:
             If ``False``, don't flush system buffers to disk when committing a
