@@ -208,7 +208,16 @@ typedef struct TransObject TransObject;
 #   define MOD_RETURN(mod) return mod;
 #   define MODINIT_NAME PyInit_cpython
 
+#   define MAKE_ID(id) PyCapsule_New((void *) (1 + (id)), NULL, NULL)
+#   define READ_ID(obj) (((int) (long) PyCapsule_GetPointer(obj, NULL)) - 1)
+
 #else
+
+#   define MOD_RETURN(mod) return
+#   define MODINIT_NAME initcpython
+
+#   define MAKE_ID(id) PyInt_FromLong((long) id)
+#   define READ_ID(obj) PyInt_AS_LONG(obj)
 
 #   define PyUnicode_InternFromString PyString_InternFromString
 #   define PyBytes_AS_STRING PyString_AS_STRING
@@ -216,8 +225,6 @@ typedef struct TransObject TransObject;
 #   define PyBytes_CheckExact PyString_CheckExact
 #   define PyBytes_FromStringAndSize PyString_FromStringAndSize
 #   define _PyBytes_Resize _PyString_Resize
-#   define MOD_RETURN(mod) return
-#   define MODINIT_NAME initcpython
 #   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
 
 #   ifndef PyBUF_READ
@@ -821,7 +828,7 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
     for(i = 0; i < specsize; i++) {
         const struct argspec *spec = argspec + i;
         PyObject *key = string_tbl[spec->string_id];
-        PyObject *val = PyCapsule_New((void *) 1+i, NULL, NULL);
+        PyObject *val = MAKE_ID(i);
         if(PyDict_SetItem(*cache, key, val)) {
             return -1;
         }
@@ -881,7 +888,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
                 return -1;
             }
 
-            i = ((int) (long) PyCapsule_GetPointer(specidx, NULL)) - 1;
+            i = READ_ID(specidx);
             if(set & (1 << i)) {
                 PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
                              PyBytes_AS_STRING(pkey));
