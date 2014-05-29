@@ -1,9 +1,12 @@
 
 from pprint import pprint
+import atexit
+import gzip
 import itertools
 import os
 import shutil
 import sys
+import tempfile
 
 from time import time as now
 import random
@@ -12,6 +15,20 @@ import lmdb
 MAP_SIZE = 1048576 * 400
 DB_PATH = '/ram/testdb'
 USE_SPARSE_FILES = sys.platform != 'darwin'
+
+if os.path.exists('/ram'):
+    DB_PATH = '/ram/testdb'
+else:
+    DB_PATH = tempfile.mktemp(prefix='dirtybench')
+
+
+env = None
+@atexit.register
+def cleanup():
+    if env:
+        env.close()
+    if os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH)
 
 
 def reopen_env(**kwargs):
@@ -34,7 +51,8 @@ def x():
     big = '' # '*' * 400
 
     t0 = now()
-    words = set(file('/usr/share/dict/words'))
+    words_path = os.path.join(os.path.dirname(__file__), 'words.gz')
+    words = set(gzip.open(words_path).read().splitlines())
     words.update([w.upper() for w in words])
     words.update([w[::-1] for w in words])
     words.update([w[::-1].upper() for w in words])
@@ -45,11 +63,13 @@ def x():
     alllen = sum(len(w) for w in words)
     avglen = alllen  / len(words)
     print 'permutate %d words avglen %d took %.2fsec' % (len(words), avglen, now()-t0)
+    print 'DB_PATH:', DB_PATH
 
     words_sorted = sorted(words)
     items = [(w, big or w) for w in words]
     items_sorted = [(w, big or w) for w in words_sorted]
 
+    global env
     env = reopen_env()
 
     @case('insert')
