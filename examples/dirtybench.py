@@ -32,6 +32,8 @@ def cleanup():
 
 
 def reopen_env(**kwargs):
+    if env:
+        env.close()
     if os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH)
     return lmdb.open(DB_PATH, map_size=MAP_SIZE, writemap=USE_SPARSE_FILES, **kwargs)
