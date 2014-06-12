@@ -1318,7 +1318,8 @@ class Transaction(object):
                 Named database to operate on. If unspecified, defaults to the
                 database given to the :py:class:`Transaction` constructor.
         """
-        return Cursor(db or self._db, self).replace(key, value)
+        with Cursor(db or self._db, self) as curs:
+            return curs.replace(key, value)
 
     def pop(self, key, db=None):
         """Use a temporary cursor to invoke :py:meth:`Cursor.pop`.
@@ -1327,7 +1328,8 @@ class Transaction(object):
                 Named database to operate on. If unspecified, defaults to the
                 database given to the :py:class:`Transaction` constructor.
         """
-        return Cursor(db or self._db, self).pop(key)
+        with Cursor(db or self._db, self) as curs:
+            return curs.pop(key)
 
     def delete(self, key, value=EMPTY_BYTES, db=None):
         """Delete a key from the database.
@@ -1468,15 +1470,23 @@ class Cursor(object):
     def _invalidate(self):
         if self._cur:
             _lib.mdb_cursor_close(self._cur)
-        self._cur = _invalid
-        self._dbi = _invalid
-        self._txn = _invalid
+            _undepend(self.db, self)
+            _undepend(self.txn, self)
+            self._cur = _invalid
+            self._dbi = _invalid
+            self._txn = _invalid
 
     def __del__(self):
-        if self._cur:
-            _lib.mdb_cursor_close(self._cur)
-        _undepend(self.db, self)
-        _undepend(self.txn, self)
+        self._invalidate()
+
+    def close(self):
+        self._invalidate()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _1, _2, _3):
+        self._invalidate()
 
     def key(self):
         """Return the current key."""
