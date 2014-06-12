@@ -462,22 +462,12 @@ def _error(what, rc):
     `rc`, using :py:class:`Error` if no better class exists."""
     return _error_map.get(rc, Error)(what, rc)
 
-def _kill_dependents(parent):
-    """Notify all dependents of `parent` that `parent` is about to become
-    invalid."""
-    deps = parent._deps
-    while deps:
-        child = deps.pop()
-        child._invalidate()
-
-
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     """We need this because CFFI on PyPy treats None as cffi.NULL, instead of
     throwing an exception it feeds LMDB null pointers. That means simply
-    replacing native handles with None during _kill_dependents() will lead to
-    NULL pointer derefences. Instead we use this class, and its weird name to
-    cause a TypeError, with a very obvious string appearing in the exception
-    text.
+    replacing native handles with None during _invalidate() will cause NULL
+    pointer dereferences. Instead use this class, and its weird name to cause a
+    TypeError, with a very obvious string in the exception text.
 
     The only alternatives to this are inserting a check around every single use
     of a native handle to ensure the handle is still valid prior to calling
@@ -711,7 +701,8 @@ class Environment(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
-            _kill_dependents(self)
+            while self._deps:
+                self._deps.pop()._invalidate()
             while self._spare_txns:
                 _lib.mdb_txn_abort(self._spare_txns.pop())
             _lib.mdb_env_close(self._env)
@@ -1184,7 +1175,8 @@ class Transaction(object):
         Equivalent to `mdb_drop()
         <http://symas.com/mdb/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
         """
-        _kill_dependents(db)
+        while db._deps:
+            db._deps.pop()._invalidate()
         rc = _lib.mdb_drop(self._txn, db._dbi, delete)
         self._mutations += 1
         if rc:
@@ -1209,7 +1201,8 @@ class Transaction(object):
         Equivalent to `mdb_txn_commit()
         <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
         """
-        _kill_dependents(self)
+        while self._deps:
+            self._deps.pop()._invalidate()
         if self._write or not self._cache_spare():
             rc = _lib.mdb_txn_commit(self._txn)
             self._txn = _invalid
@@ -1226,7 +1219,8 @@ class Transaction(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
         """
         if self._txn:
-            _kill_dependents(self)
+            while self._deps:
+                self._deps.pop()._invalidate()
             if self._write or not self._cache_spare():
                 rc = _lib.mdb_txn_abort(self._txn)
                 self._txn = _invalid
@@ -1466,6 +1460,7 @@ class Cursor(object):
         self._invalidate()
 
     def close(self):
+        """Close the cursor, freeing its associated resources."""
         self._invalidate()
 
     def __enter__(self):
