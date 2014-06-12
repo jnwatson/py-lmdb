@@ -467,10 +467,9 @@ def _kill_dependents(parent):
     invalid."""
     deps = parent._deps
     while deps:
-        chid, chref = deps.popitem()
-        child = chref()
-        if child:
-            child._invalidate()
+        child = deps.pop()
+        child._invalidate()
+
 
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     """We need this because CFFI on PyPy treats None as cffi.NULL, instead of
@@ -491,16 +490,6 @@ class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     def __repr__(self):
         return "<This used to be a LMDB resource but it was deleted or closed>"
 _invalid = Some_LMDB_Resource_That_Was_Deleted_Or_Closed()
-
-def _depend(parent, child):
-    """Mark `child` as dependent on `parent`, so its `_invalidate()` method
-    will be called before the resource associated with `parent` is
-    destroyed."""
-    parent._deps[id(child)] = weakref.ref(child)
-
-def _undepend(parent, child):
-    """Clean up `parent`'s dependency dict by removing `child` from it."""
-    parent._deps.pop(id(child), None)
 
 def _mvbuf(mv):
     """Convert a MDB_val cdata to a CFFI buffer object."""
@@ -665,7 +654,7 @@ class Environment(object):
         if rc:
             raise _error("mdb_env_create", rc)
         self._env = envpp[0]
-        self._deps = {}
+        self._deps = set()
 
         rc = _lib.mdb_env_set_mapsize(self._env, map_size)
         if rc:
@@ -1012,9 +1001,9 @@ class Environment(object):
 class _Database(object):
     """Internal database handle."""
     def __init__(self, env, txn, name, reverse_key, dupsort, create):
-        _depend(env, self)
+        env._deps.add(self)
         self.env = env
-        self._deps = {}
+        self._deps = set()
 
         flags = 0
         if reverse_key:
@@ -1049,9 +1038,6 @@ class _Database(object):
 
     def _invalidate(self):
         pass
-
-    def __del__(self):
-        _undepend(self.env, self)
 
 open = Environment
 
@@ -1117,19 +1103,19 @@ class Transaction(object):
     _mutations = 0
 
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
-        _depend(env, self)
+        env._deps.add(self)
         self.env = env  # hold ref
         self._db = db or env._db
         self._env = env._env
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
-        self._deps = {}
+        self._deps = set()
 
         if parent:
             self._parent = parent
             parent_txn = parent._txn
-            _depend(parent, self)
+            parent._deps.add(self)
         else:
             parent_txn = _ffi.NULL
 
@@ -1162,12 +1148,12 @@ class Transaction(object):
 
     def _invalidate(self):
         self.abort()
+        self.env._deps.discard(self)
         self._parent = None
         self._env = _invalid
 
     def __del__(self):
         self.abort()
-        _undepend(self.env, self)
 
     def __enter__(self):
         return self
@@ -1447,8 +1433,8 @@ class Cursor(object):
             ...     path.append(cursor.value())
     """
     def __init__(self, db, txn):
-        _depend(db, self)
-        _depend(txn, self)
+        db._deps.add(self)
+        txn._deps.add(self)
         self.db = db # hold ref
         self.txn = txn # hold ref
         self._dbi = db._dbi
@@ -1470,8 +1456,8 @@ class Cursor(object):
     def _invalidate(self):
         if self._cur:
             _lib.mdb_cursor_close(self._cur)
-            _undepend(self.db, self)
-            _undepend(self.txn, self)
+            self.db._deps.discard(self)
+            self.txn._deps.discard(self)
             self._cur = _invalid
             self._dbi = _invalid
             self._txn = _invalid
