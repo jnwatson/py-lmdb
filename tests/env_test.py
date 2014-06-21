@@ -251,7 +251,7 @@ class ContextManagerTest(unittest.TestCase):
         with env as env_:
             assert env_ is env
             with env.begin() as txn:
-                txn.get('foo')
+                txn.get(B('foo'))
         self.assertRaises(Exception, lambda: env.begin())
 
     def test_crash(self):
