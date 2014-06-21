@@ -1,4 +1,20 @@
 
+2014-06-26 v0.83
+
+* Environment.__enter__() and __exit__() are implemented, allowing
+  Environments to behave like context managers.
+
+* Cursor.close(), __enter__() and __exit__() are implemented, allowing Cursors
+  to be explicitly closed. In CFFI this mechanism *must* be used when many
+  cursors are used within a single transaction, otherwise a resource leak will
+  occur.
+
+* Dependency tracking in CFFI is now much faster, especially on PyPy, however
+  at a cost: Cursor use must always be wrapped in a context manager, or
+  .close() must be manually invoked for discarded Cursors when the parent
+  transaction is long lived.
+
+
 2014-05-26 v0.82
 
 * Both variants now implement max_spare_txns, reducing the cost of creating a
