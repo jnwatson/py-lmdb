@@ -136,6 +136,37 @@ class InitTest(unittest.TestCase):
         txn.abort()
 
 
+class ContextManagerTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_ok(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        with txn as txn_:
+            assert txn is txn_
+            txn.put(B('foo'), B('123'))
+
+        self.assertRaises(Exception, lambda: txn.get(B('foo')))
+        with env.begin() as txn:
+            assert txn.get(B('foo')) == B('123')
+
+    def test_crash(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+
+        try:
+            with txn as txn_:
+                txn.put(B('foo'), B('123'))
+                txn.put(123, 123)
+        except:
+            pass
+
+        self.assertRaises(Exception, lambda: txn.get(B('foo')))
+        with env.begin() as txn:
+            assert txn.get(B('foo')) is None
+
+
 class StatTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
