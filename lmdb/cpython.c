@@ -76,106 +76,7 @@
 static PyObject *msvcrt;
 #endif
 
-/**
- * Integer indices into `string_tbl', representing an associated string. We
- * use an enum of indices since they can be stored with 1 byte instead of 8
- * bytes for a direct pointer, shaving a few KB data off all argspec arrays,
- * and allowing indirect reference to a table of interned strings created
- * during initialization, to avoid constructing and hashing temporary PyStrings
- * to parse keyword arguments on every call.
- *
- * Must be in the same order as `strings' below.
- */
-enum string_id {
-    APPEND_S,
-    BUFFERS_S,
-    CREATE_S,
-    DB_S,
-    DEFAULT_S,
-    DELETE_S,
-    DUPDATA_S,
-    DUPSORT_S,
-    ENV_S,
-    FD_S,
-    FORCE_S,
-    ITEMS_S,
-    KEY_S,
-    KEYS_S,
-    LOCK_S,
-    MAP_ASYNC_S,
-    MAP_SIZE_S,
-    MAX_DBS_S,
-    MAX_READERS_S,
-    MAX_SPARE_TXNS_S,
-    MEMINIT_S,
-    METASYNC_S,
-    MODE_S,
-    OVERWRITE_S,
-    PARENT_S,
-    PATH_S,
-    READAHEAD_S,
-    READONLY_S,
-    REVERSE_S,
-    REVERSE_KEY_S,
-    SUBDIR_S,
-    SYNC_S,
-    TXN_S,
-    VALUE_S,
-    VALUES_S,
-    WRITE_S,
-    WRITEMAP_S,
 
-    /* Must be last. */
-    STRING_ID_COUNT
-};
-
-/**
- * NUL-separated array of strings corresponding to `string_ids`. Expanded into
- * `string_tbl` PyObject* array representing interned strings during module
- * init.
- */
-static const char *strings = (
-    "append\0"
-    "buffers\0"
-    "create\0"
-    "db\0"
-    "default\0"
-    "delete\0"
-    "dupdata\0"
-    "dupsort\0"
-    "env\0"
-    "fd\0"
-    "force\0"
-    "items\0"
-    "key\0"
-    "keys\0"
-    "lock\0"
-    "map_async\0"
-    "map_size\0"
-    "max_dbs\0"
-    "max_readers\0"
-    "max_spare_txns\0"
-    "meminit\0"
-    "metasync\0"
-    "mode\0"
-    "overwrite\0"
-    "parent\0"
-    "path\0"
-    "readahead\0"
-    "readonly\0"
-    "reverse\0"
-    "reverse_key\0"
-    "subdir\0"
-    "sync\0"
-    "txn\0"
-    "value\0"
-    "values\0"
-    "write\0"
-    "writemap\0"
-);
-
-/** Interned string array corresponding to `string_ids'. */
-static PyObject **string_tbl;
 /** PyLong representing integer 0. */
 static PyObject *py_zero;
 /** PyLong representing INT_MAX. */
@@ -723,7 +624,7 @@ enum arg_type {
 };
 struct argspec {
     unsigned char type;
-    unsigned char string_id;
+    const char *string;
     unsigned short offset;
 };
 
@@ -827,9 +728,9 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
 
     for(i = 0; i < specsize; i++) {
         const struct argspec *spec = argspec + i;
-        PyObject *key = string_tbl[spec->string_id];
+        PyObject *key = PyUnicode_InternFromString(spec->string);
         PyObject *val = MAKE_ID(i);
-        if(PyDict_SetItem(*cache, key, val)) {
+        if((! (key && val)) || PyDict_SetItem(*cache, key, val)) {
             return -1;
         }
         Py_DECREF(val);
@@ -1141,7 +1042,7 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     } arg = {NULL};
 
     static const struct argspec argspec[] = {
-        {ARG_TRANS, TXN_S, OFFSET(db_flags, txn)}
+        {ARG_TRANS, "txn", OFFSET(db_flags, txn)}
     };
 
     static PyObject *cache = NULL;
@@ -1289,22 +1190,22 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 1};
 
     static const struct argspec argspec[] = {
-        {ARG_OBJ, PATH_S, OFFSET(env_new, path)},
-        {ARG_SIZE, MAP_SIZE_S, OFFSET(env_new, map_size)},
-        {ARG_BOOL, SUBDIR_S, OFFSET(env_new, subdir)},
-        {ARG_BOOL, READONLY_S, OFFSET(env_new, readonly)},
-        {ARG_BOOL, METASYNC_S, OFFSET(env_new, metasync)},
-        {ARG_BOOL, SYNC_S, OFFSET(env_new, sync)},
-        {ARG_BOOL, MAP_ASYNC_S, OFFSET(env_new, map_async)},
-        {ARG_INT, MODE_S, OFFSET(env_new, mode)},
-        {ARG_BOOL, CREATE_S, OFFSET(env_new, create)},
-        {ARG_BOOL, READAHEAD_S, OFFSET(env_new, readahead)},
-        {ARG_BOOL, WRITEMAP_S, OFFSET(env_new, writemap)},
-        {ARG_INT, MEMINIT_S, OFFSET(env_new, meminit)},
-        {ARG_INT, MAX_READERS_S, OFFSET(env_new, max_readers)},
-        {ARG_INT, MAX_DBS_S, OFFSET(env_new, max_dbs)},
-        {ARG_INT, MAX_SPARE_TXNS_S, OFFSET(env_new, max_spare_txns)},
-        {ARG_BOOL, LOCK_S, OFFSET(env_new, lock)}
+        {ARG_OBJ, "path", OFFSET(env_new, path)},
+        {ARG_SIZE, "map_size", OFFSET(env_new, map_size)},
+        {ARG_BOOL, "subdir", OFFSET(env_new, subdir)},
+        {ARG_BOOL, "readonly", OFFSET(env_new, readonly)},
+        {ARG_BOOL, "metasync", OFFSET(env_new, metasync)},
+        {ARG_BOOL, "sync", OFFSET(env_new, sync)},
+        {ARG_BOOL, "map_async", OFFSET(env_new, map_async)},
+        {ARG_INT, "mode", OFFSET(env_new, mode)},
+        {ARG_BOOL, "create", OFFSET(env_new, create)},
+        {ARG_BOOL, "readahead", OFFSET(env_new, readahead)},
+        {ARG_BOOL, "writemap", OFFSET(env_new, writemap)},
+        {ARG_INT, "meminit", OFFSET(env_new, meminit)},
+        {ARG_INT, "max_readers", OFFSET(env_new, max_readers)},
+        {ARG_INT, "max_dbs", OFFSET(env_new, max_dbs)},
+        {ARG_INT, "max_spare_txns", OFFSET(env_new, max_spare_txns)},
+        {ARG_BOOL, "lock", OFFSET(env_new, lock)}
     };
 
     PyObject *fspath_obj = NULL;
@@ -1439,10 +1340,10 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
     } arg = {self->main_db, NULL, 0, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_DB, DB_S, OFFSET(env_begin, db)},
-        {ARG_TRANS, PARENT_S, OFFSET(env_begin, parent)},
-        {ARG_BOOL, WRITE_S, OFFSET(env_begin, write)},
-        {ARG_BOOL, BUFFERS_S, OFFSET(env_begin, buffers)},
+        {ARG_DB, "db", OFFSET(env_begin, db)},
+        {ARG_TRANS, "parent", OFFSET(env_begin, parent)},
+        {ARG_BOOL, "write", OFFSET(env_begin, write)},
+        {ARG_BOOL, "buffers", OFFSET(env_begin, buffers)},
     };
 
     static PyObject *cache = NULL;
@@ -1463,7 +1364,7 @@ env_copy(EnvObject *self, PyObject *args)
     } arg = {NULL};
 
     static const struct argspec argspec[] = {
-        {ARG_OBJ, PATH_S, OFFSET(env_copy, path)}
+        {ARG_OBJ, "path", OFFSET(env_copy, path)}
     };
 
     PyObject *fspath_obj;
@@ -1504,7 +1405,7 @@ env_copyfd(EnvObject *self, PyObject *args)
 #endif
 
     static const struct argspec argspec[] = {
-        {ARG_INT, FD_S, OFFSET(env_copyfd, fd)}
+        {ARG_INT, "fd", OFFSET(env_copyfd, fd)}
     };
 
     static PyObject *cache = NULL;
@@ -1645,11 +1546,11 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     } arg = {NULL, NULL, 0, 0, 1};
 
     static const struct argspec argspec[] = {
-        {ARG_STR, KEY_S, OFFSET(env_open_db, key)},
-        {ARG_TRANS, TXN_S, OFFSET(env_open_db, txn)},
-        {ARG_BOOL, REVERSE_KEY_S, OFFSET(env_open_db, reverse_key)},
-        {ARG_BOOL, DUPSORT_S, OFFSET(env_open_db, dupsort)},
-        {ARG_BOOL, CREATE_S, OFFSET(env_open_db, create)},
+        {ARG_STR, "key", OFFSET(env_open_db, key)},
+        {ARG_TRANS, "txn", OFFSET(env_open_db, txn)},
+        {ARG_BOOL, "reverse_key", OFFSET(env_open_db, reverse_key)},
+        {ARG_BOOL, "dupsort", OFFSET(env_open_db, dupsort)},
+        {ARG_BOOL, "create", OFFSET(env_open_db, create)},
     };
     int flags;
 
@@ -1798,7 +1699,7 @@ env_sync(EnvObject *self, PyObject *args)
     } arg = {0};
 
     static const struct argspec argspec[] = {
-        {ARG_BOOL, FORCE_S, OFFSET(env_sync, force)}
+        {ARG_BOOL, "force", OFFSET(env_sync, force)}
     };
     int rc;
 
@@ -1936,8 +1837,8 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     } arg = {NULL, NULL};
 
     static const struct argspec argspec[] = {
-        {ARG_DB, DB_S, OFFSET(cursor_new, db)},
-        {ARG_TRANS, TXN_S, OFFSET(cursor_new, trans)}
+        {ARG_DB, "db", OFFSET(cursor_new, db)},
+        {ARG_TRANS, "txn", OFFSET(cursor_new, trans)}
     };
 
     static PyObject *cache = NULL;
@@ -2025,7 +1926,7 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {0};
 
     static const struct argspec argspec[] = {
-        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_delete, dupdata)}
+        {ARG_BOOL, "dupdata", OFFSET(cursor_delete, dupdata)}
     };
     int res;
 
@@ -2085,8 +1986,8 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, Py_None};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_get, key)},
-        {ARG_OBJ, DEFAULT_S, OFFSET(cursor_get, default_)}
+        {ARG_BUF, "key", OFFSET(cursor_get, key)},
+        {ARG_OBJ, "default", OFFSET(cursor_get, default_)}
     };
 
     static PyObject *cache = NULL;
@@ -2250,10 +2151,10 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     PyObject *item;
 
     static const struct argspec argspec[] = {
-        {ARG_OBJ, ITEMS_S, OFFSET(cursor_put, items)},
-        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_put, dupdata)},
-        {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
-        {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
+        {ARG_OBJ, "items", OFFSET(cursor_put, items)},
+        {ARG_BOOL, "dupdata", OFFSET(cursor_put, dupdata)},
+        {ARG_BOOL, "overwrite", OFFSET(cursor_put, overwrite)},
+        {ARG_BOOL, "append", OFFSET(cursor_put, append)}
     };
     int flags;
     int rc;
@@ -2340,11 +2241,11 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}, 1, 1, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_put, key)},
-        {ARG_BUF, VALUE_S, OFFSET(cursor_put, val)},
-        {ARG_BOOL, DUPDATA_S, OFFSET(cursor_put, dupdata)},
-        {ARG_BOOL, OVERWRITE_S, OFFSET(cursor_put, overwrite)},
-        {ARG_BOOL, APPEND_S, OFFSET(cursor_put, append)}
+        {ARG_BUF, "key", OFFSET(cursor_put, key)},
+        {ARG_BUF, "value", OFFSET(cursor_put, val)},
+        {ARG_BOOL, "dupdata", OFFSET(cursor_put, dupdata)},
+        {ARG_BOOL, "overwrite", OFFSET(cursor_put, overwrite)},
+        {ARG_BOOL, "append", OFFSET(cursor_put, append)}
     };
     int flags;
     int rc;
@@ -2441,8 +2342,8 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_replace, key)},
-        {ARG_BUF, VALUE_S, OFFSET(cursor_replace, val)}
+        {ARG_BUF, "key", OFFSET(cursor_replace, key)},
+        {ARG_BUF, "value", OFFSET(cursor_replace, val)}
     };
 
     static PyObject *cache = NULL;
@@ -2464,7 +2365,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_pop, key)},
+        {ARG_BUF, "key", OFFSET(cursor_pop, key)},
     };
     PyObject *old;
     int rc;
@@ -2521,8 +2422,8 @@ cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_set_key_dup, key)},
-        {ARG_BUF, VALUE_S, OFFSET(cursor_set_key_dup, value)}
+        {ARG_BUF, "key", OFFSET(cursor_set_key_dup, key)},
+        {ARG_BUF, "value", OFFSET(cursor_set_key_dup, value)}
     };
 
     static PyObject *cache = NULL;
@@ -2564,8 +2465,8 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_set_range_dup, key)},
-        {ARG_BUF, VALUE_S, OFFSET(cursor_set_range_dup, value)}
+        {ARG_BUF, "key", OFFSET(cursor_set_range_dup, key)},
+        {ARG_BUF, "value", OFFSET(cursor_set_range_dup, value)}
     };
 
     static PyObject *cache = NULL;
@@ -2619,8 +2520,8 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
     } arg = {keys_default, values_default};
 
     static const struct argspec argspec[] = {
-        {ARG_BOOL, KEYS_S, OFFSET(iter_from_args, keys)},
-        {ARG_BOOL, VALUES_S, OFFSET(iter_from_args, values)}
+        {ARG_BOOL, "keys", OFFSET(iter_from_args, keys)},
+        {ARG_BOOL, "values", OFFSET(iter_from_args, values)}
     };
     void *val_func;
 
@@ -2717,8 +2618,8 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     } arg = {{0, 0}, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(cursor_iter_from, key)},
-        {ARG_BOOL, REVERSE_S, OFFSET(cursor_iter_from, reverse)}
+        {ARG_BUF, "key", OFFSET(cursor_iter_from, key)},
+        {ARG_BOOL, "reverse", OFFSET(cursor_iter_from, reverse)}
     };
     enum MDB_cursor_op op;
     int rc;
@@ -3024,11 +2925,11 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     } arg = {NULL, NULL, NULL, 0, 0};
 
     static const struct argspec argspec[] = {
-        {ARG_ENV, ENV_S, OFFSET(trans_new, env)},
-        {ARG_DB, DB_S, OFFSET(trans_new, db)},
-        {ARG_TRANS, PARENT_S, OFFSET(trans_new, parent)},
-        {ARG_BOOL, WRITE_S, OFFSET(trans_new, write)},
-        {ARG_BOOL, BUFFERS_S, OFFSET(trans_new, buffers)}
+        {ARG_ENV, "env", OFFSET(trans_new, env)},
+        {ARG_DB, "db", OFFSET(trans_new, db)},
+        {ARG_TRANS, "parent", OFFSET(trans_new, parent)},
+        {ARG_BOOL, "write", OFFSET(trans_new, write)},
+        {ARG_BOOL, "buffers", OFFSET(trans_new, buffers)}
     };
 
     static PyObject *cache = NULL;
@@ -3114,7 +3015,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_DB, DB_S, OFFSET(trans_cursor, db)}
+        {ARG_DB, "db", OFFSET(trans_cursor, db)}
     };
 
     static PyObject *cache = NULL;
@@ -3137,9 +3038,9 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}, self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_delete, key)},
-        {ARG_BUF, VALUE_S, OFFSET(trans_delete, val)},
-        {ARG_DB, DB_S, OFFSET(trans_delete, db)}
+        {ARG_BUF, "key", OFFSET(trans_delete, key)},
+        {ARG_BUF, "value", OFFSET(trans_delete, val)},
+        {ARG_DB, "db", OFFSET(trans_delete, db)}
     };
     MDB_val *val_ptr;
     int rc;
@@ -3175,8 +3076,8 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {NULL, 1};
 
     static const struct argspec argspec[] = {
-        {ARG_DB, DB_S, OFFSET(trans_drop, db)},
-        {ARG_BOOL, DELETE_S, OFFSET(trans_drop, delete)}
+        {ARG_DB, "db", OFFSET(trans_drop, db)},
+        {ARG_BOOL, "delete", OFFSET(trans_drop, delete)}
     };
     int rc;
 
@@ -3211,9 +3112,9 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, Py_None, self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_get, key)},
-        {ARG_OBJ, DEFAULT_S, OFFSET(trans_get, default_)},
-        {ARG_DB, DB_S, OFFSET(trans_get, db)}
+        {ARG_BUF, "key", OFFSET(trans_get, key)},
+        {ARG_OBJ, "default", OFFSET(trans_get, default_)},
+        {ARG_DB, "db", OFFSET(trans_get, db)}
     };
     MDB_val val;
     int rc;
@@ -3257,12 +3158,12 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}, 1, 1, 0, self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_put, key)},
-        {ARG_BUF, VALUE_S, OFFSET(trans_put, value)},
-        {ARG_BOOL, DUPDATA_S, OFFSET(trans_put, dupdata)},
-        {ARG_BOOL, OVERWRITE_S, OFFSET(trans_put, overwrite)},
-        {ARG_BOOL, APPEND_S, OFFSET(trans_put, append)},
-        {ARG_DB, DB_S, OFFSET(trans_put, db)}
+        {ARG_BUF, "key", OFFSET(trans_put, key)},
+        {ARG_BUF, "value", OFFSET(trans_put, value)},
+        {ARG_BOOL, "dupdata", OFFSET(trans_put, dupdata)},
+        {ARG_BOOL, "overwrite", OFFSET(trans_put, overwrite)},
+        {ARG_BOOL, "append", OFFSET(trans_put, append)},
+        {ARG_DB, "db", OFFSET(trans_put, db)}
     };
     int flags;
     int rc;
@@ -3322,9 +3223,9 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, {0, 0}, self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_replace, key)},
-        {ARG_BUF, VALUE_S, OFFSET(trans_replace, value)},
-        {ARG_DB, DB_S, OFFSET(trans_replace, db)}
+        {ARG_BUF, "key", OFFSET(trans_replace, key)},
+        {ARG_BUF, "value", OFFSET(trans_replace, value)},
+        {ARG_DB, "db", OFFSET(trans_replace, db)}
     };
     PyObject *ret;
     CursorObject *cursor;
@@ -3361,8 +3262,8 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {{0, 0}, self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_BUF, KEY_S, OFFSET(trans_pop, key)},
-        {ARG_DB, DB_S, OFFSET(trans_pop, db)}
+        {ARG_BUF, "key", OFFSET(trans_pop, key)},
+        {ARG_DB, "db", OFFSET(trans_pop, db)}
     };
     CursorObject *cursor;
     PyObject *old;
@@ -3442,7 +3343,7 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     } arg = {self->db};
 
     static const struct argspec argspec[] = {
-        {ARG_DB, DB_S, OFFSET(trans_stat, db)}
+        {ARG_DB, "db", OFFSET(trans_stat, db)}
     };
     MDB_stat st;
     int rc;
@@ -3588,29 +3489,6 @@ static int init_types(PyObject *mod)
 }
 
 /**
- * Produce `string_tbl' array of PyObjects from `strings'.
- */
-static int init_strings(PyObject *mod)
-{
-    const char *cur;
-    int i;
-
-    string_tbl = malloc(sizeof(PyObject *) * STRING_ID_COUNT);
-    if(! string_tbl) {
-        return -1;
-    }
-
-    cur = strings;
-    for(i = 0; i < STRING_ID_COUNT; i++) {
-        if(! ((string_tbl[i] = PyUnicode_InternFromString(cur)))) {
-            return -1;
-        }
-        cur += PyUnicode_GET_SIZE(string_tbl[i]) + 1;
-    }
-    return 0;
-}
-
-/**
  * Initialize a bunch of constants used to ease number compares.
  */
 static int init_constants(PyObject *mod)
@@ -3702,9 +3580,6 @@ MODINIT_NAME(void)
     }
 #endif
 
-    if(init_strings(mod)) {
-        MOD_RETURN(NULL);
-    }
     if(init_constants(mod)) {
         MOD_RETURN(NULL);
     }
