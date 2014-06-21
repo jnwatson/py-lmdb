@@ -30,6 +30,29 @@ from testlib import B
 from testlib import BT
 
 
+class ContextManagerTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_ok(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        with txn.cursor() as curs:
+            curs.put(B('foo'), B('123'))
+        self.assertRaises(Exception, lambda: curs.get(B('foo')))
+
+    def test_crash(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+
+        try:
+            with txn.cursor() as curs:
+                curs.put(123, 123)
+        except:
+            pass
+        self.assertRaises(Exception, lambda: curs.get(B('foo')))
+
+
 class CursorTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
