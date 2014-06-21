@@ -119,7 +119,7 @@
  *
  *	@author	Howard Chu, Symas Corporation.
  *
- *	@copyright Copyright 2011-2013 Howard Chu, Symas Corp. All rights reserved.
+ *	@copyright Copyright 2011-2014 Howard Chu, Symas Corp. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted only as authorized by the OpenLDAP
@@ -184,7 +184,7 @@ typedef int mdb_filehandle_t;
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	11
+#define MDB_VERSION_PATCH	14
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -194,10 +194,10 @@ typedef int mdb_filehandle_t;
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"January 15, 2014"
+#define MDB_VERSION_DATE	"June 20, 2014"
 
 /** A stringifier for the version info */
-#define MDB_VERSTR(a,b,c,d)	"MDB " #a "." #b "." #c ": (" d ")"
+#define MDB_VERSTR(a,b,c,d)	"LMDB " #a "." #b "." #c ": (" d ")"
 
 /** A helper for the stringifier macro */
 #define MDB_VERFOO(a,b,c,d)	MDB_VERSTR(a,b,c,d)
@@ -345,16 +345,18 @@ typedef enum MDB_cursor_op {
 	MDB_GET_BOTH,			/**< Position at key/data pair. Only for #MDB_DUPSORT */
 	MDB_GET_BOTH_RANGE,		/**< position at key, nearest data. Only for #MDB_DUPSORT */
 	MDB_GET_CURRENT,		/**< Return key/data at current cursor position */
-	MDB_GET_MULTIPLE,		/**< Return all the duplicate data items at the current
-								 cursor position. Only for #MDB_DUPFIXED */
+	MDB_GET_MULTIPLE,		/**< Return key and up to a page of duplicate data items
+								from current cursor position. Move cursor to prepare
+								for #MDB_NEXT_MULTIPLE. Only for #MDB_DUPFIXED */
 	MDB_LAST,				/**< Position at last key/data item */
 	MDB_LAST_DUP,			/**< Position at last data item of current key.
 								Only for #MDB_DUPSORT */
 	MDB_NEXT,				/**< Position at next data item */
 	MDB_NEXT_DUP,			/**< Position at next data item of current key.
 								Only for #MDB_DUPSORT */
-	MDB_NEXT_MULTIPLE,		/**< Return all duplicate data items at the next
-								cursor position. Only for #MDB_DUPFIXED */
+	MDB_NEXT_MULTIPLE,		/**< Return key and up to a page of duplicate data items
+								from next cursor position. Move cursor to prepare
+								for #MDB_NEXT_MULTIPLE. Only for #MDB_DUPFIXED */
 	MDB_NEXT_NODUP,			/**< Position at first data item of next key */
 	MDB_PREV,				/**< Position at previous data item */
 	MDB_PREV_DUP,			/**< Position at previous data item of current key.
@@ -408,7 +410,7 @@ typedef enum MDB_cursor_op {
 #define MDB_BAD_RSLOT		(-30783)
 	/** Transaction cannot recover - it must be aborted */
 #define MDB_BAD_TXN			(-30782)
-	/** Too big key/data, key is empty, or wrong DUPFIXED size */
+	/** Unsupported size of key/DB name/data, or wrong DUPFIXED size */
 #define MDB_BAD_VALSIZE		(-30781)
 #define MDB_LAST_ERRCODE	MDB_BAD_VALSIZE
 /** @} */
@@ -784,6 +786,10 @@ int  mdb_env_get_maxreaders(MDB_env *env, unsigned int *readers);
 	 * environment. Simpler applications that use the environment as a single
 	 * unnamed database can ignore this option.
 	 * This function may only be called after #mdb_env_create() and before #mdb_env_open().
+	 *
+	 * Currently a moderate number of slots are cheap but a huge number gets
+	 * expensive: 7-120 words per transaction, and every #mdb_dbi_open()
+	 * does a linear search of the opened slots.
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbs The maximum number of databases
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -951,7 +957,7 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * independently of whether such a database exists.
 	 * The database handle may be discarded by calling #mdb_dbi_close().
 	 * The old database handle is returned if the database was already open.
-	 * The handle must only be closed once.
+	 * The handle may only be closed once.
 	 * The database handle will be private to the current transaction until
 	 * the transaction is successfully committed. If the transaction is
 	 * aborted the handle will be closed automatically.
@@ -963,7 +969,8 @@ int  mdb_txn_renew(MDB_txn *txn);
 	 * use this function.
 	 *
 	 * To use named databases (with name != NULL), #mdb_env_set_maxdbs()
-	 * must be called before opening the environment.
+	 * must be called before opening the environment.  Database names
+	 * are kept as keys in the unnamed database.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] name The name of the database to open. If only a single
 	 * 	database is needed in the environment, this value may be NULL.
@@ -1033,12 +1040,19 @@ int  mdb_stat(MDB_txn *txn, MDB_dbi dbi, MDB_stat *stat);
 	 */
 int mdb_dbi_flags(MDB_txn *txn, MDB_dbi dbi, unsigned int *flags);
 
-	/** @brief Close a database handle.
+	/** @brief Close a database handle. Normally unnecessary. Use with care:
 	 *
 	 * This call is not mutex protected. Handles should only be closed by
 	 * a single thread, and only if no other threads are going to reference
 	 * the database handle or one of its cursors any further. Do not close
 	 * a handle if an existing transaction has modified its database.
+	 * Doing so can cause misbehavior from database corruption to errors
+	 * like MDB_BAD_VALSIZE (since the DB name is gone).
+	 *
+	 * Closing a database handle is not necessary, but lets #mdb_dbi_open()
+	 * reuse the handle value.  Usually it's better to set a bigger
+	 * #mdb_env_set_maxdbs(), unless that value would be large.
+	 *
 	 * @param[in] env An environment handle returned by #mdb_env_create()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 */
@@ -1046,6 +1060,7 @@ void mdb_dbi_close(MDB_env *env, MDB_dbi dbi);
 
 	/** @brief Empty or delete+close a database.
 	 *
+	 * See #mdb_dbi_close() for restrictions about closing the DB handle.
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @param[in] dbi A database handle returned by #mdb_dbi_open()
 	 * @param[in] del 0 to empty the DB, 1 to delete it from the
@@ -1323,20 +1338,18 @@ int  mdb_cursor_get(MDB_cursor *cursor, MDB_val *key, MDB_val *data,
 	/** @brief Store by cursor.
 	 *
 	 * This function stores key/data pairs into the database.
-	 * If the function fails for any reason, the state of the cursor will be
-	 * unchanged. If the function succeeds and an item is inserted into the
-	 * database, the cursor is always positioned to refer to the newly inserted item.
+	 * The cursor is positioned at the new item, or on failure usually near it.
+	 * @note Earlier documentation incorrectly said errors would leave the
+	 * state of the cursor unchanged.
 	 * @param[in] cursor A cursor handle returned by #mdb_cursor_open()
 	 * @param[in] key The key operated on.
 	 * @param[in] data The data operated on.
 	 * @param[in] flags Options for this operation. This parameter
 	 * must be set to 0 or one of the values described here.
 	 * <ul>
-	 *	<li>#MDB_CURRENT - overwrite the data of the key/data pair to which
-	 *		the cursor refers with the specified data item. The \b key
-	 *		parameter is not used for positioning the cursor, but should
-	 *		still be provided. If using sorted duplicates (#MDB_DUPSORT)
-	 *		the data item must still sort into the same place.
+	 *	<li>#MDB_CURRENT - replace the item at the current cursor position.
+	 *		The \b key parameter must still be provided, and must match it.
+	 *		So must \b data if using sorted duplicates (#MDB_DUPSORT).
 	 *	<li>#MDB_NODUPDATA - enter the new key/data pair only if it does not
 	 *		already appear in the database. This flag may only be specified
 	 *		if the database was opened with #MDB_DUPSORT. The function will

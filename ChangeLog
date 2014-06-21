@@ -1,6 +1,8 @@
 
 2014-06-26 v0.83
 
+* LMDB 0.9.13 is bundled along with extra fixes from upstream Git.
+
 * Environment.__enter__() and __exit__() are implemented, allowing
   Environments to behave like context managers.
 
