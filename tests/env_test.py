@@ -242,6 +242,30 @@ class CloseTest(unittest.TestCase):
             lambda: env.begin())
 
 
+class ContextManagerTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_ok(self):
+        path, env = testlib.temp_env()
+        with env as env_:
+            assert env_ is env
+            with env.begin() as txn:
+                txn.get('foo')
+        self.assertRaises(Exception, lambda: env.begin())
+
+    def test_crash(self):
+        path, env = testlib.temp_env()
+        try:
+            with env as env_:
+                assert env_ is env
+                with env.begin() as txn:
+                    txn.get(123)
+        except:
+            pass
+        self.assertRaises(Exception, lambda: env.begin())
+
+
 class InfoMethodsTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()

@@ -693,6 +693,15 @@ class Environment(object):
             self._db = _Database(self, txn, None, False, False, True)
         self._dbs = {None: weakref.ref(self._db)}
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _1, _2, _3):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
     def close(self):
         """Close the environment, invalidating any open iterators, cursors, and
         transactions. Repeat calls to :py:meth:`close` have no effect.
@@ -707,9 +716,6 @@ class Environment(object):
                 _lib.mdb_txn_abort(self._spare_txns.pop())
             _lib.mdb_env_close(self._env)
             self._env = _invalid
-
-    def __del__(self):
-        self.close()
 
     def path(self):
         """Directory path or file name prefix where this environment is

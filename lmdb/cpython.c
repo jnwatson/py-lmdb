@@ -1814,7 +1814,27 @@ env_sync(EnvObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/**
+ * Environment.__enter__()
+ */
+static PyObject *env_enter(EnvObject *self)
+{
+    Py_INCREF(self);
+    return (PyObject *)self;
+}
+
+/**
+ * Environment.__exit__()
+ */
+static PyObject *env_exit(EnvObject *self, PyObject *args)
+{
+    env_clear(self);
+    Py_RETURN_NONE;
+}
+
 static struct PyMethodDef env_methods[] = {
+    {"__enter__", (PyCFunction)env_enter, METH_NOARGS},
+    {"__exit__", (PyCFunction)env_exit, METH_VARARGS},
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
     {"copy", (PyCFunction)env_copy, METH_VARARGS},
