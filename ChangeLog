@@ -16,6 +16,8 @@
   .close() must be manually invoked for discarded Cursors when the parent
   transaction is long lived.
 
+* Fixed crash in CFFI Cursor.putmulti().
+
 
 2014-05-26 v0.82
 
