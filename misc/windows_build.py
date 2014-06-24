@@ -82,7 +82,7 @@ def main():
         else:
             os.environ.pop('LMDB_FORCE_CFFI', '')
         if os.path.exists('lmdb\\cpython.pyd'):
-            os.unlink('lmdb\\cpython.pyd'):
+            os.unlink('lmdb\\cpython.pyd')
         #run(path, '-mpy.test')
         run(path, 'setup.py', 'bdist_egg', 'upload')
         run(path, 'setup.py', 'bdist_wheel', 'upload')
