@@ -17,9 +17,9 @@ provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
 
-* Ordered-map interface (keys are always sorted)
-* Reader/writer transactions: readers don't block writers and writers don't
-  block readers. Each environment supports one concurrent write transaction.
+* Ordered map interface (keys are always sorted)
+* Reader/writer transactions: readers don't block writers, writers don't block
+  readers. Each environment supports one concurrent write transaction.
 * Read transactions are extremely cheap.
 * Environments may be opened by multiple processes on the same host, making it
   ideal for working around Python's `GIL
@@ -125,11 +125,11 @@ databases may be created via :py:meth:`Environment.open_db`.
 Storage efficiency & limits
 +++++++++++++++++++++++++++
 
-LMDB groups records in pages matching the operating system's page size, which
-is usually 4096 bytes. Each page must contain at least 2 records, in addition
-to 8 bytes per record and a 16 byte header. Due to this the engine is most
-space-efficient when the combined size of any (8+key+value) combination does
-not exceed 2040 bytes.
+Records are grouped into pages matching the operating system's VM page size,
+which is usually 4096 bytes. Each page must contain at least 2 records, in
+addition to 8 bytes per record and a 16 byte header. Due to this the engine is
+most space-efficient when the combined size of any (8+key+value) combination
+does not exceed 2040 bytes.
 
 When an attempt to store a record would exceed the maximum size, its value part
 is written separately to one or more dedicated pages. Since the trailer of the
@@ -283,31 +283,42 @@ overwrite the map, resulting in database corruption.
     OSX, to immediately preallocate `map_size=` bytes of underlying storage.
 
 
+Resource Management
++++++++++++++++++++
+
+:py:class:`Environment`, :py:class:`Transaction`, and :py:class:`Cursor`
+support the context manager protocol, allowing for robust resource cleanup in
+the case of exceptions.
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as curs:
+            # do stuff
+            print 'key is:', curs.get('key')
+
+On CFFI it is important to use the :py:class:`Cursor` context manager, or
+explicitly call :py:meth:`Cursor.close` if many cursors are created within a
+single transaction. Failure to close a cursor on CFFI may cause many dead
+objects to accumulate until the parent transaction is aborted or committed.
+
+
 Transaction management
 ++++++++++++++++++++++
 
-``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
-freely migrate across threads and for a single thread to maintain multiple read
-transactions. This enables mostly care-free use of read transactions, for
-example when using `gevent <http://www.gevent.org/>`_.
+While any reader exists, writers cannot reuse space in the database file that
+has become unused in later versions. Due to this, continual use of long-lived
+read transactions may cause the database to grow without bound. A lost
+reference to a read transaction will simply be aborted (and its reader slot
+freed) when the :py:class:`Transaction` is eventually garbage collected. This
+should occur immediately on CPython, but may be deferred indefinitely on PyPy.
 
-.. caution::
-
-    While any reader exists, writers cannot reuse space in the database file
-    that has become unused in later versions. Due to this, continual use of
-    long-lived read transactions may cause the database to grow without bound.
-    A lost reference to a read transaction will simply be aborted (and its
-    reader slot freed) when the :py:class:`Transaction` is eventually garbage
-    collected. This should occur immediately on CPython, but may be deferred
-    indefinitely on PyPy.
-
-    However the same is *not* true for write transactions: losing a reference
-    to a write transaction can lead to deadlock, particularly on PyPy, since if
-    the same process that lost the :py:class:`Transaction` reference
-    immediately starts another write transaction, it will deadlock on its own
-    lock. Subsequently the lost transaction may never be garbage collected
-    (since the process is now blocked on itself) and the database will become
-    unusable.
+However the same is *not* true for write transactions: losing a reference to a
+write transaction can lead to deadlock, particularly on PyPy, since if the same
+process that lost the :py:class:`Transaction` reference immediately starts
+another write transaction, it will deadlock on its own lock. Subsequently the
+lost transaction may never be garbage collected (since the process is now
+blocked on itself) and the database will become unusable.
 
 These problems are easily avoided by always wrapping :py:class:`Transaction` in
 a ``with`` statement somewhere on the stack:
@@ -320,6 +331,15 @@ a ``with`` statement somewhere on the stack:
             function_that_stashes_away_txn_ref(txn)
             function_that_leaks_txn_refs(txn)
             crash()
+
+
+Threads
++++++++
+
+``MDB_NOTLS`` mode is used exclusively, which allows read transactions to
+freely migrate across threads and for a single thread to maintain multiple read
+transactions. This enables mostly care-free use of read transactions, for
+example when using `gevent <http://www.gevent.org/>`_.
 
 
 Interface
