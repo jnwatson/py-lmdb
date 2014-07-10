@@ -54,7 +54,7 @@ class ContextManagerTest(unittest.TestCase):
         self.assertRaises(Exception, lambda: curs.get(B('foo')))
 
 
-class CursorTest(unittest.TestCase):
+class CursorTestBase(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
@@ -63,6 +63,8 @@ class CursorTest(unittest.TestCase):
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
+
+class CursorTest(CursorTestBase):
     def testKeyValueItemEmpty(self):
         self.assertEqual(B(''), self.c.key())
         self.assertEqual(B(''), self.c.value())
@@ -137,6 +139,47 @@ class CursorTest(unittest.TestCase):
 
     def testPut(self):
         pass
+
+
+class PutmultiTest(CursorTestBase):
+    def test_empty_seq(self):
+        consumed, added = self.c.putmulti(())
+        assert consumed == added == 0
+
+    def test_2list(self):
+        l = [BT('a', ''), BT('a', '')]
+        consumed, added = self.c.putmulti(l)
+        assert consumed == added == 2
+
+        li = iter(l)
+        consumed, added = self.c.putmulti(li)
+        assert consumed == added == 2
+
+    def test_2list_preserve(self):
+        l = [BT('a', ''), BT('a', '')]
+        consumed, added = self.c.putmulti(l, overwrite=False)
+        assert consumed == 2
+        assert added == 1
+
+        assert self.c.set_key(B('a'))
+        assert self.c.delete()
+
+        li = iter(l)
+        consumed, added = self.c.putmulti(li, overwrite=False)
+        assert consumed == 2
+        assert added == 1
+
+    def test_bad_seq1(self):
+        self.assertRaises(Exception,
+             lambda: self.c.putmulti(range(2)))
+
+
+class ReplaceTest(CursorTestBase):
+    def test_replace(self):
+        assert None is self.c.replace(B('a'), B(''))
+        assert B('') == self.c.replace(B('a'), B('x'))
+        assert B('x') == self.c.replace(B('a'), B('y'))
+
 
 if __name__ == '__main__':
     unittest.main()
