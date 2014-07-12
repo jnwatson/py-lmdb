@@ -1972,7 +1972,8 @@ class Cursor(object):
             if rc:
                 if rc == _lib.MDB_KEYEXIST:
                     skipped += 1
-                raise _error("mdb_cursor_put", rc)
+                else:
+                    raise _error("mdb_cursor_put", rc)
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return added, added-skipped
 
