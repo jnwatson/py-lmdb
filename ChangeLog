@@ -1,4 +1,12 @@
 
+2014-09-24 v0.84
+
+* LMDB 0.9.14 is bundled.
+
+* CFFI Cursor.putmulti() could crash when append=False and a key already
+  existed.
+
+
 2014-06-24 v0.83
 
 * LMDB 0.9.13 is bundled along with extra fixes from upstream Git.
