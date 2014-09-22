@@ -221,7 +221,7 @@ extern int cacheflush(char *addr, int nbytes, int cache);
 #define pthread_mutex_lock(x)	WaitForSingleObject(*x, INFINITE)
 #define pthread_cond_signal(x)	SetEvent(*x)
 #define pthread_cond_wait(cond,mutex)	do{SignalObjectAndWait(*mutex, *cond, INFINITE, FALSE); WaitForSingleObject(*mutex, INFINITE);}while(0)
-#define THREAD_CREATE(thr,start,arg)	thr=CreateThread(NULL,0,start,arg,0,NULL)
+#define THREAD_CREATE(thr,start,arg)	thr=CreateThread(NULL,0,(LPTHREAD_START_ROUTINE)start,arg,0,NULL)
 #define THREAD_FINISH(thr)	WaitForSingleObject(thr, INFINITE)
 #define LOCK_MUTEX_R(env)	pthread_mutex_lock(&(env)->me_rmutex)
 #define UNLOCK_MUTEX_R(env)	pthread_mutex_unlock(&(env)->me_rmutex)
