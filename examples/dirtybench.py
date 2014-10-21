@@ -182,6 +182,25 @@ def x():
         return len(words)
 
 
+    @case('get+put (cursor)')
+    def test():
+        with env.begin(write=True) as txn:
+            with txn.cursor() as cursor:
+                for word in words:
+                    cursor.get(word)
+                    cursor.put(word, word)
+            return len(words)
+
+
+    @case('replace (cursor)')
+    def test():
+        with env.begin(write=True) as txn:
+            with txn.cursor() as cursor:
+                for word in words:
+                    cursor.replace(word, word)
+        return len(words)
+
+
     print
 
 
