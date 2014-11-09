@@ -5,29 +5,35 @@ from time import time
 import random
 import shutil
 import os
+import tempfile
 
 import lmdb
 
 
 val = ' ' * 100
-max_keys = int(1e6)
+MAX_KEYS = int(1e6)
 
 t0 = time()
 
 urandom = file('/dev/urandom', 'rb', 1048576).read
 
 keys = set()
-while len(keys) < max_keys:
-    for _ in xrange(min(1000, max_keys - len(keys))):
+while len(keys) < MAX_KEYS:
+    for _ in xrange(min(1000, MAX_KEYS - len(keys))):
         keys.add(urandom(16))
 
 print 'make %d keys in %.2fsec' % (len(keys), time() - t0)
 keys = list(keys)
 
+if os.path.exists('/ram'):
+    DB_PATH = '/ram/dbtest'
+else:
+    DB_PATH = tempfile.mktemp(prefix='nastybench')
 
-if os.path.exists('/ram/dbtest'):
-    shutil.rmtree('/ram/dbtest')
-env = lmdb.open('/ram/dbtest', map_size=1048576 * 1024,
+if os.path.exists(DB_PATH):
+    shutil.rmtree(DB_PATH)
+
+env = lmdb.open(DB_PATH, map_size=1048576 * 1024,
     metasync=False, sync=False, map_async=True)
 
 nextkey = iter(keys).next
