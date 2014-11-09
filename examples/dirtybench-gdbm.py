@@ -2,6 +2,7 @@
 from pprint import pprint
 import os
 import shutil
+import tempfile
 
 from time import time as now
 import random
@@ -9,6 +10,11 @@ import gdbm
 
 MAP_SIZE = 1048576 * 400
 DB_PATH = '/ram/testdb-gdbm'
+
+if os.path.exists('/ram'):
+    DB_PATH = '/ram/testdb-gdbm'
+else:
+    DB_PATH = tempfile.mktemp(prefix='dirtybench-gdbm')
 
 
 def x():

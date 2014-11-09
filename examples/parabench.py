@@ -6,6 +6,7 @@ import os
 import random
 import shutil
 import sys
+import tempfile
 import time
 
 try:
@@ -18,6 +19,11 @@ import lmdb
 USE_SPARSE_FILES = sys.platform != 'darwin'
 DB_PATH = '/ram/dbtest'
 MAX_KEYS = int(4e6)
+
+if os.path.exists('/ram'):
+    DB_PATH = '/ram/dbtest'
+else:
+    DB_PATH = tempfile.mktemp(prefix='parabench')
 
 
 def open_env():
