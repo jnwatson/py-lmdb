@@ -389,6 +389,7 @@ static const struct error_map error_map[] = {
     {MDB_MAP_RESIZED, "MapResizedError"},
     {MDB_INCOMPATIBLE, "IncompatibleError"},
     {MDB_BAD_RSLOT, "BadRSlotError"},
+    {MDB_BAD_DBI, "BadDbiError"},
     {MDB_BAD_TXN, "BadTxnError"},
     {MDB_BAD_VALSIZE, "BadValsizeError"},
     {EACCES, "ReadonlyError"},
