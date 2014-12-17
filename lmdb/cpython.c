@@ -1358,21 +1358,25 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
  * Environment.copy()
  */
 static PyObject *
-env_copy(EnvObject *self, PyObject *args)
+env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     struct env_copy {
         PyObject *path;
-    } arg = {NULL};
+        int compact;
+    } arg = {NULL, 0};
 
     static const struct argspec argspec[] = {
-        {"path", ARG_OBJ, OFFSET(env_copy, path)}
+        {"path", ARG_OBJ, OFFSET(env_copy, path)},
+        {"compact", ARG_BOOL, OFFSET(env_copy, compact)}
     };
 
     PyObject *fspath_obj;
+    const char *fspath_s;
+    int flags;
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(! arg.path) {
@@ -1382,10 +1386,12 @@ env_copy(EnvObject *self, PyObject *args)
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_env_copy(self->env, PyBytes_AS_STRING(fspath_obj)));
+    fspath_s = PyBytes_AS_STRING(fspath_obj);
+    flags = arg.compact ? MDB_CP_COMPACT : 0;
+    UNLOCKED(rc, mdb_env_copy2(self->env, fspath_s, flags));
     Py_CLEAR(fspath_obj);
     if(rc) {
-        return err_set("mdb_env_copy", rc);
+        return err_set("mdb_env_copy2", rc);
     }
     Py_RETURN_NONE;
 }
@@ -1394,11 +1400,12 @@ env_copy(EnvObject *self, PyObject *args)
  * Environment.copyfd(fd)
  */
 static PyObject *
-env_copyfd(EnvObject *self, PyObject *args)
+env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     struct env_copyfd {
         int fd;
-    } arg = {-1};
+        int compact;
+    } arg = {-1, 0};
     int rc;
 #ifdef _WIN32
     PyObject *temp;
@@ -1406,16 +1413,19 @@ env_copyfd(EnvObject *self, PyObject *args)
 #endif
 
     static const struct argspec argspec[] = {
-        {"fd", ARG_INT, OFFSET(env_copyfd, fd)}
+        {"fd", ARG_INT, OFFSET(env_copyfd, fd)},
+        {"compact", ARG_BOOL, OFFSET(env_copyfd, compact)}
     };
+    int flags;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
     if(arg.fd == -1) {
         return type_error("fd argument required");
     }
+    flags = arg.compact ? MDB_CP_COMPACT : 0;
 
 #ifdef _WIN32
     temp = PyObject_CallMethod(msvcrt, "get_osfhandle", "i", arg.fd);
@@ -1427,13 +1437,13 @@ env_copyfd(EnvObject *self, PyObject *args)
     if(PyErr_Occurred()) {
         return NULL;
     }
-    UNLOCKED(rc, mdb_env_copyfd(self->env, (HANDLE)handle));
+    UNLOCKED(rc, mdb_env_copyfd2(self->env, (HANDLE)handle, flags));
 #else
-    UNLOCKED(rc, mdb_env_copyfd(self->env, arg.fd));
+    UNLOCKED(rc, mdb_env_copyfd2(self->env, arg.fd, flags));
 #endif
 
     if(rc) {
-        return err_set("mdb_env_copyfd", rc);
+        return err_set("mdb_env_copyfd2", rc);
     }
     Py_RETURN_NONE;
 }
@@ -1739,8 +1749,8 @@ static struct PyMethodDef env_methods[] = {
     {"__exit__", (PyCFunction)env_exit, METH_VARARGS},
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
-    {"copy", (PyCFunction)env_copy, METH_VARARGS},
-    {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS},
+    {"copy", (PyCFunction)env_copy, METH_VARARGS|METH_KEYWORDS},
+    {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS|METH_KEYWORDS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"flags", (PyCFunction)env_flags, METH_NOARGS},
     {"max_key_size", (PyCFunction)env_max_key_size, METH_NOARGS},

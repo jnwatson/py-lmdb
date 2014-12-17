@@ -386,6 +386,24 @@ class OtherMethodsTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.copy(testlib.temp_dir()))
 
+    def test_copy_compact(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+
+        dest_dir = testlib.temp_dir()
+        env.copy(dest_dir, compact=True)
+        assert os.path.exists(dest_dir + '/data.mdb')
+
+        cenv = lmdb.open(dest_dir)
+        ctxn = cenv.begin()
+        assert ctxn.get(B('a')) == B('b')
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.copy(testlib.temp_dir()))
+
     def test_copyfd(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
@@ -395,6 +413,25 @@ class OtherMethodsTest(unittest.TestCase):
         dst_path = testlib.temp_file(create=False)
         fp = open(dst_path, 'wb')
         env.copyfd(fp.fileno())
+
+        dstenv = lmdb.open(dst_path, subdir=False)
+        dtxn = dstenv.begin()
+        assert dtxn.get(B('a')) == B('b')
+
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.copyfd(fp.fileno()))
+        fp.close()
+
+    def test_copyfd_compact(self):
+        path, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+
+        dst_path = testlib.temp_file(create=False)
+        fp = open(dst_path, 'wb')
+        env.copyfd(fp.fileno(), compact=True)
 
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()

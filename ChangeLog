@@ -1,4 +1,10 @@
 
+2015-01-22 v0.85
+
+* Environment.copy() and Environment.copyfd() now support compact=True, to
+  trigger database compaction while copying.
+
+
 2014-09-22 v0.84
 
 * LMDB 0.9.14 is bundled.

@@ -140,8 +140,8 @@ _CFFI_CDEF = '''
     int mdb_env_create(MDB_env **env);
     int mdb_env_open(MDB_env *env, const char *path, unsigned int flags,
                      mode_t mode);
-    int mdb_env_copy(MDB_env *env, const char *path);
-    int mdb_env_copyfd(MDB_env *env, int fd);
+    int mdb_env_copy2(MDB_env *env, const char *path, int flags);
+    int mdb_env_copyfd2(MDB_env *env, int fd, int flags);
     int mdb_env_stat(MDB_env *env, MDB_stat *stat);
     int mdb_env_info(MDB_env *env, MDB_envinfo *stat);
     int mdb_env_get_maxkeysize(MDB_env *env);
@@ -223,6 +223,7 @@ _CFFI_CDEF = '''
     #define MDB_REVERSEKEY ...
     #define MDB_WRITEMAP ...
     #define MDB_NOMEMINIT ...
+    #define MDB_CP_COMPACT ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // CFFI will use PyString_AS_STRING when passed as an argument.
@@ -423,7 +424,7 @@ class BadRslotError(Error):
     MDB_NAME = 'MDB_BAD_RSLOT'
 
 class BadDbiError(Error):
-	"""The specified DBI was changed unexpectedly."""
+    """The specified DBI was changed unexpectedly."""
     MDB_NAME = 'MDB_BAD_DBI'
 
 class BadTxnError(Error):
@@ -735,20 +736,34 @@ class Environment(object):
             raise _error("mdb_env_get_path", rc)
         return _ffi.string(path[0]).decode(sys.getfilesystemencoding())
 
-    def copy(self, path):
+    def copy(self, path, compact=False):
         """Make a consistent copy of the environment in the given destination
         directory.
+
+        `compact`:
+            If ``True``, perform compaction while copying: omit free pages and
+            sequentially renumber all pages in output. This option consumes
+            more CPU and runs more slowly than the default, but may produce a
+            smaller output database.
 
         Equivalent to `mdb_env_copy()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
-        rc = _lib.mdb_env_copy(self._env, path.encode(sys.getfilesystemencoding()))
+        flags = _lib.MDB_CP_COMPACT if compact else 0
+        encoded = path.encode(sys.getfilesystemencoding())
+        rc = _lib.mdb_env_copy2(self._env, encoded, flags)
         if rc:
-            raise _error("mdb_env_copy", rc)
+            raise _error("mdb_env_copy2", rc)
 
-    def copyfd(self, fd):
+    def copyfd(self, fd, compact=False):
         """Copy a consistent version of the environment to file descriptor
         `fd`.
+
+        `compact`:
+            If ``True``, perform compaction while copying: omit free pages and
+            sequentially renumber all pages in output. This option consumes
+            more CPU and runs more slowly than the default, but may produce a
+            smaller output database.
 
         Equivalent to `mdb_env_copyfd()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
@@ -756,9 +771,10 @@ class Environment(object):
         if is_win32:
             # Convert C library handle to kernel handle.
             fd = msvcrt.get_osfhandle(fd)
-        rc = _lib.mdb_env_copyfd(self._env, fd)
+        flags = _lib.MDB_CP_COMPACT if compact else 0
+        rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
         if rc:
-            raise _error("mdb_env_copyfd", rc)
+            raise _error("mdb_env_copyfd2", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
