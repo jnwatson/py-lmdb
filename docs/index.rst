@@ -108,7 +108,8 @@ you're allergic to GitHub.
 
 For all other problems and related discussion, please direct it to
 `the py-lmdb@freelists.org mailing list <http://www.freelists.org/list/py-lmdb>`_.
-You must be subscribed to post.
+You must be subscribed to post. The `list archives
+<http://www.freelists.org/archive/py-lmdb/>`_ are also available.
 
 
 Named Databases
