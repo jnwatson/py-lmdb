@@ -2486,7 +2486,7 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
     }
     self->key = arg.key;
     self->val = arg.value;
-    return _cursor_get(self, MDB_GET_BOTH);
+    return _cursor_get(self, MDB_GET_BOTH_RANGE);
 }
 
 /**
