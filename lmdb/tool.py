@@ -564,7 +564,7 @@ def cmd_stat(opts, args):
     pprint.pprint(ENV.info())
 
 
-def _get_term_width(default=80):
+def _get_term_width(default=(80, 25)):
     try:
         import fcntl    # No fcntl on win32
         import termios  # No termios on win32
@@ -595,7 +595,8 @@ def main():
         global DB
         DB = ENV.open_db(opts.db)
 
-    signal.signal(signal.SIGWINCH, _on_sigwinch)
+    if hasattr(signal, 'SIGWINCH'):  # Disable on win32.
+        signal.signal(signal.SIGWINCH, _on_sigwinch)
     _on_sigwinch()
 
     func = globals().get('cmd_' + args[0])
