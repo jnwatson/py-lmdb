@@ -839,19 +839,24 @@ class Environment(object):
     def info(self):
         """Return some nice environment information as a dict:
 
-        +--------------------+---------------------------------------+
-        | ``map_addr``       | Address of database map in RAM.       |
-        +--------------------+---------------------------------------+
-        | ``map_size``       | Size of database map in RAM.          |
-        +--------------------+---------------------------------------+
-        | ``last_pgno``      | ID of last used page.                 |
-        +--------------------+---------------------------------------+
-        | ``last_txnid``     | ID of last committed transaction.     |
-        +--------------------+---------------------------------------+
-        | ``max_readers``    | Maximum number of threads.            |
-        +--------------------+---------------------------------------+
-        | ``num_readers``    | Number of threads in use.             |
-        +--------------------+---------------------------------------+
+        +--------------------+---------------------------------------------+
+        | ``map_addr``       | Address of database map in RAM.             |
+        +--------------------+---------------------------------------------+
+        | ``map_size``       | Size of database map in RAM.                |
+        +--------------------+---------------------------------------------+
+        | ``last_pgno``      | ID of last used page.                       |
+        +--------------------+---------------------------------------------+
+        | ``last_txnid``     | ID of last committed transaction.           |
+        +--------------------+---------------------------------------------+
+        | ``max_readers``    | Number of reader slots allocated in the     |
+        |                    | lock file. Equivalent to the value of       |
+        |                    | `maxreaders=` specified by the first        |
+        |                    | process opening the Environment.            |
+        +--------------------+---------------------------------------------+
+        | ``num_readers``    | Maximum number of reader slots in           |
+        |                    | simultaneous use since the lock file was    |
+        |                    | initialized.                                |
+        +--------------------+---------------------------------------------+
 
         Equivalent to `mdb_env_info()
         <http://symas.com/mdb/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
