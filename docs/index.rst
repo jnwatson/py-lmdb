@@ -546,6 +546,29 @@ Deviations from LMDB API
     operations in C to avoid a chunk of error prone, boilerplate Python from
     having to do the same.
 
+`mdb_set_compare()`, `mdb_set_dupsort()`:
+    Neither function is exposed for a variety of reasons. In particular,
+    neither can be supported safely, since exceptions cannot be propagated
+    through LMDB callbacks, and can lead to database corruption if used
+    incorrectly. Secondarily, since both functions are repeatedly invoked for
+    every single lookup in the LMDB read path, most of the performance benefit
+    of LMDB is lost by introducing Python interpreter callbacks to its hot path.
+
+    There are a variety of workarounds that could make both functions useful,
+    but not without either punishing binding users who do not require these
+    features (especially on CFFI), or needlessly complicating the binding for
+    what is essentially an edge case.
+
+    In all cases where `mdb_set_compare()` might be useful, use of a special
+    key encoding that encodes your custom order is usually desirable. See
+    `issue #79 <https://github.com/dw/py-lmdb/issues/79>` for example
+    approaches.
+
+    The answer is not so clear for `mdb_set_dupsort()`, since a custom encoding
+    there may necessitate wasted storage space, or complicating record decoding
+    in an application's hot path. Please file a ticket if you think you have a
+    use for `mdb_set_dupsort()`.
+
 
 Technology
 ##########
