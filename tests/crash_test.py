@@ -32,6 +32,7 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import itertools
 import os
 import random
 import unittest
@@ -193,6 +194,27 @@ class MultiCursorDeleteTest(unittest.TestCase):
 
         assert deleted == len(keys), deleted
 
+
+class TxnFullTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_17bf75b12eb94d9903cd62329048b146d5313bad(self):
+        """
+        me_txn0 previously cached MDB_TXN_ERROR permanently. Fixed by
+        17bf75b12eb94d9903cd62329048b146d5313bad.
+        """
+        path, env = testlib.temp_env(map_size=4096*9, sync=False, max_spare_txns=0)
+        for i in itertools.count():
+            try:
+                with env.begin(write=True) as txn:
+                    txn.put(str(i), str(i))
+            except lmdb.MapFullError:
+                break
+
+        # Should not crash with MDB_BAD_TXN:
+        with env.begin(write=True) as txn:
+            txn.delete('1')
 
 if __name__ == '__main__':
     unittest.main()
