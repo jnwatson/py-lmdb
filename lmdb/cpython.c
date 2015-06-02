@@ -2675,9 +2675,18 @@ static PyObject *cursor_enter(CursorObject *self)
 }
 
 /**
- * Transaction.__exit__()
+ * Cursor.__exit__()
  */
 static PyObject *cursor_exit(CursorObject *self, PyObject *args)
+{
+    cursor_clear(self);
+    Py_RETURN_NONE;
+}
+
+/**
+ * Cursor.close()
+ */
+static PyObject *cursor_close(CursorObject *self)
 {
     cursor_clear(self);
     Py_RETURN_NONE;
@@ -2686,6 +2695,7 @@ static PyObject *cursor_exit(CursorObject *self, PyObject *args)
 static struct PyMethodDef cursor_methods[] = {
     {"__enter__", (PyCFunction)cursor_enter, METH_NOARGS},
     {"__exit__", (PyCFunction)cursor_exit, METH_VARARGS},
+    {"close", (PyCFunction)cursor_close, METH_NOARGS},
     {"count", (PyCFunction)cursor_count, METH_NOARGS},
     {"delete", (PyCFunction)cursor_delete, METH_VARARGS|METH_KEYWORDS},
     {"first", (PyCFunction)cursor_first, METH_NOARGS},

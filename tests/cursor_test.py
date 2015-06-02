@@ -181,5 +181,42 @@ class ReplaceTest(CursorTestBase):
         assert B('x') == self.c.replace(B('a'), B('y'))
 
 
+class ContextManagerTest(CursorTestBase):
+    def test_enter(self):
+        with self.c as c:
+            assert c is self.c
+            c.put(B('a'), B('a'))
+            assert c.get(B('a')) == B('a')
+        self.assertRaises(Exception,
+            lambda: c.get(B('a')))
+
+    def test_exit_success(self):
+        with self.txn.cursor() as c:
+            c.put(B('a'), B('a'))
+        self.assertRaises(Exception,
+            lambda: c.get(B('a')))
+
+    def test_exit_failure(self):
+        try:
+            with self.txn.cursor() as c:
+                c.put(B('a'), B('a'))
+            raise ValueError
+        except ValueError:
+            pass
+        self.assertRaises(Exception,
+            lambda: c.get(B('a')))
+
+    def test_close(self):
+        self.c.close()
+        self.assertRaises(Exception,
+            lambda: c.get(B('a')))
+
+    def test_double_close(self):
+        self.c.close()
+        self.c.close()
+        self.assertRaises(Exception,
+            lambda: self.c.put(B('a'), B('a')))
+
+
 if __name__ == '__main__':
     unittest.main()
