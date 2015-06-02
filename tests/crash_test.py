@@ -208,13 +208,13 @@ class TxnFullTest(unittest.TestCase):
         for i in itertools.count():
             try:
                 with env.begin(write=True) as txn:
-                    txn.put(str(i), str(i))
+                    txn.put(B(str(i)), B(str(i)))
             except lmdb.MapFullError:
                 break
 
         # Should not crash with MDB_BAD_TXN:
         with env.begin(write=True) as txn:
-            txn.delete('1')
+            txn.delete(B('1'))
 
 if __name__ == '__main__':
     unittest.main()
