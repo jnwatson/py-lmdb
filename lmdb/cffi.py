@@ -33,7 +33,6 @@ import inspect
 import os
 import sys
 import threading
-import weakref
 
 is_win32 = sys.platform == 'win32'
 if is_win32:
@@ -697,7 +696,7 @@ class Environment(object):
 
         with self.begin(db=object()) as txn:
             self._db = _Database(self, txn, None, False, False, True)
-        self._dbs = {None: weakref.ref(self._db)}
+        self._dbs = {None: self._db}
 
     def __enter__(self):
         return self
@@ -1002,18 +1001,16 @@ class Environment(object):
         if isinstance(key, UnicodeType):
             raise TypeError('key must be bytes')
 
-        ref = self._dbs.get(key)
-        if ref:
-            db = ref()
-            if db:
-                return db
+        db = self._dbs.get(key)
+        if db:
+            return db
 
         if txn:
             db = _Database(self, txn, key, reverse_key, dupsort, create)
         else:
             with self.begin(write=True) as txn:
                 db = _Database(self, txn, key, reverse_key, dupsort, create)
-        self._dbs[key] = weakref.ref(db)
+        self._dbs[key] = db
         return db
 
     def begin(self, db=None, parent=None, write=False, buffers=False):
@@ -1025,7 +1022,6 @@ class _Database(object):
     """Internal database handle."""
     def __init__(self, env, txn, name, reverse_key, dupsort, create):
         env._deps.add(self)
-        self.env = env
         self._deps = set()
 
         flags = 0
@@ -1170,7 +1166,8 @@ class Transaction(object):
                 self._txn = txnpp[0]
 
     def _invalidate(self):
-        self.abort()
+        if self._txn:
+            self.abort()
         self.env._deps.discard(self)
         self._parent = None
         self._env = _invalid
@@ -1225,6 +1222,7 @@ class Transaction(object):
             self.env._spare_txns.append(self._txn)
             self.env._max_spare_txns -= 1
             self._txn = _invalid
+            self._invalidate()
             return True
 
     def commit(self):
@@ -1240,6 +1238,7 @@ class Transaction(object):
             self._txn = _invalid
             if rc:
                 raise _error("mdb_txn_commit", rc)
+            self._invalidate()
 
     def abort(self):
         """Abort the pending transaction. Repeat calls to :py:meth:`abort` have
@@ -1258,6 +1257,7 @@ class Transaction(object):
                 self._txn = _invalid
                 if rc:
                     raise _error("mdb_txn_abort", rc)
+            self._invalidate()
 
     def get(self, key, default=None, db=None):
         """Fetch the first value matching `key`, returning `default` if `key`
