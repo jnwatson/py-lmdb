@@ -22,7 +22,9 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import gc
 import unittest
+import weakref
 
 import testlib
 from testlib import B
@@ -452,6 +454,30 @@ class ReplaceTest(unittest.TestCase):
         assert txn.put(B('a'), B('a'), dupdata=True)
         assert txn.put(B('a'), B('b'), dupdata=True)
         txn.get(B('a'))
+
+
+class LeakTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_open_close(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        with env.begin() as txn:
+            pass
+        env.close()
+        r1 = weakref.ref(env)
+        r2 = weakref.ref(txn)
+        env = None
+        txn = None
+
+        old = gc.get_debug()
+        gc.set_debug(gc.DEBUG_LEAK)
+        gc.collect()
+        gc.set_debug(old)
+
+        assert r1() is None
+        assert r2() is None
 
 
 if __name__ == '__main__':
