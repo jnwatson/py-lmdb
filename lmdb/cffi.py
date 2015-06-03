@@ -707,6 +707,11 @@ class Environment(object):
     def __del__(self):
         self.close()
 
+    _env = None
+    _deps = None
+    _spare_txns = None
+    _dbs = None
+
     def close(self):
         """Close the environment, invalidating any open iterators, cursors, and
         transactions. Repeat calls to :py:meth:`close` have no effect.
@@ -715,15 +720,18 @@ class Environment(object):
         <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
-            while self._deps:
-                self._deps.pop()._invalidate()
+            if self._deps:
+                while self._deps:
+                    self._deps.pop()._invalidate()
             self._deps = None
 
-            while self._spare_txns:
-                _lib.mdb_txn_abort(self._spare_txns.pop())
+            if self._spare_txns:
+                while self._spare_txns:
+                    _lib.mdb_txn_abort(self._spare_txns.pop())
             self._spare_txns = None
 
-            self._dbs.clear()
+            if self._dbs:
+                self._dbs.clear()
             self._dbs = None
             self._db = None
 
