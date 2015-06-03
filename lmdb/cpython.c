@@ -228,6 +228,8 @@ enum trans_flags {
 /** lmdb.Transaction */
 struct TransObject {
     LmdbObject_HEAD
+    /** Python-managed list of weakrefs to this object. */
+    PyObject *weaklist;
     EnvObject *env;
 #ifdef HAVE_MEMSINK
     /** Copy-on-invalid list head. */
@@ -891,6 +893,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 
     OBJECT_INIT(self)
     LINK_CHILD(env, self)
+    self->weaklist = NULL;
     self->env = env;
     Py_INCREF(env);
     self->db = db;
@@ -3425,7 +3428,7 @@ static PyTypeObject PyTransaction_Type = {
     0,                          /*tp_traverse*/
     (inquiry) trans_clear,      /*tp_clear*/
     0,                          /*tp_richcompare*/
-    0,                          /*tp_weaklistoffset*/
+    offsetof(TransObject, weaklist), /*tp_weaklistoffset*/
     0,                          /*tp_iter*/
     0,                          /*tp_iternext*/
     trans_methods,              /*tp_methods*/
