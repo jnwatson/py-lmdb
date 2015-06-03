@@ -13,17 +13,18 @@ clean() {
 cat > /tmp/gdb.$$ <<-EOF
     set confirm off
     define hook-stop
-        if $_isvoid ($_exitcode)
+        if \$_isvoid (\$_exitcode)
             echo Abnormal stop.\n
             backtrace
             quit 1
         else
             echo Normal exit.\n
-            quit $_exitcode
+            quit \$_exitcode
         end
     end
     run
 EOF
+cat /tmp/gdb.$$
 trap "rm /tmp/gdb.$$" EXIT
 
 with_gdb() {
