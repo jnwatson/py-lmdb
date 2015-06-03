@@ -10,25 +10,8 @@ clean() {
     find /usr/lib -name '*lmdb*' | xargs rm -rf
 }
 
-cat > /tmp/gdb.$$ <<-EOF
-    set confirm off
-    define hook-stop
-        if \$_isvoid (\$_exitcode)
-            echo Abnormal stop.\n
-            backtrace
-            quit 1
-        else
-            echo Normal exit.\n
-            quit \$_exitcode
-        end
-    end
-    run
-EOF
-cat /tmp/gdb.$$
-trap "rm /tmp/gdb.$$" EXIT
-
 with_gdb() {
-    gdb -x /tmp/gdb.$$ --args "$@"
+    gdb -x misc/gdb.commands --args "$@"
 }
 
 native() {
