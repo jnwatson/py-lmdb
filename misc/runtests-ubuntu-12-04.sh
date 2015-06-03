@@ -35,14 +35,14 @@ native() {
     clean
     quiet $1 setup.py develop
     quiet $1 -c 'import lmdb.cpython'
-    with_gdb $2 tests || fail=1
+    with_gdb $1 `type -p $2` tests || fail=1
 }
 
 cffi() {
     clean
     LMDB_FORCE_CFFI=1 quiet $1 setup.py install
     LMDB_FORCE_CFFI=1 quiet $1 -c 'import lmdb.cffi'
-    with_gdb $2 tests || fail=1
+    with_gdb $1 `type -p $2` tests || fail=1
 }
 
 native python2.5 py.test-2.5
