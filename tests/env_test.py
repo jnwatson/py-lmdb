@@ -22,7 +22,6 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
-import gc
 import os
 import signal
 import sys
@@ -721,10 +720,7 @@ class LeakTest(unittest.TestCase):
         env = lmdb.open(temp_dir)
         ref = weakref.ref(env)
         env = None
-        old = gc.get_debug()
-        gc.set_debug(gc.DEBUG_LEAK)
-        gc.collect()
-        gc.set_debug(old)
+        testlib.debug_collect()
         assert ref() is None
 
     def test_open_close_does_not_leak(self):
@@ -733,10 +729,7 @@ class LeakTest(unittest.TestCase):
         env.close()
         ref = weakref.ref(env)
         env = None
-        old = gc.get_debug()
-        gc.set_debug(gc.DEBUG_LEAK)
-        gc.collect()
-        gc.set_debug(old)
+        testlib.debug_collect()
         assert ref() is None
 
 

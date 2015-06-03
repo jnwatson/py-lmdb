@@ -22,7 +22,7 @@
 
 from __future__ import absolute_import
 import atexit
-import contextlib
+import gc
 import os
 import shutil
 import stat
@@ -86,6 +86,16 @@ def temp_env(path=None, max_dbs=10, **kwargs):
 
 def path_mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def debug_collect():
+    has = hasattr(gc, 'set_debug') and hasattr(gc, 'get_debug')
+    if has:
+        old = gc.get_debug()
+        gc.set_debug(gc.DEBUG_LEAK)
+    gc.collect()
+    if has:
+        gc.set_debug(old)
 
 
 # Handle moronic Python >=3.0 <3.3.

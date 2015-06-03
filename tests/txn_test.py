@@ -22,7 +22,6 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
-import gc
 import unittest
 import weakref
 
@@ -470,12 +469,7 @@ class LeakTest(unittest.TestCase):
         r2 = weakref.ref(txn)
         env = None
         txn = None
-
-        old = gc.get_debug()
-        gc.set_debug(gc.DEBUG_LEAK)
-        gc.collect()
-        gc.set_debug(old)
-
+        testlib.debug_collect()
         assert r1() is None
         assert r2() is None
 
