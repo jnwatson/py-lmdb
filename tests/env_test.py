@@ -22,10 +22,12 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import gc
 import os
 import signal
 import sys
 import unittest
+import weakref
 
 import testlib
 from testlib import B
@@ -708,6 +710,34 @@ class SpareTxnTest(unittest.TestCase):
         t3.abort()
         del t3
         assert 1 == reader_count(env)  # 1 cached
+
+
+class LeakTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_open_unref_does_not_leak(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        ref = weakref.ref(env)
+        env = None
+        old = gc.get_debug()
+        gc.set_debug(gc.DEBUG_LEAK)
+        gc.collect()
+        gc.set_debug(old)
+        assert ref() is None
+
+    def test_open_close_does_not_leak(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        env.close()
+        ref = weakref.ref(env)
+        env = None
+        old = gc.get_debug()
+        gc.set_debug(gc.DEBUG_LEAK)
+        gc.collect()
+        gc.set_debug(old)
+        assert ref() is None
 
 
 if __name__ == '__main__':
