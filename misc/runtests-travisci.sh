@@ -15,7 +15,8 @@ quiet apt-get -qq update
 quiet apt-get install --force-yes -qq \
     python{2.5,2.6,2.7,3.1,3.2,3.3}-dev \
     pypy-dev \
-    libffi-dev
+    libffi-dev \
+    gdb
 
 wget -qO ez_setup_24.py \
     https://bitbucket.org/pypa/setuptools/raw/bootstrap-py24/ez_setup.py
