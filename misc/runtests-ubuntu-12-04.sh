@@ -11,7 +11,7 @@ clean() {
 }
 
 with_gdb() {
-    gdb -x misc/gdb.commands --args "$@"
+    gdb --batch -x misc/gdb.commands --args "$@"
 }
 
 native() {
