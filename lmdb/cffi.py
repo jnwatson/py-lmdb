@@ -717,8 +717,16 @@ class Environment(object):
         if self._env:
             while self._deps:
                 self._deps.pop()._invalidate()
+            self._deps = None
+
             while self._spare_txns:
                 _lib.mdb_txn_abort(self._spare_txns.pop())
+            self._spare_txns = None
+
+            self._dbs.clear()
+            self._dbs = None
+            self._db = None
+
             _lib.mdb_env_close(self._env)
             self._env = _invalid
 
@@ -1056,7 +1064,7 @@ class _Database(object):
         }
 
     def _invalidate(self):
-        pass
+        self._dbi = _invalid
 
 open = Environment
 
