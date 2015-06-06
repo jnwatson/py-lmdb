@@ -1125,6 +1125,12 @@ static int
 env_clear(EnvObject *self)
 {
     MDEBUG("killing env..")
+
+    if(self->weaklist != NULL) {
+        MDEBUG("Clearing weaklist..")
+        PyObject_ClearWeakRefs((PyObject *) self);
+    }
+
     INVALIDATE(self)
     self->valid = 0;
     Py_CLEAR(self->main_db);
@@ -2912,6 +2918,11 @@ trans_clear(TransObject *self)
 static void
 trans_dealloc(TransObject *self)
 {
+    if(self->weaklist != NULL) {
+        MDEBUG("Clearing weaklist..")
+        PyObject_ClearWeakRefs((PyObject *) self);
+    }
+
     if(self->env && self->txn &&
        (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
         MDEBUG("caching trans")

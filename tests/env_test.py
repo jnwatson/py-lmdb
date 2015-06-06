@@ -732,6 +732,19 @@ class LeakTest(unittest.TestCase):
         testlib.debug_collect()
         assert ref() is None
 
+    def test_weakref_callback_invoked_once(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        env.close()
+        count = [0]
+        def callback(ref):
+            count[0] += 1
+        ref = weakref.ref(env, callback)
+        env = None
+        testlib.debug_collect()
+        assert ref() is None
+        assert count[0] == 1
+
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test_reader_check_child':
