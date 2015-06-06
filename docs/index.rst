@@ -411,6 +411,7 @@ Exceptions
 .. autoclass:: lmdb.PageFullError ()
 .. autoclass:: lmdb.MapResizedError ()
 .. autoclass:: lmdb.IncompatibleError ()
+.. autoclass:: lmdb.BadDbiError ()
 .. autoclass:: lmdb.BadRslotError ()
 .. autoclass:: lmdb.BadTxnError ()
 .. autoclass:: lmdb.BadValsizeError ()
