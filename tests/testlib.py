@@ -92,6 +92,7 @@ def debug_collect():
     if hasattr(gc, 'set_debug') and hasattr(gc, 'get_debug'):
         old = gc.get_debug()
         gc.set_debug(gc.DEBUG_LEAK)
+        gc.collect()
         gc.set_debug(old)
     else:
         for x in range(10):
