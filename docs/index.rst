@@ -342,6 +342,23 @@ freely migrate across threads and for a single thread to maintain multiple read
 transactions. This enables mostly care-free use of read transactions, for
 example when using `gevent <http://www.gevent.org/>`_.
 
+Most objects can be safely called by a single caller from a single thread, and
+usually it only makes sense to to have a single caller, except in the case of
+:py:class:`Environment`.
+
+Most :py:class:`Environment` methods are thread-safe, and may be called
+concurrently, except for :py:meth:`Environment.close`.
+
+A write :py:class:`Transaction` may only be used from the thread it was created
+on.
+
+A read-only :py:class:`Transaction` can move across threads, but it cannot be
+used concurrently from multiple threads.
+
+:py:class:`Cursor` is not thread-safe, but it does not make sense to use it on
+any thread except the thread that currently owns its associated
+:py:class:`Transaction`.
+
 
 Interface
 +++++++++
