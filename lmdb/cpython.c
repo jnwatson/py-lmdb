@@ -43,6 +43,7 @@
 #endif
 
 #include "lmdb.h"
+#include "preload.h"
 
 
 /* Comment out for copious debug. */
@@ -595,28 +596,6 @@ val_from_buffer(MDB_val *val, PyObject *buf)
     return PyObject_AsReadBuffer(buf,
         (const void **) &val->mv_data,
         (Py_ssize_t *) &val->mv_size);
-}
-
-/**
- * Touch a byte from every page in `x`, causing any read faults necessary for
- * copying the value to occur. This should be called with the GIL released, in
- * order to dramatically decrease the chances of a page fault being taken with
- * the GIL held.
- *
- * We do this since PyMalloc cannot be invoked with the GIL released, and we
- * cannot know the size of the MDB result value before dropping the GIL. This
- * seems the simplest and cheapest compromise to ensuring multithreaded Python
- * apps don't hard stall when dealing with a database larger than RAM.
- */
-void preload(int rc, void *x, size_t size) {
-    if(rc == 0) {
-        volatile char j;
-        int i;
-        for(i = 0; i < size; i += 4096) {
-            j = ((volatile char *)x)[i];
-        }
-        (void) j; /* -Wunused-variable */
-    }
 }
 
 /* ------------------- */

@@ -248,6 +248,7 @@ _CFFI_CDEF = '''
 _CFFI_VERIFY = '''
     #include <sys/stat.h>
     #include "lmdb.h"
+    #include "preload.h"
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // CFFI will use PyString_AS_STRING when passed as an argument.
@@ -255,7 +256,9 @@ _CFFI_VERIFY = '''
                          MDB_val *val_out)
     {
         MDB_val key = {keylen, key_s};
-        return mdb_get(txn, dbi, &key, val_out);
+        int rc = mdb_get(txn, dbi, &key, val_out);
+        preload(rc, val_out->mv_data, val_out->mv_size);
+        return rc;
     }
 
     static int pymdb_put(MDB_txn *txn, MDB_dbi dbi, char *key_s, size_t keylen,
@@ -289,6 +292,7 @@ _CFFI_VERIFY = '''
         MDB_val tmp_data = {data_len, data_s};
         int rc = mdb_cursor_get(cursor, &tmp_key, &tmp_data, op);
         if(! rc) {
+            preload(rc, tmp_data.mv_data, tmp_data.mv_size);
             *key = tmp_key;
             *data = tmp_data;
         }
