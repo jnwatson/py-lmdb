@@ -1126,11 +1126,6 @@ env_clear(EnvObject *self)
 {
     MDEBUG("killing env..")
 
-    if(self->weaklist != NULL) {
-        MDEBUG("Clearing weaklist..")
-        PyObject_ClearWeakRefs((PyObject *) self);
-    }
-
     INVALIDATE(self)
     self->valid = 0;
     Py_CLEAR(self->main_db);
@@ -1160,6 +1155,11 @@ env_clear(EnvObject *self)
 static void
 env_dealloc(EnvObject *self)
 {
+    if(self->weaklist != NULL) {
+        MDEBUG("Clearing weaklist..")
+        PyObject_ClearWeakRefs((PyObject *) self);
+    }
+
     env_clear(self);
     PyObject_Del(self);
 }
