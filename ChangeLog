@@ -1,4 +1,12 @@
 
+2015-06-07 v0.86
+
+* LMDB_FORCE_SYSTEM builds were broken by the GIL/page fault change. This
+  release fixes the problem.
+
+* Various cosmetic fixes to documentation.
+
+
 2015-06-06 v0.85
 
 * New exception class: lmdb.BadDbiError.
