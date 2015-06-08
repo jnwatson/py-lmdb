@@ -17,7 +17,7 @@ provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
 
-* Ordered map interface (keys are always sorted)
+* Ordered map interface (keys are always lexicographically sorted).
 * Reader/writer transactions: readers don't block writers, writers don't block
   readers. Each environment supports one concurrent write transaction.
 * Read transactions are extremely cheap.
@@ -579,7 +579,7 @@ Deviations from LMDB API
 
     In all cases where `mdb_set_compare()` might be useful, use of a special
     key encoding that encodes your custom order is usually desirable. See
-    `issue #79 <https://github.com/dw/py-lmdb/issues/79>` for example
+    `issue #79 <https://github.com/dw/py-lmdb/issues/79>`_ for example
     approaches.
 
     The answer is not so clear for `mdb_set_dupsort()`, since a custom encoding
