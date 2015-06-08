@@ -66,6 +66,8 @@ if os.getenv('LMDB_LIBDIR'):
 else:
     extra_library_dirs = []
 
+extra_include_dirs += ['lib/py-lmdb']
+
 if os.getenv('LMDB_FORCE_SYSTEM') is not None:
     print('py-lmdb: Using system version of liblmdb.')
     extra_sources = []
