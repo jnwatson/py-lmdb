@@ -59,7 +59,6 @@ class IndexResource(twisted.web.resource.Resource):
         self.data = read_resource('static/index.html')
 
     def render(self, request):
-        return read_resource('static/index.html')
         return self.data
 
 
