@@ -28,9 +28,9 @@ This example never calls LMDB directly from the main loop, even though in some
 restricted circumstances that may be completely safe. Such a situation might
 look like:
 
-    * The database is guaranteed to always be in RAM.
-    * Database writes are never contended.
-    * Disk IO is very fast, or `sync=False` is used.
+* The database is guaranteed to always be in RAM.
+* Database writes are never contended.
+* Disk IO is very fast, or `sync=False` is used.
 
 In almost every case, it is likely better to design an application that handles
 the possibility that calls into LMDB will trigger slow IO, if not now then at
