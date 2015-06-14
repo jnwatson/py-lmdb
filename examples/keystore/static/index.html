@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+
+<script>
+    function log(s) {
+        var msg = document.createElement('div');
+        msg.textContent = s;
+
+        var logElem = document.getElementById('log');
+        logElem.insertBefore(msg, logElem.firstChild);
+    }
+
+    function onRequestDone(request, path) {
+        var bits = [path, ': HTTP '];
+        bits.push(request.status);
+        bits.push(': ');
+        bits.push(request.responseText);
+        log(bits.join(''));
+    }
+
+    function startRequest(method, path, body) {
+        var req = new XMLHttpRequest;
+        req.onreadystatechange = function() {
+            if(req.readyState === XMLHttpRequest.DONE) {
+                onRequestDone(req, path);
+            }
+        }
+        req.open(method, path);
+        if(body !== undefined) {
+            req.send(body);
+        } else {
+            req.send();
+        }
+    }
+
+    window.onload = function() {
+        document.getElementById('startRequest').onclick = function() {
+            var method = document.getElementById('method').value;
+            var path = '/db' + document.getElementById('path').value;
+            var body = document.getElementById('body').value;
+            startRequest(method, path, method=='PUT'?body:undefined);
+        }
+    }
+</script>
+
+<style>
+    #log {
+        margin-top: 1em;
+        background: #efefef;
+    }
+
+    #log div {
+        font-family: monospace;
+        white-space: pre-wrap;
+        border-bottom: 1px dotted silver;
+        padding-bottom: 0.2em;
+    }
+</style>
+
+
+<select id="method">
+    <option value="GET">GET</option>
+    <option value="PUT">PUT</option>
+    <option value="DELETE">DELETE</option>
+</select><br>
+Request path: <input type="text" id="path" value="/foo/"><br>
+Request body: <input type="text" id="body"><br>
+<button type="button" id="startRequest">Start Request</button>
+
+<div id="log">
+</div>
