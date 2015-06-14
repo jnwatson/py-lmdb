@@ -53,10 +53,10 @@ class NamespaceResource(keystore.web.DeferrableResource):
         return KeyResource(self.store)
 
 
-class IndexResource(twisted.web.resource.Resource):
-    def __init__(self):
+class StaticResource(twisted.web.resource.Resource):
+    def __init__(self, pkg_path):
         twisted.web.resource.Resource.__init__(self)
-        self.data = read_resource('static/index.html')
+        self.data = read_resource(pkg_path)
 
     def render(self, request):
         return self.data
@@ -64,6 +64,6 @@ class IndexResource(twisted.web.resource.Resource):
 
 def create_site(store):
     root = twisted.web.resource.Resource()
-    root.putChild('', IndexResource())
+    root.putChild('', StaticResource('static/index.html'))
     root.putChild('db', NamespaceResource(store))
     return twisted.web.server.Site(root)
