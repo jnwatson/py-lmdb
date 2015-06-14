@@ -86,7 +86,7 @@ class LmdbKeyStore(object):
         get = lambda sync: sync.get(key)
         return self._call_in_thread(lambda: _reader_task(self.env, get))
 
-    def _get_forward(self, key, count, getter):
+    def _get_forward(self, sync, key, count, getter):
         positioned = sync.seek(key)
         out = []
         for x in xrange(count):
@@ -96,7 +96,7 @@ class LmdbKeyStore(object):
             positioned = sync.next()
         return out
 
-    def _get_reverse(self, key, count, getter):
+    def _get_reverse(self, sync, key, count, getter):
         out = []
         positioned = sync.seek(key)
         if not positioned:
@@ -112,19 +112,23 @@ class LmdbKeyStore(object):
     _item_getter = operator.attrgetter('key', 'value')
 
     def getKeys(self, key, count):
-        get = lambda sync: self._get_forward(key, count, self._key_getter)
+        get = lambda sync: self._get_forward(sync, key, count,
+                                             self._key_getter)
         return self._call_in_thread(lambda: _reader_task(self.env, get))
 
     def getKeysReverse(self, key, count):
-        get = lambda sync: self._get_reverse(key, count, self._key_getter)
+        get = lambda sync: self._get_reverse(sync, key, count,
+                                             self._key_getter)
         return self._call_in_thread(lambda: _reader_task(self.env, get))
 
     def getItems(self, key, count):
-        get = lambda sync: self._get_forward(key, count, self._item_getter)
+        get = lambda sync: self._get_forward(sync, key, count,
+                                             self._item_getter)
         return self._call_in_thread(lambda: _reader_task(self.env, get))
 
     def getItemsReverse(self, key, count):
-        get = lambda sync: self._get_reverse(key, count, self._item_getter)
+        get = lambda sync: self._get_reverse(sync, key, count,
+                                             self._item_getter)
         return self._call_in_thread(lambda: _reader_task(self.env, get))
 
     def put(self, key, value):

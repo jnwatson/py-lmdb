@@ -5,7 +5,6 @@ import twisted.python.log
 import twisted.web.http
 import twisted.web.resource
 import twisted.web.server
-import zope.interface
 
 
 class Response(object):

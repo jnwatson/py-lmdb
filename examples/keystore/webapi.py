@@ -16,9 +16,6 @@ class KeyResource(keystore.web.DeferrableResource):
         keystore.web.DeferrableResource.__init__(self)
         self.store = store
 
-    def render_HEAD(self, request):
-        d = self.render_GET()
-
     def _get_done(self, value):
         if value is None:
             return keystore.web.Response(status=404)

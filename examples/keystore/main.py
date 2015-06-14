@@ -3,7 +3,6 @@ from __future__ import absolute_import
 import webbrowser
 
 import twisted.internet.reactor
-import twisted.internet.defer
 
 import lmdb
 import keystore.lmdb
