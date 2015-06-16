@@ -257,16 +257,16 @@ buffer's contents, copy it using :py:func:`bytes`:
     .. code-block:: python
 
         with env.begin(write=True, buffers=True) as txn:
-            buf = env.get('foo')           # only valid until the next write.
+            buf = txn.get('foo')           # only valid until the next write.
             buf_copy = bytes(buf)          # valid forever
-            env.delete('foo')              # this is a write!
-            env.put('foo2', 'bar2')        # this is also a write!
+            txn.delete('foo')              # this is a write!
+            txn.put('foo2', 'bar2')        # this is also a write!
 
             print('foo: %r' % (buf,))      # ERROR! invalidated by write
-            print('foo: %r' % (buf_copy,)  # OK
+            print('foo: %r' % (buf_copy,)) # OK
 
         print('foo: %r' % (buf,))          # ERROR! also invalidated by txn end
-        print('foo: %r' % (buf_copy,)      # still OK
+        print('foo: %r' % (buf_copy,))     # still OK
 
 
 ``writemap`` mode
