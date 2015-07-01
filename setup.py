@@ -112,13 +112,13 @@ if sys.platform.startswith('win'):
 # errors). This happens even when `use_cpython` since user might want to
 # LMDB_FORCE_CFFI=1 during testing.
 with open('lmdb/_config.py', 'w') as fp:
-    fp.write('CONFIG = %r\n\n' % ({
-        'extra_compile_args': extra_compile_args,
-        'extra_sources': extra_sources,
-        'extra_library_dirs': extra_library_dirs,
-        'extra_include_dirs': extra_include_dirs,
-        'libraries': libraries
-    },))
+    fp.write('CONFIG = dict(%r)\n\n' % ((
+        ('extra_compile_args', extra_compile_args),
+        ('extra_sources', extra_sources),
+        ('extra_library_dirs', extra_library_dirs),
+        ('extra_include_dirs', extra_include_dirs),
+        ('libraries', libraries),
+    ),))
 
 
 if use_cpython:
