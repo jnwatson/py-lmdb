@@ -1,4 +1,18 @@
 
+2015-08-11 v0.87
+
+* Environment.set_mapsize() was added to allow runtime adjustment of the
+  environment map size.
+
+* Remove non-determinism from setup.py, to support Debian's reproducible
+  builds project. Patch by Chris Lamb.
+
+* Documentation correctness and typo fixes. Patch by Gustav Larsson.
+
+* examples/keystore: beginnings of example that integrates py-lmdb with an
+  asynchronous IO loop.
+
+
 2015-06-07 v0.86
 
 * LMDB_FORCE_SYSTEM builds were broken by the GIL/page fault change. This
