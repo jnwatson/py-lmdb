@@ -655,9 +655,7 @@ class Environment(object):
         self._env = envpp[0]
         self._deps = set()
 
-        rc = _lib.mdb_env_set_mapsize(self._env, map_size)
-        if rc:
-            raise _error("mdb_env_set_mapsize", rc)
+        self.set_mapsize(map_size)
 
         rc = _lib.mdb_env_set_maxreaders(self._env, max_readers)
         if rc:
@@ -715,6 +713,20 @@ class Environment(object):
     _deps = None
     _spare_txns = None
     _dbs = None
+
+    def set_mapsize(self, map_size):
+        """Change the maximum size of the map file. This function will fail if
+        any transactions are active in the current process.
+
+        `map_size`:
+            The new size in bytes.
+
+        Equivalent to `mdb_env_set_mapsize()
+        <http://symas.com/mdb/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
+        """
+        rc = _lib.mdb_env_set_mapsize(self._env, map_size)
+        if rc:
+            raise _error("mdb_env_set_mapsize", rc)
 
     def close(self):
         """Close the environment, invalidating any open iterators, cursors, and

@@ -1709,6 +1709,34 @@ env_reader_check(EnvObject *self)
 }
 
 /**
+ * Environment.set_mapsize(size) -> None
+ */
+static PyObject *
+env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject **kwargs)
+{
+    struct env_set_mapsize {
+        size_t map_size;
+    } arg = {0};
+
+    static const struct argspec argspec[] = {
+        {"map_size", ARG_SIZE, OFFSET(env_set_mapsize, map_size)}
+    };
+    int rc;
+
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache,
+                  args, kwargs, &arg)) {
+        return NULL;
+    }
+
+    rc = mdb_env_set_mapsize(self->env, arg.map_size);
+    if(rc) {
+        return err_set("mdb_env_set_mapsize", rc);
+    }
+    Py_RETURN_NONE;
+}
+
+/**
  * Environment.sync()
  */
 static PyObject *
@@ -1769,6 +1797,8 @@ static struct PyMethodDef env_methods[] = {
     {"stat", (PyCFunction)env_stat, METH_NOARGS},
     {"readers", (PyCFunction)env_readers, METH_NOARGS},
     {"reader_check", (PyCFunction)env_reader_check, METH_NOARGS},
+    {"set_mapsize", (PyCFunction)env_reader_set_mapsize,
+     METH_VARARGS|METH_KEYWORDS},
     {"sync", (PyCFunction)env_sync, METH_VARARGS},
     {NULL, NULL}
 };

@@ -214,6 +214,29 @@ class OpenTest(unittest.TestCase):
                 lambda: env.open_db(B('toomany')))
 
 
+class SetMapSizeTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_invalid(self):
+        _, env = testlib.temp_env()
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.set_mapsize(999999))
+
+    def test_negative(self):
+        _, env = testlib.temp_env()
+        self.assertRaises(OverflowError,
+            lambda: env.set_mapsize(-2015))
+
+    def test_applied(self):
+        _, env = testlib.temp_env(map_size=32768)
+        assert env.info()['map_size'] == 32768
+
+        env.set_mapsize(65536)
+        assert env.info()['map_size'] == 65536
+
+
 class CloseTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
