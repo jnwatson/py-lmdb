@@ -446,12 +446,17 @@ static txnid_t mdb_debug_start;
 	/**	The version number for a database's lockfile format. */
 #define MDB_LOCK_VERSION	 1
 
-	/**	@brief The max size of a key we can write, or 0 for dynamic max.
+	/**	@brief The max size of a key we can write, or 0 for computed max.
 	 *
-	 *	Define this as 0 to compute the max from the page size.  511
-	 *	is default for backwards compat: liblmdb <= 0.9.10 can break
-	 *	when modifying a DB with keys/dupsort data bigger than its max.
-	 *	#MDB_DEVEL sets the default to 0.
+	 *	This macro should normally be left alone or set to 0.
+	 *	Note that a database with big keys or dupsort data cannot be
+	 *	reliably modified by a liblmdb which uses a smaller max.
+	 *	The default is 511 for backwards compat, or 0 when #MDB_DEVEL.
+	 *
+	 *	Other values are allowed, for backwards compat.  However:
+	 *	A value bigger than the computed max can break if you do not
+	 *	know what you are doing, and liblmdb <= 0.9.10 can break when
+	 *	modifying a DB with keys/dupsort data bigger than its max.
 	 *
 	 *	Data items in an #MDB_DUPSORT database are also limited to
 	 *	this size, since they're actually keys of a sub-DB.  Keys and
@@ -1245,6 +1250,13 @@ static void mdb_default_cmp(MDB_txn *txn, MDB_dbi dbi);
 static MDB_cmp_func	mdb_cmp_memn, mdb_cmp_memnr, mdb_cmp_int, mdb_cmp_cint, mdb_cmp_long;
 /** @endcond */
 
+/** Compare two items pointing at size_t's of unknown alignment. */
+#ifdef MISALIGNED_OK
+# define mdb_cmp_clong mdb_cmp_long
+#else
+# define mdb_cmp_clong mdb_cmp_cint
+#endif
+
 #ifdef _WIN32
 static SECURITY_DESCRIPTOR mdb_null_sd;
 static SECURITY_ATTRIBUTES mdb_all_sa;
@@ -1558,7 +1570,12 @@ mdb_cmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 int
 mdb_dcmp(MDB_txn *txn, MDB_dbi dbi, const MDB_val *a, const MDB_val *b)
 {
-	return txn->mt_dbxs[dbi].md_dcmp(a, b);
+	MDB_cmp_func *dcmp = txn->mt_dbxs[dbi].md_dcmp;
+#if UINT_MAX < SIZE_MAX
+	if (dcmp == mdb_cmp_int && a->mv_size == sizeof(size_t))
+		dcmp = mdb_cmp_clong;
+#endif
+	return dcmp(a, b);
 }
 
 /** Allocate memory for a page.
@@ -2486,15 +2503,11 @@ mdb_txn_renew0(MDB_txn *txn)
 	MDB_env *env = txn->mt_env;
 	MDB_txninfo *ti = env->me_txns;
 	MDB_meta *meta;
-	unsigned int i, nr;
+	unsigned int i, nr, flags = txn->mt_flags;
 	uint16_t x;
 	int rc, new_notls = 0;
 
-	if (txn->mt_flags & MDB_TXN_RDONLY) {
-		txn->mt_flags = MDB_TXN_RDONLY;
-		/* Setup db info */
-		txn->mt_numdbs = env->me_numdbs;
-		txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
+	if ((flags &= MDB_TXN_RDONLY) != 0) {
 		if (!ti) {
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
@@ -2547,6 +2560,7 @@ mdb_txn_renew0(MDB_txn *txn)
 			txn->mt_u.reader = r;
 			meta = env->me_metas[txn->mt_txnid & 1];
 		}
+		txn->mt_dbxs = env->me_dbxs;	/* mostly static anyway */
 	} else {
 		if (ti) {
 			LOCK_MUTEX_W(env);
@@ -2557,14 +2571,11 @@ mdb_txn_renew0(MDB_txn *txn)
 			meta = env->me_metas[ mdb_env_pick_meta(env) ];
 			txn->mt_txnid = meta->mm_txnid;
 		}
-		/* Setup db info */
-		txn->mt_numdbs = env->me_numdbs;
 		txn->mt_txnid++;
 #if MDB_DEBUG
 		if (txn->mt_txnid == mdb_debug_start)
 			mdb_debug = 1;
 #endif
-		txn->mt_flags = 0;
 		txn->mt_child = NULL;
 		txn->mt_loose_pgs = NULL;
 		txn->mt_loose_count = 0;
@@ -2584,6 +2595,10 @@ mdb_txn_renew0(MDB_txn *txn)
 	/* Moved to here to avoid a data race in read TXNs */
 	txn->mt_next_pgno = meta->mm_last_pg+1;
 
+	txn->mt_flags = flags;
+
+	/* Setup db info */
+	txn->mt_numdbs = env->me_numdbs;
 	for (i=2; i<txn->mt_numdbs; i++) {
 		x = env->me_dbflags[i];
 		txn->mt_dbs[i].md_flags = x & PERSISTENT_FLAGS;
@@ -2807,8 +2822,8 @@ mdb_txn_reset0(MDB_txn *txn, const char *act)
 		}
 
 		if (!txn->mt_parent) {
-			if (mdb_midl_shrink(&txn->mt_free_pgs))
-				env->me_free_pgs = txn->mt_free_pgs;
+			mdb_midl_shrink(&txn->mt_free_pgs);
+			env->me_free_pgs = txn->mt_free_pgs;
 			/* me_pgstate: */
 			env->me_pghead = NULL;
 			env->me_pglast = 0;
@@ -3380,7 +3395,8 @@ mdb_txn_commit(MDB_txn *txn)
 					goto fail;
 				}
 				data.mv_data = &txn->mt_dbs[i];
-				rc = mdb_cursor_put(&mc, &txn->mt_dbxs[i].md_name, &data, 0);
+				rc = mdb_cursor_put(&mc, &txn->mt_dbxs[i].md_name, &data,
+					F_SUBDATA);
 				if (rc)
 					goto fail;
 			}
@@ -3393,8 +3409,8 @@ mdb_txn_commit(MDB_txn *txn)
 
 	mdb_midl_free(env->me_pghead);
 	env->me_pghead = NULL;
-	if (mdb_midl_shrink(&txn->mt_free_pgs))
-		env->me_free_pgs = txn->mt_free_pgs;
+	mdb_midl_shrink(&txn->mt_free_pgs);
+	env->me_free_pgs = txn->mt_free_pgs;
 
 #if (MDB_DEBUG) > 2
 	mdb_audit(txn);
@@ -3632,7 +3648,6 @@ mdb_env_write_meta(MDB_txn *txn)
 	/* Write to the SYNC fd */
 	mfd = env->me_flags & (MDB_NOSYNC|MDB_NOMETASYNC) ?
 		env->me_fd : env->me_mfd;
-retry_write:
 #ifdef _WIN32
 	{
 		memset(&ov, 0, sizeof(ov));
@@ -3641,12 +3656,15 @@ retry_write:
 			rc = -1;
 	}
 #else
+retry_write:
 	rc = pwrite(mfd, ptr, len, off);
 #endif
 	if (rc != len) {
 		rc = rc < 0 ? ErrCode() : EIO;
+#ifndef _WIN32
 		if (rc == EINTR)
 			goto retry_write;
+#endif
 		DPUTS("write failed, disk error?");
 		/* On a failure, the pagecache still contains the new data.
 		 * Write some old data back, to prevent it from being used.
@@ -4772,7 +4790,11 @@ mdb_cmp_long(const MDB_val *a, const MDB_val *b)
 		*(size_t *)a->mv_data > *(size_t *)b->mv_data;
 }
 
-/** Compare two items pointing at aligned unsigned int's */
+/** Compare two items pointing at aligned unsigned int's.
+ *
+ *	This is also set as #MDB_INTEGERDUP|#MDB_DUPFIXED's #MDB_dbx.%md_dcmp,
+ *	but #mdb_cmp_clong() is called instead if the data type is size_t.
+ */
 static int
 mdb_cmp_int(const MDB_val *a, const MDB_val *b)
 {
@@ -4809,13 +4831,6 @@ mdb_cmp_cint(const MDB_val *a, const MDB_val *b)
 	return x;
 #endif
 }
-
-/** Compare two items pointing at size_t's of unknown alignment. */
-#ifdef MISALIGNED_OK
-# define mdb_cmp_clong mdb_cmp_long
-#else
-# define mdb_cmp_clong mdb_cmp_cint
-#endif
 
 /** Compare two items lexically */
 static int
@@ -5202,6 +5217,8 @@ mdb_page_search(MDB_cursor *mc, MDB_val *key, int flags)
 						&mc->mc_dbx->md_name, &exact);
 					if (!exact)
 						return MDB_NOTFOUND;
+					if ((leaf->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
+						return MDB_INCOMPATIBLE; /* not a named DB */
 					rc = mdb_node_read(mc->mc_txn, leaf, &data);
 					if (rc)
 						return rc;
@@ -5713,8 +5730,10 @@ set2:
 
 	if (leaf == NULL) {
 		DPUTS("===> inexact leaf not found, goto sibling");
-		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS)
+		if ((rc = mdb_cursor_sibling(mc, 1)) != MDB_SUCCESS) {
+			mc->mc_flags |= C_EOF;
 			return rc;		/* no entries matched */
+		}
 		mp = mc->mc_pg[mc->mc_top];
 		mdb_cassert(mc, IS_LEAF(mp));
 		leaf = NODEPTR(mp, 0);
@@ -6392,6 +6411,9 @@ prep_subDB:
 			goto new_sub;
 		}
 current:
+		/* LMDB passes F_SUBDATA in 'flags' to write a DB record */
+		if ((leaf->mn_flags ^ flags) & F_SUBDATA)
+			return MDB_INCOMPATIBLE;
 		/* overflow page overwrites need special handling */
 		if (F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 			MDB_page *omp;
@@ -6661,6 +6683,11 @@ mdb_cursor_del(MDB_cursor *mc, unsigned int flags)
 			if (rc)
 				goto fail;
 		}
+	}
+	/* LMDB passes F_SUBDATA in 'flags' to delete a DB record */
+	else if ((leaf->mn_flags ^ flags) & F_SUBDATA) {
+		rc = MDB_INCOMPATIBLE;
+		goto fail;
 	}
 
 	/* add overflow pages to free list */
@@ -9157,7 +9184,7 @@ int mdb_dbi_open(MDB_txn *txn, const char *name, unsigned int flags, MDB_dbi *db
 	if (rc == MDB_SUCCESS) {
 		/* make sure this is actually a DB */
 		MDB_node *node = NODEPTR(mc.mc_pg[mc.mc_top], mc.mc_ki[mc.mc_top]);
-		if (!(node->mn_flags & F_SUBDATA))
+		if ((node->mn_flags & (F_DUPDATA|F_SUBDATA)) != F_SUBDATA)
 			return MDB_INCOMPATIBLE;
 	} else if (rc == MDB_NOTFOUND && (flags & MDB_CREATE)) {
 		/* Create if requested */
@@ -9350,7 +9377,7 @@ int mdb_drop(MDB_txn *txn, MDB_dbi dbi, int del)
 
 	/* Can't delete the main DB */
 	if (del && dbi > MAIN_DBI) {
-		rc = mdb_del0(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL, 0);
+		rc = mdb_del0(txn, MAIN_DBI, &mc->mc_dbx->md_name, NULL, F_SUBDATA);
 		if (!rc) {
 			txn->mt_dbflags[dbi] = DB_STALE;
 			mdb_dbi_close(txn->mt_env, dbi);
