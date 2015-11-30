@@ -1712,7 +1712,7 @@ env_reader_check(EnvObject *self)
  * Environment.set_mapsize(size) -> None
  */
 static PyObject *
-env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject **kwargs)
+env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
 {
     struct env_set_mapsize {
         size_t map_size;
