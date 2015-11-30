@@ -3,6 +3,8 @@
 
 * LMDB 0.9.17 is bundled.
 
+* Transaction.id() is exposed.
+
 
 2015-08-11 v0.87
 
