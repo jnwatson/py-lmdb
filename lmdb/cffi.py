@@ -1225,8 +1225,6 @@ class Transaction(object):
         This returns the identifier associated with this transaction. For a
         read-only transaction, this corresponds to the snapshot being read;
         concurrent readers will frequently have the same transaction ID.
-
-	    A transaction ID, valid if input is an active transaction.
         """
         return _lib.mdb_txn_id(self._txn)
 
