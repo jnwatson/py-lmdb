@@ -168,6 +168,34 @@ class ContextManagerTest(unittest.TestCase):
             assert txn.get(B('foo')) is None
 
 
+class IdTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_readonly_new(self):
+        _, env = testlib.temp_env()
+        with env.begin() as txn:
+            assert txn.id() == 0
+
+    def test_write_new(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            assert txn.id() == 1
+
+    def test_readonly_after_write(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(B('a'), B('a'))
+        with env.begin() as txn:
+            assert txn.id() == 1
+
+    def test_invalid_txn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        txn.abort()
+        self.assertRaises(Exception, lambda: txn.id())
+
+
 class StatTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()

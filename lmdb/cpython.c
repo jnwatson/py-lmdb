@@ -3407,6 +3407,21 @@ static PyObject *trans_exit(TransObject *self, PyObject *args)
 }
 
 /**
+ * Transaction.id() -> int
+ */
+static PyObject *trans_id(TransObject *self)
+{
+    size_t id;
+
+    if(! self->valid) {
+        return err_invalid();
+    }
+
+    id = mdb_txn_id(self->txn);
+    return PyLong_FromSize_t(id);
+}
+
+/**
  * Transaction.stat() -> dict
  */
 static PyObject *
@@ -3449,6 +3464,7 @@ static struct PyMethodDef trans_methods[] = {
     {"put", (PyCFunction)trans_put, METH_VARARGS|METH_KEYWORDS},
     {"replace", (PyCFunction)trans_replace, METH_VARARGS|METH_KEYWORDS},
     {"pop", (PyCFunction)trans_pop, METH_VARARGS|METH_KEYWORDS},
+    {"id", (PyCFunction)trans_id, METH_NOARGS},
     {"stat", (PyCFunction)trans_stat, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
