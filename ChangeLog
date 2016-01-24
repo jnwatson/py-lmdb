@@ -1,9 +1,11 @@
 
-2015-12-11 v0.88
+2016-01-24 v0.88
 
 * LMDB 0.9.17 is bundled.
 
 * Transaction.id() is exposed.
+
+* Binary wheels are built for Python 3.5 Windows 32/64-bit.
 
 
 2015-08-11 v0.87
