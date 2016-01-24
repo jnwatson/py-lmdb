@@ -35,7 +35,7 @@ native python3.3
 cffi pypy
 cffi python2.6
 cffi python2.7
-cffi python3.1
+# cffi python3.1
 cffi python3.2
 cffi python3.3
 
