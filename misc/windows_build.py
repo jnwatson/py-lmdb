@@ -39,6 +39,8 @@ INTERPS = (
     ('Python33-64', False),
     ('Python34', False),
     ('Python34-64', False),
+    ('Python35', False),
+    ('Python35-64', False),
 )
 
 
