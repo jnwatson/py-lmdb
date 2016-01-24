@@ -50,15 +50,43 @@ except ImportError:
     _config = None
 
 
-__all__ = ['Environment', 'Cursor', 'Transaction', 'open',
-           'enable_drop_gil', 'version']
-__all__ += ['Error', 'KeyExistsError', 'NotFoundError', 'PageNotFoundError',
-            'CorruptedError', 'PanicError', 'VersionMismatchError',
-            'InvalidError', 'MapFullError', 'DbsFullError', 'ReadersFullError',
-            'TlsFullError', 'TxnFullError', 'CursorFullError', 'PageFullError',
-            'MapResizedError', 'IncompatibleError', 'BadRslotError',
-            'BadTxnError', 'BadValsizeError', 'ReadonlyError',
-            'InvalidParameterError', 'LockError', 'MemoryError', 'DiskError']
+__all__ = [
+    'Cursor',
+    'Environment',
+    'Transaction',
+    'enable_drop_gil',
+    'open',
+    'version',
+]
+
+__all__ += [
+    'BadDbiError',
+    'BadRslotError',
+    'BadTxnError',
+    'BadValsizeError',
+    'CorruptedError',
+    'CursorFullError',
+    'DbsFullError',
+    'DiskError',
+    'Error',
+    'IncompatibleError',
+    'InvalidError',
+    'InvalidParameterError',
+    'KeyExistsError',
+    'LockError',
+    'MapFullError',
+    'MapResizedError',
+    'MemoryError',
+    'NotFoundError',
+    'PageFullError',
+    'PageNotFoundError',
+    'PanicError',
+    'ReadersFullError',
+    'ReadonlyError',
+    'TlsFullError',
+    'TxnFullError',
+    'VersionMismatchError',
+]
 
 
 # Handle moronic Python 3 mess.
