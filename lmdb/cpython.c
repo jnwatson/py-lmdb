@@ -112,6 +112,7 @@ typedef struct TransObject TransObject;
 
 #   define MAKE_ID(id) PyCapsule_New((void *) (1 + (id)), NULL, NULL)
 #   define READ_ID(obj) (((int) (long) PyCapsule_GetPointer(obj, NULL)) - 1)
+#   define NEXT_METHOD_NAME "__next__"
 
 #else
 
@@ -128,6 +129,7 @@ typedef struct TransObject TransObject;
 #   define PyBytes_FromStringAndSize PyString_FromStringAndSize
 #   define _PyBytes_Resize _PyString_Resize
 #   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
+#   define NEXT_METHOD_NAME "next"
 
 #   ifndef PyBUF_READ
 #       define PyBUF_READ 0
@@ -2871,7 +2873,7 @@ iter_next(IterObject *self)
 }
 
 static struct PyMethodDef iter_methods[] = {
-    {"next", (PyCFunction)iter_next, METH_NOARGS},
+    {NEXT_METHOD_NAME, (PyCFunction)iter_next, METH_NOARGS},
     {NULL, NULL}
 };
 
