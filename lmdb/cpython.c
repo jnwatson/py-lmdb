@@ -2561,6 +2561,7 @@ new_iterator(CursorObject *cursor, IterValFunc val_func, MDB_cursor_op op)
         iter->started = 0;
         iter->op = op;
     }
+    DEBUG("new_iterator: %#p", (void *)iter)
     return (PyObject *) iter;
 }
 
@@ -2870,7 +2871,7 @@ iter_next(IterObject *self)
 }
 
 static struct PyMethodDef iter_methods[] = {
-    {"next", (PyCFunction)cursor_next, METH_NOARGS},
+    {"next", (PyCFunction)iter_next, METH_NOARGS},
     {NULL, NULL}
 };
 
