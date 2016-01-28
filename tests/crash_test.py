@@ -216,5 +216,22 @@ class TxnFullTest(unittest.TestCase):
         with env.begin(write=True) as txn:
             txn.delete(B('1'))
 
+
+class EmptyIterTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_python3_iternext_segfault(self):
+        # https://github.com/dw/py-lmdb/issues/105
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        cur = txn.cursor()
+        ite = cur.iternext()
+        nex = getattr(ite, 'next',
+            getattr(ite, '__next__', None))
+        assert nex is not None
+        self.assertRaises(StopIteration, nex)
+
+
 if __name__ == '__main__':
     unittest.main()
