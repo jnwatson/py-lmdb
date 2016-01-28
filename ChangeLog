@@ -1,4 +1,11 @@
 
+2016-02-24 v0.89
+
+* CPython Iterator.next() was incorrectly defined as pointing at the
+  implementation for Cursor.next(), triggering a crash if the method was ever
+  invoked manually.
+
+
 2016-01-24 v0.88
 
 * LMDB 0.9.17 is bundled.
