@@ -73,6 +73,13 @@ class OpenTest(unittest.TestCase):
         self.assertRaises(OverflowError,
             lambda: testlib.temp_env(map_size=-123))
 
+    def test_tiny_size(self):
+        _, env = testlib.temp_env(map_size=10)
+        def txn():
+            with env.begin(write=True) as txn:
+                txn.put('a', 'a')
+        self.assertRaises(lmdb.MapFullError, txn)
+
     def test_subdir_false_junk(self):
         path = testlib.temp_file()
         fp = open(path, 'wb')
