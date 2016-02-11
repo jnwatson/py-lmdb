@@ -30,8 +30,8 @@ import unittest
 import testlib
 from testlib import B
 from testlib import BT
-from testlib import KEYS, ITEMS
-from testlib import putData
+from testlib import KEYS, ITEMS, KEYS2, ITEMS2
+from testlib import putData, putBigData
 
 
 class IterationTestBase(unittest.TestCase):
@@ -42,6 +42,23 @@ class IterationTestBase(unittest.TestCase):
         self.path, self.env = testlib.temp_env()  # creates 10 databases
         self.txn = self.env.begin(write=True)
         putData(self.txn)
+        self.c = self.txn.cursor()
+        self.empty_entry = ('', '')
+
+    def matchList(self, ls_a, ls_b):
+        return all(map(lambda x, y: x == y, ls_a, ls_b))
+
+
+class IterationTestBase2(unittest.TestCase):
+    """ This puts more data than its predecessor"""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def setUp(self):
+        self.path, self.env = testlib.temp_env()  # creates 10 databases
+        self.txn = self.env.begin(write=True)
+        putBigData(self.txn)  # HERE!
         self.c = self.txn.cursor()
         self.empty_entry = ('', '')
 
@@ -177,8 +194,9 @@ class IterationTestWithDupsBase(unittest.TestCase):
         testlib.cleanup()
 
     def setUp(self):
-        self.path, self.env = testlib.temp_env(dupsort=True)
-        self.txn = self.env.begin(write=True)
+        self.path, self.env = testlib.temp_env()
+        db = self.env.open_db(B('db1'), dupsort=True)
+        self.txn = self.env.begin(db, write=True)
         for _ in range(2):
             putData(self.txn)
         self.c = self.txn.cursor()
@@ -187,8 +205,47 @@ class IterationTestWithDupsBase(unittest.TestCase):
     def matchList(self, ls_a, ls_b):
         return all(map(lambda x, y: x == y, ls_a, ls_b))
 
+
 class IterationTestWithDups(IterationTestWithDupsBase):
     pass
+
+
+class SeekIterationTest(IterationTestBase2):
+    def testForwardIterationSeek(self):
+        self.c.first()
+        test_list = []
+        for i in self.c.iternext():
+            test_list.append(i)
+            # skips d and e
+            if self.c.key() == B('baa'):
+                self.c.set_key(B('e'))
+        test_item = [i for i in ITEMS2 if i[0] not in (B('d'), B('e'))]
+        self.assertEqual(test_list, test_item)
+
+    def testPutDuringIteration(self):
+        # ERROR
+        self.c.first()
+        test_list = []
+        for i in self.c.iternext():
+            test_list.append(i)
+            # adds 'i' upon seeing 'e'
+            if self.c.key() == B('e'):
+                self.c.put(B('i'), B(''))
+        test_item = ITEMS2 + [(B('i'), B(''))]
+        self.assertEqual(test_list, test_item)
+
+    def testDeleteDuringIteration(self):
+        self.c.first()
+        test_list = []
+        for i in self.c.iternext():
+            # deletes 'e' upon seeing it
+            if self.c.key() == B('e'):
+            # ERROR! deletes 'f' instead of 'e'
+                self.c.delete()
+            test_list.append(i)
+        test_item = [i for i in ITEMS2 if i[0] != B('e')]
+        self.assertEqual(test_list, test_item) 
+
 
 if __name__ == '__main__':
     unittest.main()
