@@ -172,11 +172,23 @@ class ReverseIterationTest(IterationTestBase):
         self.assertEqual(test_list, [])  # weird behaviour
 
 
+class IterationTestWithDupsBase(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
 
+    def setUp(self):
+        self.path, self.env = testlib.temp_env(dupsort=True)
+        self.txn = self.env.begin(write=True)
+        for _ in range(2):
+            putData(self.txn)
+        self.c = self.txn.cursor()
+        self.empty_entry = ('', '')
 
+    def matchList(self, ls_a, ls_b):
+        return all(map(lambda x, y: x == y, ls_a, ls_b))
 
-
-
+class IterationTestWithDups(IterationTestWithDupsBase):
+    pass
 
 if __name__ == '__main__':
     unittest.main()
