@@ -3414,7 +3414,7 @@ static PyObject *trans_id(TransObject *self)
     }
 
     id = mdb_txn_id(self->txn);
-    return PyLong_FromSize_t(id);
+    return PyLong_FromUnsignedLong(id);
 }
 
 /**
