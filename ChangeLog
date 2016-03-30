@@ -1,4 +1,11 @@
 
+2016-04-12 v0.90
+
+* CFFI open_db() would always attempt to use a write transaction, even if the
+  environment was opened with readonly=True. Now both CPython and CFFI will
+  use a read-only transaction in this case.
+
+
 2016-02-12 v0.89
 
 * LMDB 0.9.18 is bundled.
