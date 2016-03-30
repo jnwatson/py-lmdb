@@ -77,7 +77,7 @@ class OpenTest(unittest.TestCase):
         _, env = testlib.temp_env(map_size=10)
         def txn():
             with env.begin(write=True) as txn:
-                txn.put('a', 'a')
+                txn.put(B('a'), B('a'))
         self.assertRaises(lmdb.MapFullError, txn)
 
     def test_subdir_false_junk(self):
@@ -703,7 +703,7 @@ class OpenDbTest(unittest.TestCase):
 
         env = lmdb.open(path, max_dbs=10, readonly=True)
         self.assertRaises(lmdb.NotFoundError,
-            lambda: env.open_db('node_schedules', create=False))
+            lambda: env.open_db(B('node_schedules'), create=False))
 
     def test_readonly_env_sub_eperm(self):
         # https://github.com/dw/py-lmdb/issues/109
@@ -712,16 +712,16 @@ class OpenDbTest(unittest.TestCase):
 
         env = lmdb.open(path, max_dbs=10, readonly=True)
         self.assertRaises(lmdb.ReadonlyError,
-            lambda: env.open_db('node_schedules', create=True))
+            lambda: env.open_db(B('node_schedules'), create=True))
 
     def test_readonly_env_sub(self):
         # https://github.com/dw/py-lmdb/issues/109
         path, env = testlib.temp_env()
-        assert env.open_db('node_schedules') is not None
+        assert env.open_db(B('node_schedules')) is not None
         env.close()
 
         env = lmdb.open(path, max_dbs=10, readonly=True)
-        db = env.open_db('node_schedules', create=False)
+        db = env.open_db(B('node_schedules'), create=False)
         assert db is not None
 
 
