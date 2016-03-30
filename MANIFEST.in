@@ -1,2 +1,6 @@
 graft .
 graft lib
+include ChangeLog
+include LICENSE
+prune docs/_build
+prune lmdb/__pycache__
