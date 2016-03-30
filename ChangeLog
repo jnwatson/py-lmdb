@@ -3,14 +3,20 @@
 
 * CFFI open_db() would always attempt to use a write transaction, even if the
   environment was opened with readonly=True. Now both CPython and CFFI will
-  use a read-only transaction in this case.
+  use a read-only transaction in this case. Reported by Github user
+  handloomweaver.
 
 * The source distribution previously did not include a LICENSE file, and may
-  have included random cached junk from the source tree during build.
+  have included random cached junk from the source tree during build. Reported
+  by Thomas Petazzoni.
 
 * Transaction.id() was broken on Python 2.5.
 
 * Repair Travis CI build again.
+
+* CFFI Cursor did not correctly return empty strings for key()/value()/item()
+  when iternext()/iterprev() had reached the start/end of the database.
+  Detected by tests contributed by Ong Teck Wu.
 
 
 2016-02-12 v0.89
@@ -19,7 +25,7 @@
 
 * CPython Iterator.next() was incorrectly defined as pointing at the
   implementation for Cursor.next(), triggering a crash if the method was ever
-  invoked manually.
+  invoked manually. Reported by Kimikazu Kato.
 
 
 2016-01-24 v0.88
