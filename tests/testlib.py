@@ -120,7 +120,7 @@ except NameError: # Python<=2.5.
     B = lambda s: s
 
 # BL('s1', 's2') -> ['bytes1', 'bytes2']
-BL = lambda *args: map(B, args)
+BL = lambda *args: list(map(B, args))
 # TS('s1', 's2') -> ('bytes1', 'bytes2')
 BT = lambda *args: tuple(B(s) for s in args)
 # O(int) -> length-1 bytes
