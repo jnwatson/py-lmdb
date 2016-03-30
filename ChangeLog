@@ -5,6 +5,9 @@
   environment was opened with readonly=True. Now both CPython and CFFI will
   use a read-only transaction in this case.
 
+* The source distribution previously did not include a LICENSE file, and may
+  have included random cached junk from the source tree during build.
+
 
 2016-02-12 v0.89
 
