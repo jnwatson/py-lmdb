@@ -134,8 +134,20 @@ ITEMS = [(k, B('')) for k in KEYS]
 REV_ITEMS = ITEMS[::-1]
 VALUES = [B('') for k in KEYS]
 
+KEYS2 = BL('a', 'b', 'baa', 'd', 'e', 'f', 'g', 'h')
+ITEMS2 = [(k, B('')) for k in KEYS2]
+REV_ITEMS2 = ITEMS2[::-1]
+VALUES2 = [B('') for k in KEYS2]
+
 def putData(t, db=None):
     for k, v in ITEMS:
+        if db:
+            t.put(k, v, db=db)
+        else:
+            t.put(k, v)
+
+def putBigData(t, db=None):
+    for k, v in ITEMS2:
         if db:
             t.put(k, v, db=db)
         else:

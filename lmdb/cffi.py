@@ -1606,11 +1606,17 @@ class Cursor(object):
         cur = self._cur
         key = self._key
         val = self._val
+        rc = 0
+
         while self._valid:
             yield get()
             rc = _lib.mdb_cursor_get(cur, key, val, op)
             self._valid = not rc
-            if rc and rc != _lib.MDB_NOTFOUND:
+
+        if rc:
+            self._key.mv_size = 0
+            self._val.mv_size = 0
+            if rc != _lib.MDB_NOTFOUND:
                 raise _error("mdb_cursor_get", rc)
 
     def iternext(self, keys=True, values=True):
