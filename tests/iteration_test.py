@@ -109,10 +109,12 @@ class IterationTest(IterationTestBase):
     def testFromNonExistentKeyPastEnd(self):
         self.c.last()
         self.assertEqual(self.c.key(), KEYS[-1])
+        # next() fails, leaving iterator in an unpositioned state.
         self.c.next()
         self.assertEqual(self.c.item(), self.empty_entry)
-        test_list = [i for i in self.c.iternext()]
-        self.assertEqual(test_list, [])  # weird behaviour
+        # iternext() from an unpositioned state proceeds from start of DB.
+        test_list = list(self.c.iternext())
+        self.assertEqual(test_list, ITEMS)
 
 
 class ReverseIterationTest(IterationTestBase):
@@ -166,11 +168,12 @@ class ReverseIterationTest(IterationTestBase):
     def testFromNonExistentKeyPastEndRev(self):
         self.c.first()
         self.assertEqual(self.c.key(), KEYS[0])
+        # prev() fails, leaving iterator in an unpositioned state.
         self.c.prev()
         self.assertEqual(self.c.item(), self.empty_entry)
-        test_list = [i for i in self.c.iterprev()]
-        self.assertEqual(test_list, [])  # weird behaviour
-
+        # iterprev() from an unpositioned state proceeds from end of DB.
+        test_list = list(self.c.iterprev())
+        self.assertEqual(test_list, ITEMS[::-1])
 
 class IterationTestWithDupsBase(unittest.TestCase):
     def tearDown(self):
@@ -189,6 +192,47 @@ class IterationTestWithDupsBase(unittest.TestCase):
 
 class IterationTestWithDups(IterationTestWithDupsBase):
     pass
+
+
+class SeekIterationTest(IterationTestBase2):
+    def testForwardIterationSeek(self):
+        self.c.first()
+        test_list = []
+        for i in self.c.iternext():
+            test_list.append(i)
+            # skips d and e
+            if self.c.key() == B('baa'):
+                self.c.set_key(B('e'))
+        test_item = [i for i in ITEMS2 if i[0] not in (B('d'), B('e'))]
+        self.assertEqual(test_list, test_item)
+
+    def testPutDuringIteration(self):
+        self.c.first()
+        test_list = []
+        c = self.txn.cursor()
+        for i in c.iternext():
+            test_list.append(i)
+            # adds 'i' upon seeing 'e'
+            if c.key() == B('e'):
+                self.c.put(B('i'), B(''))
+        test_item = ITEMS2 + [(B('i'), B(''))]
+        self.assertEqual(test_list, test_item)
+
+    def testDeleteDuringIteration(self):
+        self.c.first()
+        test_list = []
+        for i in self.c.iternext():
+            # deletes 'e' upon seeing it
+            if self.c.key() == B('e'):
+                # Causes 'e' to be deleted, and advances cursor to next
+                # element.
+                self.c.delete()
+                i = self.c.item()
+            test_list.append(i)
+
+        test_item = [i for i in ITEMS2 if i[0] != B('e')]
+        self.assertEqual(test_list, test_item)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1350,7 +1350,8 @@ class Transaction(object):
     def put(self, key, value, dupdata=True, overwrite=True, append=False,
             db=None):
         """Store a record, returning ``True`` if it was written, or ``False``
-        to indicate the key was already present and `overwrite=False`.
+        to indicate the key was already present and `overwrite=False`. On
+        success, the cursor is positioned on the new record.
 
         Equivalent to `mdb_put()
         <http://symas.com/mdb/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
