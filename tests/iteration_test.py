@@ -43,7 +43,7 @@ class IterationTestBase(unittest.TestCase):
         self.txn = self.env.begin(write=True)
         putData(self.txn)
         self.c = self.txn.cursor()
-        self.empty_entry = ('', '')
+        self.empty_entry = (B(''), B(''))
 
     def matchList(self, ls_a, ls_b):
         return all(map(lambda x, y: x == y, ls_a, ls_b))
