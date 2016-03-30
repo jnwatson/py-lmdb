@@ -689,6 +689,41 @@ class OpenDbTest(unittest.TestCase):
             db = env.open_db(key, txn=txn)
             assert db.flags(txn)[flag] == val
 
+    def test_readonly_env_main(self):
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, readonly=True)
+        db = env.open_db(None)
+
+    def test_readonly_env_sub_noexist(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db('node_schedules', create=False))
+
+    def test_readonly_env_sub_eperm(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: env.open_db('node_schedules', create=True))
+
+    def test_readonly_env_sub(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        assert env.open_db('node_schedules') is not None
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        db = env.open_db('node_schedules', create=False)
+        assert db is not None
+
 
 reader_count = lambda env: env.readers().count('\n') - 1
 

@@ -1069,7 +1069,7 @@ class Environment(object):
         if txn:
             db = _Database(self, txn, key, reverse_key, dupsort, create)
         else:
-            with self.begin(write=True) as txn:
+            with self.begin(write=not self.readonly) as txn:
                 db = _Database(self, txn, key, reverse_key, dupsort, create)
         self._dbs[key] = db
         return db
