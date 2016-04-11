@@ -540,7 +540,7 @@ def cmd_edit(opts, args):
             cursor.put(key, value)
 
         for key in opts.delete or []:
-            cursor.delete(key)
+            txn.delete(key)
 
         for elem in opts.add_file or []:
             key, _, path = elem.partition('=')
