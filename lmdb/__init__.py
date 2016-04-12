@@ -29,6 +29,10 @@ import sys
 
 def _reading_docs():
     # Hack: disable speedups while testing or reading docstrings.
+    # Don't check for basename for embedded python - variable 'argv' does not exists there.
+    if not(hasattr(sys, 'argv')):
+        return False
+
     basename = os.path.basename(sys.argv[0])
     return any(x in basename for x in ('sphinx-build', 'pydoc'))
 
