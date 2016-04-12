@@ -18,6 +18,12 @@
   when iternext()/iterprev() had reached the start/end of the database.
   Detected by tests contributed by Ong Teck Wu.
 
+* The package can now be imported from within a CPython subinterpreter. Fix
+  contributed by Vitaly Repin.
+
+* lmdb.tool --delete would not delete keys in some circumstances. Fix
+  contributed by Vitaly Repin.
+
 
 2016-02-12 v0.89
 
