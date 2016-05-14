@@ -158,6 +158,9 @@ def make_parser():
                       help='Maximum open DBs (default: 128)')
     parser.add_option('--out-fd', type='int', default=1,
                       help='"copyfd" command target fd')
+    group = parser.add_option_group('Options for "copy" command')
+    group.add_option('--compact', action='store_true', default=False,
+                     help='Perform compaction while copying.')
     group = parser.add_option_group('Options for "edit" command')
     group.add_option('--set', action='append',
                      help='List of key=value pairs to set.')
@@ -228,7 +231,7 @@ def cmd_copy(opts, args):
 
     os.makedirs(output_dir, int('0755', 8))
     print('Running copy to %r....' % (output_dir,))
-    ENV.copy(output_dir)
+    ENV.copy(output_dir, compact=opts.compact)
 
 
 def cmd_copyfd(opts, args):
