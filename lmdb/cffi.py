@@ -23,7 +23,7 @@
 """
 CPython/CFFI wrapper for OpenLDAP's "Lightning" MDB database.
 
-Please see http://lmdb.readthedocs.org/
+Please see https://lmdb.readthedocs.io/
 """
 
 from __future__ import absolute_import
