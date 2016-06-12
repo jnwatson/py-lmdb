@@ -53,14 +53,15 @@
  *
  *	  Fix: Check for stale readers periodically, using the
  *	  #mdb_reader_check function or the \ref mdb_stat_1 "mdb_stat" tool.
- *	  Stale writers will be cleared automatically on some systems:
+ *	  Stale writers will be cleared automatically on most systems:
  *	  - Windows - automatic
+ *	  - BSD, systems using SysV semaphores - automatic
  *	  - Linux, systems using POSIX mutexes with Robust option - automatic
- *	  - not on BSD, systems using POSIX semaphores.
  *	  Otherwise just make all programs using the database close it;
  *	  the lockfile is always reset on first open of the environment.
  *
- *	- On BSD systems or others configured with MDB_USE_POSIX_SEM,
+ *	- On BSD systems or others configured with MDB_USE_SYSV_SEM or
+ *	  MDB_USE_POSIX_SEM,
  *	  startup can fail due to semaphores owned by another userid.
  *
  *	  Fix: Open and close the database as the user which owns the
@@ -76,6 +77,11 @@
  *	- There is normally no pure read-only mode, since readers need write
  *	  access to locks and lock file. Exceptions: On read-only filesystems
  *	  or with the #MDB_NOLOCK flag described under #mdb_env_open().
+ *
+ *	- An LMDB configuration will often reserve considerable \b unused
+ *	  memory address space and maybe file size for future growth.
+ *	  This does not use actual memory or disk space, but users may need
+ *	  to understand the difference so they won't be scared off.
  *
  *	- By default, in versions before 0.9.10, unused portions of the data
  *	  file might receive garbage data from memory freed by other code.
@@ -160,6 +166,7 @@
 #define _LMDB_H_
 
 #include <sys/types.h>
+#include <inttypes.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,6 +177,13 @@ extern "C" {
 typedef	int	mdb_mode_t;
 #else
 typedef	mode_t	mdb_mode_t;
+#endif
+
+#ifdef MDB_VL32
+typedef uint64_t	mdb_size_t;
+#define mdb_env_create	mdb_env_create_vl32	/**< Prevent mixing with non-VL32 builds */
+#else
+typedef size_t	mdb_size_t;
 #endif
 
 /** An abstraction for a file handle.
@@ -194,7 +208,7 @@ typedef int mdb_filehandle_t;
 /** Library minor version */
 #define MDB_VERSION_MINOR	9
 /** Library patch version */
-#define MDB_VERSION_PATCH	18
+#define MDB_VERSION_PATCH	70
 
 /** Combine args a,b,c into a single integer for easy version comparisons */
 #define MDB_VERINT(a,b,c)	(((a) << 24) | ((b) << 16) | (c))
@@ -204,7 +218,7 @@ typedef int mdb_filehandle_t;
 	MDB_VERINT(MDB_VERSION_MAJOR,MDB_VERSION_MINOR,MDB_VERSION_PATCH)
 
 /** The release date of this library version */
-#define MDB_VERSION_DATE	"February 5, 2016"
+#define MDB_VERSION_DATE	"December 19, 2015"
 
 /** A stringifier for the version info */
 #define MDB_VERSTR(a,b,c,d)	"LMDB " #a "." #b "." #c ": (" d ")"
@@ -383,7 +397,9 @@ typedef enum MDB_cursor_op {
 	MDB_PREV_NODUP,			/**< Position at last data item of previous key */
 	MDB_SET,				/**< Position at specified key */
 	MDB_SET_KEY,			/**< Position at specified key, return key + data */
-	MDB_SET_RANGE			/**< Position at first key greater than or equal to specified key. */
+	MDB_SET_RANGE,			/**< Position at first key greater than or equal to specified key. */
+	MDB_PREV_MULTIPLE		/**< Position at previous page and return key and up to
+								a page of duplicate data items. Only for #MDB_DUPFIXED */
 } MDB_cursor_op;
 
 /** @defgroup  errors	Return Codes
@@ -449,18 +465,18 @@ typedef struct MDB_stat {
 	unsigned int	ms_psize;			/**< Size of a database page.
 											This is currently the same for all databases. */
 	unsigned int	ms_depth;			/**< Depth (height) of the B-tree */
-	size_t		ms_branch_pages;	/**< Number of internal (non-leaf) pages */
-	size_t		ms_leaf_pages;		/**< Number of leaf pages */
-	size_t		ms_overflow_pages;	/**< Number of overflow pages */
-	size_t		ms_entries;			/**< Number of data items */
+	mdb_size_t		ms_branch_pages;	/**< Number of internal (non-leaf) pages */
+	mdb_size_t		ms_leaf_pages;		/**< Number of leaf pages */
+	mdb_size_t		ms_overflow_pages;	/**< Number of overflow pages */
+	mdb_size_t		ms_entries;			/**< Number of data items */
 } MDB_stat;
 
 /** @brief Information about the environment */
 typedef struct MDB_envinfo {
 	void	*me_mapaddr;			/**< Address of map, if fixed */
-	size_t	me_mapsize;				/**< Size of the data memory map */
-	size_t	me_last_pgno;			/**< ID of the last used page */
-	size_t	me_last_txnid;			/**< ID of the last committed transaction */
+	mdb_size_t	me_mapsize;				/**< Size of the data memory map */
+	mdb_size_t	me_last_pgno;			/**< ID of the last used page */
+	mdb_size_t	me_last_txnid;			/**< ID of the last committed transaction */
 	unsigned int me_maxreaders;		/**< max reader slots in the environment */
 	unsigned int me_numreaders;		/**< max reader slots used in the environment */
 } MDB_envinfo;
@@ -829,7 +845,7 @@ int  mdb_env_get_fd(MDB_env *env, mdb_filehandle_t *fd);
 	 *   	an active write transaction.
 	 * </ul>
 	 */
-int  mdb_env_set_mapsize(MDB_env *env, size_t size);
+int  mdb_env_set_mapsize(MDB_env *env, mdb_size_t size);
 
 	/** @brief Set the maximum number of threads/reader slots for the environment.
 	 *
@@ -942,6 +958,10 @@ int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
 	 * <ul>
 	 *	<li>#MDB_RDONLY
 	 *		This transaction will not perform any write operations.
+	 *	<li>#MDB_NOSYNC
+	 *		Don't flush system buffers to disk when committing this transaction.
+	 *	<li>#MDB_NOMETASYNC
+	 *		Flush system buffers but omit metadata flush when committing this transaction.
 	 * </ul>
 	 * @param[out] txn Address where the new #MDB_txn handle will be stored
 	 * @return A non-zero error value on failure and 0 on success. Some possible
@@ -974,7 +994,7 @@ MDB_env *mdb_txn_env(MDB_txn *txn);
 	 * @param[in] txn A transaction handle returned by #mdb_txn_begin()
 	 * @return A transaction ID, valid if input is an active transaction.
 	 */
-size_t mdb_txn_id(MDB_txn *txn);
+mdb_size_t mdb_txn_id(MDB_txn *txn);
 
 	/** @brief Commit all the operations of a transaction into the database.
 	 *
@@ -1524,7 +1544,7 @@ int  mdb_cursor_del(MDB_cursor *cursor, unsigned int flags);
 	 *	<li>EINVAL - cursor is not initialized, or an invalid parameter was specified.
 	 * </ul>
 	 */
-int  mdb_cursor_count(MDB_cursor *cursor, size_t *countp);
+int  mdb_cursor_count(MDB_cursor *cursor, mdb_size_t *countp);
 
 	/** @brief Compare two data items according to a particular database.
 	 *
