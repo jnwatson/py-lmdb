@@ -388,7 +388,12 @@ class KeyExistsError(Error):
     MDB_NAME = 'MDB_KEYEXIST'
 
 class NotFoundError(Error):
-    """No matching key/data pair found."""
+    """No matching key/data pair found.
+
+    Normally py-lmdb indicates a missing key by returning ``None``, or a
+    user-supplied default value, however LMDB may return this error where
+    py-lmdb does not know to convert it into a non-exceptional return.
+    """
     MDB_NAME = 'MDB_NOTFOUND'
 
 class PageNotFoundError(Error):
