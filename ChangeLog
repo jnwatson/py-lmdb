@@ -1,11 +1,8 @@
 
-2016-08-14 v0.91
+2016-07-11 v0.90
 
 * The docstring for NotFoundError was clarified to indicate that it is
   not raised in normal circumstances.
-
-
-2016-06-14 v0.90
 
 * LMDB 0.9.70 is bundled. Contributed by Tagir Magomedov.
 
