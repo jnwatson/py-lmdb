@@ -1,10 +1,8 @@
 
-2016-07-11 v0.90
+2016-08-11 v0.91
 
 * The docstring for NotFoundError was clarified to indicate that it is
   not raised in normal circumstances.
-
-* LMDB 0.9.70 is bundled. Contributed by Tagir Magomedov.
 
 * CFFI open_db() would always attempt to use a write transaction, even if the
   environment was opened with readonly=True. Now both CPython and CFFI will
@@ -28,6 +26,12 @@
 
 * lmdb.tool --delete would not delete keys in some circumstances. Fix
   contributed by Vitaly Repin.
+
+
+2016-07-11 v0.90
+
+* This release was deleted from PyPI due to an erroneous pull request
+  upgrading the bundled LMDB to mdb.master.
 
 
 2016-02-12 v0.89
