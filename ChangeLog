@@ -27,6 +27,10 @@
 * lmdb.tool --delete would not delete keys in some circumstances. Fix
   contributed by Vitaly Repin.
 
+* Calls to Cursor.set_range_dup() could lead to memory corruption due to
+  Cursor's idea of the key and value failing to be updated correctly. Reported
+  by Michael Lazarev.
+
 
 2016-07-11 v0.90
 
