@@ -2514,6 +2514,7 @@ cursor_set_range(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 {
+    PyObject *ret;
     struct cursor_set_range_dup {
         MDB_val key;
         MDB_val value;
@@ -2528,9 +2529,17 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
         return NULL;
     }
+
     self->key = arg.key;
     self->val = arg.value;
-    return _cursor_get(self, MDB_GET_BOTH_RANGE);
+    ret = _cursor_get(self, MDB_GET_BOTH_RANGE);
+
+    /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
+     * fails to update `key` and `value` on success. Therefore explicitly call
+     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE. */
+    _cursor_get_c(self, MDB_GET_CURRENT);
+
+    return ret;
 }
 
 /**

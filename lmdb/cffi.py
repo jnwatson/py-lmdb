@@ -1948,7 +1948,12 @@ class Cursor(object):
         with `MDB_GET_BOTH_RANGE
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
+        rc = self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
+        # issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation,
+        # and fails to update `key` and `value` on success. Therefore
+        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE.
+        self._cursor_get(_lib.MDB_GET_CURRENT)
+        return rc
 
     def delete(self, dupdata=False):
         """Delete the current element and move to the next, returning ``True``
