@@ -242,9 +242,6 @@ struct TransObject {
     int flags;
     /** Default database if none specified. */
     DbObject *db;
-    /** Number of mutations occurred since start of transaction. Required to
-     * know when cursor key/value must be refreshed. */
-    int mutations;
     /** Next free read-only txn, or NULL. */
     struct TransObject *spare_next;
 };
@@ -262,9 +259,6 @@ struct CursorObject {
     MDB_val key;
     /** mv_size==0 if positioned==0, otherwise points to current value. */
     MDB_val val;
-    /** If TransObject.mutations!=last_mutation, must MDB_GET_CURRENT to
-     * refresh `key' and `val'. */
-    int last_mutation;
     /** DBI flags at time of creation. */
     unsigned int dbi_flags;
 };
@@ -902,7 +896,6 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
     self->sink_head = NULL;
 #endif
 
-    self->mutations = 0;
     self->spare_next = NULL;
     self->flags = 0;
     if(! write) {
@@ -943,7 +936,6 @@ make_cursor(DbObject *db, TransObject *trans)
     self->key.mv_size = 0;
     self->val.mv_size = 0;
     self->trans = trans;
-    self->last_mutation = trans->mutations;
     self->dbi_flags = db->flags;
     Py_INCREF(self->trans);
     return (PyObject *) self;
@@ -1925,9 +1917,7 @@ cursor_count(CursorObject *self)
 /**
  * Apply `op` to the cursor using the Cursor instance's `key` and `val`
  * MDB_vals. On completion, check for an error and if one occurred, set the
- * cursor to the unpositioned state. Finally record the containing
- * transaction's last mutation count, so we know if `key` and `val` become
- * invalid before the next attempt to read them.
+ * cursor to the unpositioned state.
  */
 static int
 _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
@@ -1940,7 +1930,6 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
     Py_END_ALLOW_THREADS;
 
     self->positioned = rc == 0;
-    self->last_mutation = self->trans->mutations;
     if(rc) {
         self->key.mv_size = 0;
         self->val.mv_size = 0;
@@ -1998,12 +1987,10 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
               (int) self->key.mv_size,
               (char*) self->key.mv_data)
         UNLOCKED(rc, mdb_cursor_del(self->curs, flags));
-        self->trans->mutations++;
         if(rc) {
             return err_set("mdb_cursor_del", rc);
         }
         res = 1;
-        _cursor_get_c(self, MDB_GET_CURRENT);
     }
     return py_bool(res);
 }
@@ -2079,9 +2066,8 @@ cursor_item(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    /* Must refresh `key` and `val` following mutation. */
-    if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+
+    if(_cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
 
@@ -2109,9 +2095,7 @@ cursor_key(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    /* Must refresh `key` and `val` following mutation. */
-    if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+    if(_cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
     return obj_from_val(&self->key, self->trans->flags & TRANS_BUFFERS);
@@ -2257,7 +2241,6 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         }
 
         UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
-        self->trans->mutations++;
         switch(rc) {
         case MDB_SUCCESS:
             added++;
@@ -2322,7 +2305,6 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
-    self->trans->mutations++;
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -2352,7 +2334,6 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
                 return NULL;
             }
             UNLOCKED(rc, mdb_cursor_del(self->curs, MDB_NODUPDATA));
-            self->trans->mutations++;
             if(rc) {
                 Py_CLEAR(old);
                 return err_set("mdb_cursor_del", rc);
@@ -2365,7 +2346,6 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
         /* val is updated if MDB_KEYEXIST. */
         int flags = MDB_NOOVERWRITE;
         UNLOCKED(rc, mdb_cursor_put(self->curs, key, val, flags));
-        self->trans->mutations++;
         if(! rc) {
             Py_RETURN_NONE;
         } else if(rc != MDB_KEYEXIST) {
@@ -2442,7 +2422,6 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
-    self->trans->mutations++;
     if(rc) {
         Py_DECREF(old);
         return err_set("mdb_cursor_del", rc);
@@ -2532,14 +2511,7 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 
     self->key = arg.key;
     self->val = arg.value;
-    ret = _cursor_get(self, MDB_GET_BOTH_RANGE);
-
-    /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
-     * fails to update `key` and `value` on success. Therefore explicitly call
-     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE. */
-    _cursor_get_c(self, MDB_GET_CURRENT);
-
-    return ret;
+    return _cursor_get(self, MDB_GET_BOTH_RANGE);
 }
 
 /**
@@ -2551,9 +2523,7 @@ cursor_value(CursorObject *self)
     if(! self->valid) {
         return err_invalid();
     }
-    /* Must refresh `key` and `val` following mutation. */
-    if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+    if( _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
     return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
@@ -3128,7 +3098,6 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
     val_ptr = arg.val.mv_size ? &arg.val : NULL;
-    self->mutations++;
     UNLOCKED(rc, mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr));
     if(rc) {
         if(rc == MDB_NOTFOUND) {
@@ -3167,7 +3136,6 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     }
 
     UNLOCKED(rc, mdb_drop(self->txn, arg.db->dbi, arg.delete));
-    self->mutations++;
     if(rc) {
         return err_set("mdb_drop", rc);
     }
@@ -3272,7 +3240,6 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         (int)arg.value.mv_size, (char *)arg.value.mv_data,
         (int)arg.value.mv_size)
 
-    self->mutations++;
     UNLOCKED(rc, mdb_put(self->txn, (arg.db)->dbi,
                          &arg.key, &arg.value, flags));
     if(rc) {
@@ -3376,7 +3343,6 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
 
     UNLOCKED(rc, mdb_cursor_del(cursor->curs, 0));
     Py_DECREF((PyObject *)cursor);
-    self->mutations++;
     if(rc) {
         Py_DECREF(old);
         return err_set("mdb_cursor_del", rc);
