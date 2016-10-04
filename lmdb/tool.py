@@ -543,7 +543,7 @@ def cmd_edit(opts, args):
             cursor.put(key, value)
 
         for key in opts.delete or []:
-            txn.delete(key)
+            txn.delete(key, db=DB)
 
         for elem in opts.add_file or []:
             key, _, path = elem.partition('=')
