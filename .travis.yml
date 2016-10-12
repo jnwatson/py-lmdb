@@ -1,13 +1,27 @@
 language: python
 python:
+  - 2.6
   - 2.7
+  - 3.2
+  - 3.3
   - 3.5
+  - 3.6-dev
   - nightly
+
+env:
+  - LMDB_FORCE_CFFI=1
+  - 
 install:
-    - "python setup.py install"
-setup:
+  - "pip install cffi"
+
+  # this is a workaround for https://github.com/dw/py-lmdb/issues/132
+  - "git revert --no-commit 04ef5846262d9bee39938208af14cce28ebc1834"
+
+  - "python setup.py install"
+before_script:
+  
 script:
-    - "python -m pytest tests"
+  - "py.test tests"
 
 notifications:
   email: false
