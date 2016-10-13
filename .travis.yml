@@ -12,6 +12,7 @@ env:
   - LMDB_FORCE_CFFI=1
   - 
 install:
+  - "sudo apt-get install gdb"
   - "pip install cffi"
 
   # this is a workaround for https://github.com/dw/py-lmdb/issues/132
@@ -19,9 +20,10 @@ install:
 
   - "python setup.py install"
 before_script:
+  - "source misc/helpers.sh"
   
 script:
-  - "py.test tests"
+  - "with_gdb py.test tests"
 
 notifications:
   email: false
