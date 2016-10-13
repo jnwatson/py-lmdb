@@ -2,29 +2,42 @@ language: python
 python:
   - 2.6
   - 2.7
-  - 3.1
+  # - 3.1
   - 3.2
-  - 3.3
-  - 3.5
-  - 3.6-dev
-  - nightly
+  # - 3.3
+  # - 3.5
+  # - 3.6-dev
+  # - nightly
 
 env:
   - LMDB_FORCE_CFFI=1
   - 
 install:
-  - "sudo apt-get install gdb"
-  - "pip install cffi"
+  - 
+  - > 
+    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then 
+      wget -qO ez_setup_24.py https://raw.githubusercontent.com/pypa/setuptools/bootstrap-py24/ez_setup.py && \
+      sudo apt-add-repository -y ppa:fkrull/deadsnakes && \
+      sudo apt-get update && \
+      sudo apt-get install python2.5-dev && \
+      sudo python2.5 ez_setup_24.py && \
+      sudo python2.5 -m easy_install py==1.4.20 pytest==2.5.2;
+    fi
+  - sudo apt-get install gdb
+  - pip install cffi
+
 
   # this is a workaround for https://github.com/dw/py-lmdb/issues/132
-  - "git revert --no-commit 04ef5846262d9bee39938208af14cce28ebc1834"
+  - git revert --no-commit 04ef5846262d9bee39938208af14cce28ebc1834
 
-  - "python setup.py install"
+  - python setup.py install
+  - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
 before_script:
-  - "source misc/helpers.sh"
+  - sudo source misc/helpers.sh
   
 script:
-  - "with_gdb py.test tests"
+  - with_gdb python -m pytest tests
+  - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then sudo native python2.5; fi
 
 notifications:
   email: false
