@@ -14,6 +14,7 @@ with_gdb() {
 
 native() {
     clean
+    unset LMDB_FORCE_CFFI
     quiet $1 setup.py develop
     quiet $1 -c 'import lmdb.cpython'
     with_gdb $1 -m pytest tests || fail=1

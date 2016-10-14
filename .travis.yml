@@ -4,25 +4,16 @@ python:
   - 2.7
   # - 3.1
   - 3.2
-  # - 3.3
-  # - 3.5
-  # - 3.6-dev
-  # - nightly
+  - 3.3
+  - 3.5
+  - 3.6-dev
+  - nightly
+  - pypy
 
 env:
   - LMDB_FORCE_CFFI=1
   - 
 install:
-  - 
-  - > 
-    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then 
-      wget -qO ez_setup_24.py https://raw.githubusercontent.com/pypa/setuptools/bootstrap-py24/ez_setup.py && \
-      sudo apt-add-repository -y ppa:fkrull/deadsnakes && \
-      sudo apt-get update && \
-      sudo apt-get install python2.5-dev && \
-      sudo python2.5 ez_setup_24.py && \
-      sudo python2.5 -m easy_install py==1.4.20 pytest==2.5.2;
-    fi
   - sudo apt-get install gdb
   - pip install cffi
 
@@ -33,11 +24,16 @@ install:
   - python setup.py install
   - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
 before_script:
-  - sudo source misc/helpers.sh
+  - source misc/helpers.sh
   
 script:
-  - with_gdb python -m pytest tests
-  - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then sudo native python2.5; fi
+  - > 
+    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; 
+      then 
+        sudo ./misc/runtests-travisci.sh 
+      else 
+        with_gdb python -m pytest tests; 
+    fi
 
 notifications:
   email: false
