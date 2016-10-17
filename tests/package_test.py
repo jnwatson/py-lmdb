@@ -35,7 +35,7 @@ class PackageExportsTest(unittest.TestCase):
     def test_exports(self):
         assert sorted(lmdb.__all__) == [
             'BadDbiError',
-            'BadRSlotError',
+            'BadRslotError',
             'BadTxnError',
             'BadValsizeError',
             'CorruptedError',
