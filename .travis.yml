@@ -1,4 +1,12 @@
 language: python
+
+matrix:
+  exclude:
+  - python: 3.2
+    env: LMDB_FORCE_CPYTHON=1
+  - python: pypy
+    env: LMDB_FORCE_CPYTHON=1
+
 python:
   - 2.6
   - 2.7
