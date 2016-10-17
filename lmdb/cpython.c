@@ -2881,7 +2881,7 @@ iter_next(IterObject *self)
 
 static PyTypeObject PyIterator_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "Iterator",                 /*tp_name*/
+    "_Iterator",                 /*tp_name*/
     sizeof(IterObject),         /*tp_basicsize*/
     0,                          /*tp_itemsize*/
     (destructor) iter_dealloc,  /*tp_dealloc*/
@@ -3518,6 +3518,26 @@ static PyTypeObject PyTransaction_Type = {
 
 
 /**
+ * Construct a PyString and append it to a list, returning 0 on success or -1
+ * on error.
+ */
+static int
+append_string(PyObject *list, const char *s)
+{
+    PyObject *o = PyString_FromString(s);
+    if(! o) {
+        return -1;
+    }
+    if(PyList_Append(list, o)) {
+        Py_DECREF(o);
+        return -1;
+    }
+    Py_DECREF(o);
+    return 0;
+}
+
+
+/**
  * lmdb.enable_drop_gil()
  */
 static PyObject *
@@ -3573,7 +3593,6 @@ static int init_types(PyObject *mod, PyObject *__all__)
     int i;
     for(i = 0; types[i]; i++) {
         PyTypeObject *type = types[i];
-        PyObject *name;
 
         if(PyType_Ready(type)) {
             return -1;
@@ -3582,10 +3601,7 @@ static int init_types(PyObject *mod, PyObject *__all__)
             return -1;
         }
 
-        if(! ((name = PyString_FromString(type->tp_name)))) {
-            return -1;
-        }
-        if(PyList_Append(__all__, name)) {
+        if(type->tp_name[0] != '_' && append_string(__all__, type->tp_name)) {
             return -1;
         }
     }
@@ -3627,6 +3643,9 @@ static int init_errors(PyObject *mod, PyObject *__all__)
     if(PyObject_SetAttrString(mod, "Error", Error)) {
         return -1;
     }
+    if(append_string(__all__, "Error")) {
+        return -1;
+    }
 
     count = (sizeof error_map / sizeof error_map[0]);
     error_tbl = malloc(sizeof(PyObject *) * count);
@@ -3649,8 +3668,7 @@ static int init_errors(PyObject *mod, PyObject *__all__)
         if(PyObject_SetAttrString(mod, error->name, klass)) {
             return -1;
         }
-
-        if(PyList_Append(__all__, PyObject_GetAttrString(klass, "__name__"))) {
+        if(append_string(__all__, error->name)) {
             return -1;
         }
     }
@@ -3678,6 +3696,12 @@ MODINIT_NAME(void)
     }
 
     if(init_types(mod, __all__)) {
+        MOD_RETURN(NULL);
+    }
+    if(append_string(__all__, "enable_drop_gil")) {
+        MOD_RETURN(NULL);
+    }
+    if(append_string(__all__, "version")) {
         MOD_RETURN(NULL);
     }
 
