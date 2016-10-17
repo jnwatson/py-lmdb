@@ -21,9 +21,11 @@
 #
 
 from __future__ import absolute_import
+import glob
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 INTERPS = (
@@ -81,14 +83,17 @@ def main():
         run(pip_path(path), 'install', '-e', '.')
         if is_cffi:
             os.environ['LMDB_FORCE_CFFI'] = '1'
+            os.environ.pop('LMDB_FORCE_CPYTHON', '')
         else:
+            os.environ['LMDB_FORCE_CPYTHON'] = '1'
             os.environ.pop('LMDB_FORCE_CFFI', '')
         if os.path.exists('lmdb\\cpython.pyd'):
             os.unlink('lmdb\\cpython.pyd')
         #run(path, '-mpy.test')
-        run(path, 'setup.py', 'bdist_egg', 'upload')
-        run(path, 'setup.py', 'bdist_wheel', 'upload')
-
+        run(path, 'setup.py', 'bdist_egg')
+        run(path, 'setup.py', 'bdist_wheel')
+    run(sys.executable, '-m', 'twine', 'upload',
+        '--skip-existing', *glob.glob('dist/*'))
 
 if __name__ == '__main__':
     main()
