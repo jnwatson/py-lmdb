@@ -43,6 +43,8 @@ try:
     from lmdb.cpython import open
     from lmdb.cpython import __all__
 except ImportError:
+    if (not _reading_docs()) and os.getenv('LMDB_FORCE_CPYTHON') is not None:
+        raise
     from lmdb.cffi import *
     from lmdb.cffi import open
     from lmdb.cffi import __all__

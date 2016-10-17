@@ -11,7 +11,7 @@ python:
 
 env:
   - LMDB_FORCE_CFFI=1
-  - 
+  - LMDB_FORCE_CPYTHON=1
 install:
   - sudo apt-get install gdb
   - pip install cffi
@@ -20,14 +20,14 @@ install:
   - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
 before_script:
   - source misc/helpers.sh
-  
+
 script:
-  - > 
-    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; 
-      then 
-        sudo ./misc/runtests-travisci.sh 
-      else 
-        with_gdb python -m pytest tests; 
+  - >
+    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]];
+      then
+        sudo ./misc/runtests-travisci.sh
+      else
+        with_gdb python -m pytest tests;
     fi
 
 notifications:
