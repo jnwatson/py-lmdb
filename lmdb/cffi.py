@@ -1183,6 +1183,10 @@ class Transaction(object):
     _parent = None
     _write = False
 
+    # Mutations occurred since transaction start. Required to know when Cursor
+    # key/value must be refreshed.
+    _mutations = 0
+
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         env._deps.add(self)
         self.env = env  # hold ref
@@ -1280,6 +1284,7 @@ class Transaction(object):
         while db._deps:
             db._deps.pop()._invalidate()
         rc = _lib.mdb_drop(self._txn, db._dbi, delete)
+        self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
 
@@ -1389,6 +1394,7 @@ class Transaction(object):
 
         rc = _lib.pymdb_put(self._txn, (db or self._db)._dbi,
                             key, len(key), value, len(value), flags)
+        self._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
                 return False
@@ -1433,6 +1439,7 @@ class Transaction(object):
         """
         rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
                             key, len(key), value, len(value))
+        self._mutations += 1
         if rc:
             if rc == _lib.MDB_NOTFOUND:
                 return False
@@ -1546,6 +1553,9 @@ class Cursor(object):
         if rc:
             raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
+        # If Transaction.mutations!=last_mutation, must MDB_GET_CURRENT to
+        # refresh `key' and `val'.
+        self._last_mutation = txn._mutations
 
     def _invalidate(self):
         if self._cur:
@@ -1571,17 +1581,23 @@ class Cursor(object):
 
     def key(self):
         """Return the current key."""
-        self._cursor_get(_lib.MDB_GET_CURRENT)
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._key)
 
     def value(self):
         """Return the current value."""
-        self._cursor_get(_lib.MDB_GET_CURRENT)
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._val)
 
     def item(self):
         """Return the current `(key, value)` pair."""
-        self._cursor_get(_lib.MDB_GET_CURRENT)
+        # Must refresh `key` and `val` following mutation.
+        if self._last_mutation != self.txn._mutations:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, op, keys, values):
@@ -1707,6 +1723,7 @@ class Cursor(object):
     def _cursor_get(self, op):
         rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
+        self._last_mutation = self.txn._mutations
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
@@ -1931,7 +1948,12 @@ class Cursor(object):
         with `MDB_GET_BOTH_RANGE
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
+        rc = self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
+        # issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation,
+        # and fails to update `key` and `value` on success. Therefore
+        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE.
+        self._cursor_get(_lib.MDB_GET_CURRENT)
+        return rc
 
     def delete(self, dupdata=False):
         """Delete the current element and move to the next, returning ``True``
@@ -1948,8 +1970,10 @@ class Cursor(object):
         if v:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
             rc = _lib.mdb_cursor_del(self._cur, flags)
+            self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
             v = rc == 0
         return v
 
@@ -2007,10 +2031,12 @@ class Cursor(object):
             flags |= _lib.MDB_APPEND
 
         rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+        self.txn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
                 return False
             raise _error("mdb_cursor_put", rc)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         return True
 
     def putmulti(self, items, dupdata=True, overwrite=True, append=False):
@@ -2056,12 +2082,14 @@ class Cursor(object):
         for key, value in items:
             rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
                                        value, len(value), flags)
+            self.txn._mutations += 1
             added += 1
             if rc:
                 if rc == _lib.MDB_KEYEXIST:
                     skipped += 1
                 else:
                     raise _error("mdb_cursor_put", rc)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         return added, added-skipped
 
     def replace(self, key, val):
@@ -2092,6 +2120,7 @@ class Cursor(object):
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
         rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        self.txn._mutations += 1
         if not rc:
             return
         if rc != _lib.MDB_KEYEXIST:
@@ -2100,8 +2129,10 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         old = _mvstr(self._val)
         rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
+        self._cursor_get(_lib.MDB_GET_CURRENT)
         return old
 
     def pop(self, key):
@@ -2118,8 +2149,10 @@ class Cursor(object):
         if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             old = _mvstr(self._val)
             rc = _lib.mdb_cursor_del(self._cur, 0)
+            self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
             return old
 
     def _iter_from(self, k, reverse):

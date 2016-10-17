@@ -1,8 +1,34 @@
-language: c
+language: python
+python:
+  - 2.6
+  - 2.7
+  - 3.2
+  - 3.3
+  - 3.5
+  - 3.6-dev
+  - nightly
+  - pypy
+
+env:
+  - LMDB_FORCE_CFFI=1
+  - 
 install:
-setup:
+  - sudo apt-get install gdb
+  - pip install cffi
+
+  - python setup.py install
+  - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
+before_script:
+  - source misc/helpers.sh
+  
 script:
-    - "sudo ./misc/runtests-travisci.sh"
+  - > 
+    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; 
+      then 
+        sudo ./misc/runtests-travisci.sh 
+      else 
+        with_gdb python -m pytest tests; 
+    fi
 
 notifications:
   email: false
