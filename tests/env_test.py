@@ -655,7 +655,13 @@ class OpenDbTest(unittest.TestCase):
         db1 = env.open_db(B('subdb1'), txn=txn)
         db2 = env.open_db(B('subdb2'), txn=txn)
         for db in db1, db2:
-            assert db.flags(txn) == {'reverse_key': False, 'dupsort': False}
+            assert db.flags(txn) == {
+                'dupfixed': False,
+                'dupsort': False,
+                'integerdup': False,
+                'integerkey': False,
+                'reverse_key': False,
+            }
         txn.commit()
 
     def test_reopen(self):
@@ -665,9 +671,13 @@ class OpenDbTest(unittest.TestCase):
         env = lmdb.open(path, max_dbs=10)
         db1 = env.open_db(B('subdb1'))
 
-    FLAG_SETS = [(flag, val)
-                 for flag in ('reverse_key', 'dupsort')
-                 for val in (True, False)]
+    FLAG_SETS = [
+        (flag, val)
+        for flag in (
+            'reverse_key', 'dupsort', 'integerkey', 'integerdup', 'dupfixed'
+        )
+        for val in (True, False)
+    ]
 
     def test_flags(self):
         path, env = testlib.temp_env()

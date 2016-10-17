@@ -22,6 +22,7 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import struct
 import unittest
 import weakref
 
@@ -34,6 +35,12 @@ from testlib import BytesType
 from testlib import UnicodeType
 
 import lmdb
+
+
+UINT_0001 = struct.pack('I', 1)
+UINT_0002 = struct.pack('I', 2)
+ULONG_0001 = struct.pack('L', 1)  # L != size_t
+ULONG_0002 = struct.pack('L', 2)  # L != size_t
 
 
 class InitTest(unittest.TestCase):
@@ -387,6 +394,31 @@ class GetTest(unittest.TestCase):
     def test_dupsort(self):
         _, env = testlib.temp_env()
         db1 = env.open_db(B('db1'), dupsort=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(B('a'), B('a'))
+        assert txn.put(B('a'), B('b'))
+        assert txn.get(B('a')) == B('a')
+
+    def test_integerkey(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), integerkey=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(UINT_0001, B('a'))
+        assert txn.put(UINT_0002, B('b'))
+        assert txn.get(UINT_0001) == B('a')
+        assert txn.get(UINT_0002) == B('b')
+
+    def test_integerdup(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True, integerdup=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(UINT_0001, UINT_0002)
+        assert txn.put(UINT_0001, UINT_0001)
+        assert txn.get(UINT_0001) == UINT_0001
+
+    def test_dupfixed(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True, dupfixed=True)
         txn = env.begin(write=True, db=db1)
         assert txn.put(B('a'), B('a'))
         assert txn.put(B('a'), B('b'))

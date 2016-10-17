@@ -1064,6 +1064,9 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     f = self->flags;
     PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
     PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
+    PyDict_SetItemString(dct, "integerkey", py_bool(f & MDB_INTEGERKEY));
+    PyDict_SetItemString(dct, "integerdup", py_bool(f & MDB_INTEGERDUP));
+    PyDict_SetItemString(dct, "dupfixed", py_bool(f & MDB_DUPFIXED));
     return dct;
 }
 
@@ -1563,6 +1566,9 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         int reverse_key;
         int dupsort;
         int create;
+        int integerkey;
+        int integerdup;
+        int dupfixed;
     } arg = {NULL, NULL, 0, 0, 1};
 
     static const struct argspec argspec[] = {
@@ -1571,6 +1577,9 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         {"reverse_key", ARG_BOOL, OFFSET(env_open_db, reverse_key)},
         {"dupsort", ARG_BOOL, OFFSET(env_open_db, dupsort)},
         {"create", ARG_BOOL, OFFSET(env_open_db, create)},
+        {"integerkey", ARG_BOOL, OFFSET(env_open_db, integerkey)},
+        {"integerdup", ARG_BOOL, OFFSET(env_open_db, integerdup)},
+        {"dupfixed", ARG_BOOL, OFFSET(env_open_db, dupfixed)},
     };
     int flags;
 
@@ -1588,6 +1597,15 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     }
     if(arg.create) {
         flags |= MDB_CREATE;
+    }
+    if(arg.integerkey) {
+        flags |= MDB_INTEGERKEY;
+    }
+    if(arg.integerdup) {
+        flags |= MDB_INTEGERDUP;
+    }
+    if(arg.dupfixed) {
+        flags |= MDB_DUPFIXED;
     }
 
     if(arg.txn) {

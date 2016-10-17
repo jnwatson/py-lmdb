@@ -235,10 +235,16 @@ _CFFI_CDEF = '''
     #define MDB_VERSION_MISMATCH ...
 
     #define MDB_APPEND ...
+    #define MDB_CP_COMPACT ...
     #define MDB_CREATE ...
+    #define MDB_DUPFIXED ...
     #define MDB_DUPSORT ...
+    #define MDB_INTEGERDUP ...
+    #define MDB_INTEGERKEY ...
     #define MDB_MAPASYNC ...
     #define MDB_NODUPDATA ...
+    #define MDB_NOLOCK ...
+    #define MDB_NOMEMINIT ...
     #define MDB_NOMETASYNC ...
     #define MDB_NOOVERWRITE ...
     #define MDB_NORDAHEAD ...
@@ -246,11 +252,8 @@ _CFFI_CDEF = '''
     #define MDB_NOSYNC ...
     #define MDB_NOTLS ...
     #define MDB_RDONLY ...
-    #define MDB_NOLOCK ...
     #define MDB_REVERSEKEY ...
     #define MDB_WRITEMAP ...
-    #define MDB_NOMEMINIT ...
-    #define MDB_CP_COMPACT ...
 
     // Helpers below inline MDB_vals. Avoids key alloc/dup on CPython, where
     // CFFI will use PyString_AS_STRING when passed as an argument.
@@ -730,7 +733,18 @@ class Environment(object):
             raise _error(path, rc)
 
         with self.begin(db=object()) as txn:
-            self._db = _Database(self, txn, None, False, False, True)
+            self._db = _Database(
+                env=self,
+                txn=txn,
+                name=None,
+                reverse_key=False,
+                dupsort=False,
+                create=True,
+                integerkey=False,
+                integerdup=False,
+                dupfixed=False
+            )
+
         self._dbs = {None: self._db}
 
     def __enter__(self):
@@ -997,7 +1011,8 @@ class Environment(object):
         return reaped[0]
 
     def open_db(self, key=None, txn=None, reverse_key=False, dupsort=False,
-                create=True):
+                create=True, integerkey=False, integerdup=False,
+                dupfixed=False):
         """
         Open a database, returning an opaque handle. Repeat
         :py:meth:`Environment.open_db` calls for the same name will return the
@@ -1062,6 +1077,23 @@ class Environment(object):
             `create`:
                 If ``True``, create the database if it doesn't exist, otherwise
                 raise an exception.
+
+            `integerkey`:
+                If ``True``, indicates keys in the database are C unsigned
+                or ``size_t`` integers encoded in native byte order. Keys must
+                all be either unsigned or ``size_t``, they cannot be mixed in a
+                single database.
+
+            `integerdup`:
+                If ``True`` and `dupsort` is also ``True``, values in the
+                database are C unsigned or ``size_t`` integers encode din
+                native byte order.
+
+            `dupfixed`:
+                If ``True`` and `dupsort` is also ``True``, values for each key
+                in database are of fixed size, allowing each additional
+                duplicate value for a key to be stored without a header
+                indicating its size.
         """
         if isinstance(key, UnicodeType):
             raise TypeError('key must be bytes')
@@ -1071,10 +1103,12 @@ class Environment(object):
             return db
 
         if txn:
-            db = _Database(self, txn, key, reverse_key, dupsort, create)
+            db = _Database(self, txn, key, reverse_key, dupsort, create,
+                           integerkey, integerdup, dupfixed)
         else:
             with self.begin(write=not self.readonly) as txn:
-                db = _Database(self, txn, key, reverse_key, dupsort, create)
+                db = _Database(self, txn, key, reverse_key, dupsort, create,
+                               integerkey, integerdup, dupfixed)
         self._dbs[key] = db
         return db
 
@@ -1085,7 +1119,8 @@ class Environment(object):
 
 class _Database(object):
     """Internal database handle."""
-    def __init__(self, env, txn, name, reverse_key, dupsort, create):
+    def __init__(self, env, txn, name, reverse_key, dupsort, create,
+                 integerkey, integerdup, dupfixed):
         env._deps.add(self)
         self._deps = set()
 
@@ -1096,6 +1131,12 @@ class _Database(object):
             flags |= _lib.MDB_DUPSORT
         if create:
             flags |= _lib.MDB_CREATE
+        if integerkey:
+            flags |= _lib.MDB_INTEGERKEY
+        if integerdup:
+            flags |= _lib.MDB_INTEGERDUP
+        if dupfixed:
+            flags |= _lib.MDB_DUPFIXED
         dbipp = _ffi.new('MDB_dbi *')
         self._dbi = None
         rc = _lib.mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
@@ -1118,6 +1159,9 @@ class _Database(object):
         return {
             'reverse_key': bool(self._flags & _lib.MDB_REVERSEKEY),
             'dupsort': bool(self._flags & _lib.MDB_DUPSORT),
+            'integerkey': bool(self._flags & _lib.MDB_INTEGERKEY),
+            'integerdup': bool(self._flags & _lib.MDB_INTEGERDUP),
+            'dupfixed': bool(self._flags & _lib.MDB_DUPFIXED),
         }
 
     def _invalidate(self):
