@@ -441,7 +441,7 @@ These functions are useful for e.g. backup jobs.
         copyfd: Consistent high speed backup an environment to stdout.
             python -mlmdb copyfd -e source.lmdb > target.lmdb/data.mdb
 
-        drop: Delete one or more named databases.
+        drop: Delete one or more sub-databases.
             python -mlmdb drop db1
 
         dump: Dump one or more databases to disk in 'cdbmake' format.
@@ -488,14 +488,15 @@ These functions are useful for e.g. backup jobs.
       -S MAP_SIZE, --map_size=MAP_SIZE
                             Map size in megabytes (default: 10)
       -a, --all             Make "dump" dump all databases
-      -T TXN_SIZE, --txn_size=TXN_SIZE
-                            Writes per transaction (default: 1000)
       -E TARGET_ENV, --target_env=TARGET_ENV
                             Target environment file for "dumpfd"
       -x, --xxd             Print values in xxd format
       -M MAX_DBS, --max-dbs=MAX_DBS
                             Maximum open DBs (default: 128)
       --out-fd=OUT_FD       "copyfd" command target fd
+
+      Options for "copy" command:
+        --compact           Perform compaction while copying.
 
       Options for "edit" command:
         --set=SET           List of key=value pairs to set.
@@ -511,9 +512,9 @@ These functions are useful for e.g. backup jobs.
 
       Options for "watch" command:
         --csv               Generate CSV instead of terminal output.
-        --interval=INTERVAL Interval size (default: 1sec)
+        --interval=INTERVAL
+                            Interval size (default: 1sec)
         --window=WINDOW     Average window size (default: 10)
-
 
 
 Implementation Notes
