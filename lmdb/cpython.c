@@ -3542,7 +3542,12 @@ static PyTypeObject PyTransaction_Type = {
 static int
 append_string(PyObject *list, const char *s)
 {
-    PyObject *o = PyString_FromString(s);
+#if PY_MAJOR_VERSION >= 3
+    PyObject *o = PyUnicode_FromString(s);
+#else
+    PyObject *o = PyBytes_FromStringAndSize(s, strlen(s));
+#endif
+
     if(! o) {
         return -1;
     }
