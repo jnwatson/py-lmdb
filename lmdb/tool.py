@@ -148,8 +148,6 @@ def make_parser():
                       help='Map size in megabytes (default: 10)')
     parser.add_option('-a', '--all', action='store_true',
                       help='Make "dump" dump all databases')
-    parser.add_option('-T', '--txn_size', type='int', default=1000,
-                      help='Writes per transaction (default: 1000)')
     parser.add_option('-E', '--target_env',
                       help='Target environment file for "dumpfd"')
     parser.add_option('-x', '--xxd', action='store_true',
