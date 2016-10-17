@@ -28,8 +28,8 @@ import os
 import sys
 
 def _reading_docs():
-    # Hack: disable speedups while testing or reading docstrings.
-    # Don't check for basename for embedded python - variable 'argv' does not exists there.
+    # Hack: disable speedups while testing or reading docstrings. Don't check
+    # for basename for embedded python - variable 'argv' does not exists there.
     if not(hasattr(sys, 'argv')):
         return False
 

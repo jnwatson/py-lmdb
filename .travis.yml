@@ -16,7 +16,7 @@ install:
   - sudo apt-get install gdb
   - pip install cffi
 
-  - python setup.py install
+  - python setup.py develop
   - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
 before_script:
   - source misc/helpers.sh

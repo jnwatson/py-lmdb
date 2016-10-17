@@ -1,5 +1,7 @@
 #!/bin/bash -ex
 
+source misc/helpers.sh
+
 quiet() {
     "$@" > /tmp/$$ || { cat /tmp/$$; return 1; }
 }
@@ -21,8 +23,13 @@ wget -q https://raw.githubusercontent.com/pypa/setuptools/bootstrap/ez_setup.py
 quiet python2.5 ez_setup_24.py
 quiet python2.6 ez_setup.py
 
-
 quiet python2.5 -measy_install py==1.4.20 pytest==2.5.2
 quiet python2.6 -measy_install py==1.4.20 pytest==2.5.2 cffi
 
-source misc/runtests-ubuntu-12-04.sh
+native python2.5
+native python2.6
+cffi python2.6
+
+
+[ "$fail" ] && exit 1
+exit 0
