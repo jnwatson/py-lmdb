@@ -1,4 +1,11 @@
 
+2017-10-17 v0.92
+
+* Changes to support __all__ caused the CPython module to fail to import at
+  runtime on Python 3. This was hidden during testing as the CFFI module was
+  successfully imported.
+
+
 2016-10-17 v0.91
 
 * The docstring for NotFoundError was clarified to indicate that it is
