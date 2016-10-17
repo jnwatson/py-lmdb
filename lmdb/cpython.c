@@ -3559,7 +3559,7 @@ static struct PyModuleDef moduledef = {
 /**
  * Initialize and publish the LMDB built-in types.
  */
-static int init_types(PyObject *mod)
+static int init_types(PyObject *mod, PyObject *__all__)
 {
     static PyTypeObject *types[] = {
         &PyEnvironment_Type,
@@ -3573,13 +3573,23 @@ static int init_types(PyObject *mod)
     int i;
     for(i = 0; types[i]; i++) {
         PyTypeObject *type = types[i];
+        PyObject *name;
+
         if(PyType_Ready(type)) {
             return -1;
         }
         if(PyObject_SetAttrString(mod, type->tp_name, (PyObject *)type)) {
             return -1;
         }
+
+        if(! ((name = PyString_FromString(type->tp_name)))) {
+            return -1;
+        }
+        if(PyList_Append(__all__, name)) {
+            return -1;
+        }
     }
+
     return 0;
 }
 
@@ -3604,7 +3614,7 @@ static int init_constants(PyObject *mod)
  * Create lmdb.Error exception class, and one subclass for each entry in
  * `error_map`.
  */
-static int init_errors(PyObject *mod)
+static int init_errors(PyObject *mod, PyObject *__all__)
 {
     size_t count;
     char qualname[64];
@@ -3639,6 +3649,10 @@ static int init_errors(PyObject *mod)
         if(PyObject_SetAttrString(mod, error->name, klass)) {
             return -1;
         }
+
+        if(PyList_Append(__all__, PyObject_GetAttrString(klass, "__name__"))) {
+            return -1;
+        }
     }
     return 0;
 }
@@ -3649,6 +3663,7 @@ static int init_errors(PyObject *mod)
 PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
+    PyObject *__all__;
 #if PY_MAJOR_VERSION >= 3
     PyObject *mod = PyModule_Create(&moduledef);
 #else
@@ -3658,7 +3673,11 @@ MODINIT_NAME(void)
         MOD_RETURN(NULL);
     }
 
-    if(init_types(mod)) {
+    if(! ((__all__ = PyList_New(0)))) {
+        MOD_RETURN(NULL);
+    }
+
+    if(init_types(mod, __all__)) {
         MOD_RETURN(NULL);
     }
 
@@ -3678,11 +3697,17 @@ MODINIT_NAME(void)
     if(init_constants(mod)) {
         MOD_RETURN(NULL);
     }
-    if(init_errors(mod)) {
+    if(init_errors(mod, __all__)) {
         MOD_RETURN(NULL);
     }
     if(PyObject_SetAttrString(mod, "open", (PyObject *)&PyEnvironment_Type)) {
         MOD_RETURN(NULL);
     }
+
+    if(PyObject_SetAttrString(mod, "__all__", __all__)) {
+        MOD_RETURN(NULL);
+    }
+    Py_DECREF(__all__);
+
     MOD_RETURN(mod);
 }

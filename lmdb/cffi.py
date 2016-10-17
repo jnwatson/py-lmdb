@@ -55,7 +55,6 @@ __all__ = [
     'Environment',
     'Transaction',
     'enable_drop_gil',
-    'open',
     'version',
 ]
 

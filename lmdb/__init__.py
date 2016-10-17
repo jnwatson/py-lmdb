@@ -40,6 +40,7 @@ try:
     if _reading_docs() or os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
     from lmdb.cpython import *
+    from lmdb.cpython import __all__
 except ImportError:
     from lmdb.cffi import *
     from lmdb.cffi import __all__
