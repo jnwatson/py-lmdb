@@ -1,5 +1,5 @@
 
-2016-08-11 v0.91
+2016-10-17 v0.91
 
 * The docstring for NotFoundError was clarified to indicate that it is
   not raised in normal circumstances.
@@ -30,6 +30,40 @@
 * Calls to Cursor.set_range_dup() could lead to memory corruption due to
   Cursor's idea of the key and value failing to be updated correctly. Reported
   by Michael Lazarev.
+
+* The lmdb.tool copy command now supports a --compact flag. Contributed by
+  Achal Dave.
+
+* The lmdb.tool edit command selects the correct database when --delete is
+  specified. Contributed by ispequalnp.
+
+* lmdb.tool correctly supports the -r flag to select a read-only environment.
+  Contributed by ispequalnp.
+
+* The lmdb.tool --txn_size parameter was removed, as it was never implemented,
+  and its original function is no longer necessary with modern LMDB. Reported
+  by Achal Dave.
+
+* The documentation template was updated to fix broken links. Contributed by
+  Adam Chainz.
+
+* The Travis CI build configuration was heavily refactored by Alexander Zhukov.
+  Automated tests are running under Travis CI once more.
+
+* The CPython extension module did not define __all__. It is now defined
+  contain the same names as on CFFI.
+
+* Both implementations were updated to remove lmdb.open() from __all__,
+  ensuring "from lmdb import *" does not shadow the builtin open(). The
+  function can still be invoked using its fully qualified name, and the alias
+  "Environment" may be used when "from lmdb import *" is used. Reported by
+  Alexander Zhukov.
+
+* The CPython extension exported BadRSlotError, instead of BadRslotError. The
+  exception's name was corrected to match CFFI.
+
+* Environment.open_db() now supports integerdup=True, dupfixed=True, and
+  integerkey=True flags. Based on a patch by Jonathan Heyman.
 
 
 2016-07-11 v0.90
