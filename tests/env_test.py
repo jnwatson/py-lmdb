@@ -164,6 +164,8 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(map_async=flag)
             assert env.flags()['map_async'] == flag
 
+    @unittest.skipIf(sys.platform == 'win32',
+        'Mode argument is ignored on Windows; see lmdb.h')
     def test_mode_subdir_create(self):
         oldmask = os.umask(0)
         try:
@@ -177,6 +179,8 @@ class OpenTest(unittest.TestCase):
         finally:
             os.umask(oldmask)
 
+    @unittest.skipIf(sys.platform == 'win32',
+        'Mode argument is ignored on Windows; see lmdb.h')
     def test_mode_subdir_nocreate(self):
         oldmask = os.umask(0)
         try:
@@ -489,6 +493,8 @@ class OtherMethodsTest(unittest.TestCase):
         txn = env.begin()
         os._exit(0)
 
+    @unittest.skipIf(sys.platform == 'win32',
+        'Stale writers are cleared automatically on Windows, see lmdb.h')
     def test_reader_check(self):
         path, env = testlib.temp_env(max_spare_txns=0)
         rc = env.reader_check()
