@@ -1,5 +1,6 @@
 graft .
 graft lib
+graft tests
 include ChangeLog
 include LICENSE
 prune docs/_build
