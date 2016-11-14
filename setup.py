@@ -51,6 +51,19 @@ if sys.version[:3] < '2.5':
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
     use_cpython = False
 
+build_dir = os.path.dirname(__file__)
+if ((os.getenv('LMDB_IS_MASTER') is not None) or
+        (os.path.exists(os.path.join(build_dir, 'lmdb/is_master.txt')))):
+    print('py-lmdb: Using mdb.master branch')
+    lmdb_includedir = 'lib/mdb.master'
+    lmdb_sources = ['lib/mdb.master/mdb.c', 'lib/mdb.master/midl.c']
+    package_name = 'lmdb_master'
+else:
+    print('py-lmdb: Using mdb.RE (release) branch; override with LMDB_IS_MASTER=1')
+    lmdb_includedir = 'lib/mdb.RE'
+    lmdb_sources = ['lib/mdb.RE/mdb.c', 'lib/mdb.RE/midl.c']
+    package_name = 'lmdb'
+
 
 #
 # Figure out which LMDB implementation to use.
@@ -75,8 +88,8 @@ if os.getenv('LMDB_FORCE_SYSTEM') is not None:
     libraries = ['lmdb']
 else:
     print('py-lmdb: Using bundled liblmdb; override with LMDB_FORCE_SYSTEM=1.')
-    extra_sources = ['lib/mdb.c', 'lib/midl.c']
-    extra_include_dirs += ['lib']
+    extra_sources = lmdb_sources
+    extra_include_dirs += ['lib', lmdb_includedir]
     libraries = []
 
 
@@ -153,7 +166,7 @@ def grep_version():
                 return eval(line.split()[-1])
 
 setup(
-    name = 'lmdb',
+    name = package_name,
     version = grep_version(),
     description = "Universal Python binding for the LMDB 'Lightning' Database",
     author = 'David Wilson',
