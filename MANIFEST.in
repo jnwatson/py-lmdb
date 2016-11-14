@@ -1,7 +1,10 @@
 graft .
-graft lib
-graft tests
+include lmdb/is_master.txt
 include ChangeLog
 include LICENSE
 prune docs/_build
 prune lmdb/__pycache__
+prune lmdb/*.pyc
+prune tests/__pycache__
+prune tests/*.pyc
+prune lmdb.egg-info
