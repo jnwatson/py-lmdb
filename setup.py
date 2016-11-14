@@ -24,8 +24,9 @@ from __future__ import absolute_import
 from __future__ import with_statement
 
 import os
-import sys
 import platform
+import subprocess
+import sys
 
 from setuptools import Extension
 from setuptools import setup
@@ -51,9 +52,11 @@ if sys.version[:3] < '2.5':
 if sys.version[:3] in ('3.0', '3.1', '3.2'):
     use_cpython = False
 
-build_dir = os.path.dirname(__file__)
-if ((os.getenv('LMDB_IS_MASTER') is not None) or
-        (os.path.exists(os.path.join(build_dir, 'lmdb/is_master.txt')))):
+build_dir = os.path.dirname(os.path.abspath(__file__))
+is_master = ((os.getenv('LMDB_IS_MASTER') is not None) or
+             (os.path.exists(os.path.join(build_dir, 'lmdb/is_master.txt'))))
+
+if is_master:
     print('py-lmdb: Using mdb.master branch')
     lmdb_includedir = 'lib/mdb.master'
     lmdb_sources = ['lib/mdb.master/mdb.c', 'lib/mdb.master/midl.c']
@@ -117,7 +120,24 @@ if sys.platform.startswith('win'):
         extra_include_dirs += ['lib\\win32-stdint']
     extra_include_dirs += ['lib\\win32']
     extra_compile_args += [r'/FIPython.h']
-    libraries += ['Advapi32']
+    libraries += ['Advapi32', 'kernel32']
+    if is_master:
+        try:
+            import pefile
+        except ImportError:
+            print("ERROR: LMDB_IS_MASTER build on win32 requires")
+            print("ERROR: the 'pefile' package to be installed, and")
+            print("ERROR: the Microsoft lib.exe utility to be available")
+            print("ERROR: on the system path.")
+            raise SystemExit(1)
+        os.chdir(build_dir)
+        args = [sys.executable,
+                'misc\\fakelib.py',
+                '%(WINDIR)s\\system32\\ntdll.dll' % os.environ]
+        print("Running %s" % (args,))
+        subprocess.check_call(args)
+        extra_library_dirs += [build_dir]
+        libraries += ['ntdll']
 
 
 # Capture setup.py configuration for later use by cffi, otherwise the
