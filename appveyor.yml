@@ -10,7 +10,8 @@ environment:
       LMDB_IS_MASTER: "1"
 
 install:
-  - "%PYTHON%\\python.exe -m pip install pytest ."
+  - "%PYTHON%\\python.exe -m pip install pefile pytest"
+  - "%PYTHON%\\python.exe -m pip install ."
 
 build: off
 
