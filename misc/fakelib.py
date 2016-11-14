@@ -36,7 +36,8 @@ def main(pename):
             numexp += 1
             f.write("\t%s\n" % (exp.name,))
     print("Wrote %s with %d exports" % (defname, numexp))
-    args = ['lib', '/machine:' + machine, '/def:' + defname, '/out:' + libname]
+    lib_path = r"C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\lib.exe"
+    args = [lib_path, '/machine:' + machine, '/def:' + defname, '/out:' + libname]
     print("Running %s" % (args,))
     subprocess.check_call(args)
 
