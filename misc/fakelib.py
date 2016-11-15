@@ -4,15 +4,27 @@ import re
 import subprocess
 import sys
 
+import distutils.msvccompiler
+
 # Building py-lmdb 
 import pefile
 
 
 # http://stackoverflow.com/questions/6774967/lnk2019-unresolved-external-symbol-ntopenfile
 
-def main(pename):
-    print("Parsing %s" % (pename,))
-    pe = pefile.PE(pename)
+
+def get_lib_exe():
+    compiler = distutils.msvccompiler.MSVCCompiler()
+    compiler.initialize()
+    return compiler.lib
+
+
+def main(dll_path):
+    dll_path = os.path.abspath(dll_path)
+
+    print("Parsing %s" % (dll_path,))
+
+    pe = pefile.PE(dll_path)
     if not getattr(pe, "DIRECTORY_ENTRY_EXPORT", None):
         print("ERROR: given file has no exports.")
         return 1
@@ -23,21 +35,35 @@ def main(pename):
     else:
         machine = 'x86'
 
-    modname = os.path.basename(pename)
-    libname = re.sub(r"(?i)^.*?([^\\/]+)\.(?:dll|exe|sys|ocx)$", r"\1.lib", modname)
-    defname = libname.replace(".lib", ".def")
+    dll_filename = os.path.basename(dll_path)
+    lib_filename = re.sub(
+        r"(?i)^.*?([^\\/]+)\.(?:dll|exe|sys|ocx)$",
+        r"\1.lib",
+        dll_filename)
+    def_filename = lib_filename.replace(".lib", ".def")
+    def_path = os.path.join(os.getcwd(), def_filename)
+    lib_path = os.path.join(os.getcwd(), lib_filename)
 
-    print("Writing module definition file %s for %s" % (defname, modname))
-    with open(defname, "w") as f: # want it to throw, no sophisticated error handling here
-        f.write("LIBRARY %s\n\n" % (modname,))
+    print("Writing module definition file %s for %s" %
+          (def_path, dll_path))
+
+    with open(def_path, "w") as f:
+        f.write("LIBRARY %s\n\n" % (dll_filename,))
         f.write("EXPORTS\n")
         numexp = 0
-        for exp in [x for x in pe.DIRECTORY_ENTRY_EXPORT.symbols if x.name]:
-            numexp += 1
-            f.write("\t%s\n" % (exp.name,))
-    print("Wrote %s with %d exports" % (defname, numexp))
-    lib_path = r"C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\lib.exe"
-    args = [lib_path, '/machine:' + machine, '/def:' + defname, '/out:' + libname]
+        for symbol in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+            if symbol.name:
+                numexp += 1
+                #f.write("\t%s\n" % (symbol.name.decode(),))
+
+    print("Wrote %s with %d exports" % (def_path, numexp))
+    args = [
+        get_lib_exe(),
+        '/machine:' + machine,
+        '/def:' + def_path,
+        '/out:' + lib_path
+    ]
+
     print("Running %s" % (args,))
     subprocess.check_call(args)
 
