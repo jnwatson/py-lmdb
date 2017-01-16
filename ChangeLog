@@ -1,5 +1,11 @@
 
-2017-10-17 v0.92
+2017-01-30 v0.93
+
+* The "warm" tool command did not function on Python 3.x. Reported by Github
+  user dev351.
+
+
+2016-10-17 v0.92
 
 * Changes to support __all__ caused the CPython module to fail to import at
   runtime on Python 3. This was hidden during testing as the CFFI module was

@@ -102,6 +102,12 @@ ENV = None
 DB = None
 
 
+def _to_bytes(s):
+    """Given either a Python 2.x or 3.x str, return either a str (Python 2.x)
+    or a bytes instance (Python 3.x)."""
+    return globals().get('unicode', str)(s).encode('ascii')
+
+
 def isprint(c):
     """Return ``True`` if the character `c` can be printed visibly and without
     adversely affecting printing position (e.g. newline)."""
@@ -468,7 +474,7 @@ def cmd_warm(opts, args):
 
     bufsize = 32768
     last_offset = stat['psize'] * info['last_pgno']
-    buf = array.array('c', '\x00' * bufsize)
+    buf = array.array('B', _to_bytes('\x00' * bufsize))
     t0 = time.time()
 
     fp = open(opts.env + '/data.mdb', 'rb', bufsize)
