@@ -1922,7 +1922,7 @@ class Cursor(object):
         with `MDB_NEXT_NODUP
         <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
-        return self._cursor_get(_lib.MDB_PREV_NODUP)
+        return self._cursor_get(_lib.MDB_NEXT_NODUP)
 
     def set_key(self, key):
         """Seek exactly to `key`, returning ``True`` on success or ``False`` if
