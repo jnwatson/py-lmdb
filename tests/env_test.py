@@ -42,7 +42,7 @@ NO_READERS = UnicodeType('(no active readers)\n')
 
 try:
     PAGE_SIZE = os.sysconf(os.sysconf_names['SC_PAGE_SIZE'])
-except (KeyError, OSError):
+except (AttributeError, KeyError, OSError):
     PAGE_SIZE = 4096
 
 
