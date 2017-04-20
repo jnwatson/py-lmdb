@@ -40,6 +40,11 @@ import lmdb
 
 NO_READERS = UnicodeType('(no active readers)\n')
 
+try:
+    PAGE_SIZE = os.sysconf(os.sysconf_names['SC_PAGE_SIZE'])
+except (KeyError, OSError):
+    PAGE_SIZE = 4096
+
 
 class VersionTest(unittest.TestCase):
     def tearDown(self):
@@ -245,11 +250,11 @@ class SetMapSizeTest(unittest.TestCase):
             lambda: env.set_mapsize(-2015))
 
     def test_applied(self):
-        _, env = testlib.temp_env(map_size=32768)
-        assert env.info()['map_size'] == 32768
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        assert env.info()['map_size'] == PAGE_SIZE * 8
 
-        env.set_mapsize(65536)
-        assert env.info()['map_size'] == 65536
+        env.set_mapsize(PAGE_SIZE * 16)
+        assert env.info()['map_size'] == PAGE_SIZE * 16
 
 
 class CloseTest(unittest.TestCase):
