@@ -1,13 +1,37 @@
 environment:
   matrix:
-    - PYTHON: "C:\\Python27-x64"
-    - PYTHON: "C:\\Python35-x64"
+    - PYTHON: 'C:\Python26'
+    - PYTHON: 'C:\Python26-x64'
+    - PYTHON: 'C:\Python27'
+    - PYTHON: 'C:\Python27-x64'
+    - PYTHON: 'C:\Python33'
+    #- PYTHON: 'C:\Python33-x64'
+    - PYTHON: 'C:\Python34'
+    #- PYTHON: 'C:\Python34-x64'
+    - PYTHON: 'C:\Python35'
+    - PYTHON: 'C:\Python35-x64'
+    - PYTHON: 'C:\Python36'
+    - PYTHON: 'C:\Python36-x64'
+
+artifacts:
+  - {
+    path: 'dist\*.egg',
+    type: 'file'
+  }
+  - {
+    path: 'dist\*.whl',
+    type: 'file'
+  }
 
 install:
-  - "%PYTHON%\\python.exe -m pip install pytest ."
+  # http://springflex.blogspot.co.uk/2014/02/how-to-fix-valueerror-when-trying-to.html. Works for 33-x64 only.
+  - 'COPY "C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\bin\vcvars64.bat" "C:\Program Files (x86)\Microsoft Visual Studio 9.0\VC\bin\vcvarsamd64.bat"'
+  - '%PYTHON%\scripts\pip.exe install wheel pytest .'
 
-build: off
+build_script:
+  - '%PYTHON%\python.exe setup.py bdist_egg'
+  - '%PYTHON%\python.exe setup.py bdist_wheel'
 
 test_script:
-  - "cd tests"
-  - "%PYTHON%\\python.exe -m pytest ."
+  - 'cd tests'
+  - '%PYTHON%\python.exe -m pytest .'

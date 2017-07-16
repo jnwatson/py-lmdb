@@ -35,7 +35,7 @@ INTERPS = (
     ('Python27-64', False),
     #('Python31', False),
     #('Python31-64', False),
-    ('Python32', False),
+    #('Python32', False),
     ('Python32-64', False),
     ('Python33', False),
     ('Python33-64', False),
