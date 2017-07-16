@@ -1,8 +1,25 @@
 
-2017-01-30 v0.93
+2017-07-16 v0.93
+
+* py-lmdb is now built with AppVeyor CI, providing early feedback on Windows
+  build health. Egg and wheel artifacts are being generated, removing the need
+  for a dedicated Windows build machine, however there is no mechanism to
+  paublish these to PyPI yet.
 
 * The "warm" tool command did not function on Python 3.x. Reported by Github
   user dev351.
+
+* Tests now pass on non-4kb page-sized machines, such as ppc64le. Reported by
+  Jonathan J. Helmus.
+
+* Windows 3.6 eggs and wheels are now available on PyPI, and tests are run
+  against 3.6. Reported by Ofek Lev.
+
+* Python 3.2 is no longer supported, due to yet more pointless breakage
+  introduced in pip/pkg_resources.
+
+* py-lmdb currently does not support LMDB >=0.9.19 due to interface changes in
+  LMDB. Support will appear in a future release.
 
 
 2016-10-17 v0.92
