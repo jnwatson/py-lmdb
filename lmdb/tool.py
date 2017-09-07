@@ -198,12 +198,12 @@ def die(fmt, *args):
 
 def dump_cursor_to_fp(cursor, fp):
     for key, value in cursor:
-        fp.write('+%d,%d:' % (len(key), len(value)))
+        fp.write(b'+%d,%d:' % (len(key), len(value)))
         fp.write(key)
-        fp.write('->')
+        fp.write(b'->')
         fp.write(value)
-        fp.write('\n')
-    fp.write('\n')
+        fp.write(b'\n')
+    fp.write(b'\n')
 
 
 def db_map_from_args(args):
@@ -218,7 +218,7 @@ def db_map_from_args(args):
             dbname = None
         if dbname in db_map:
             die('DB specified twice: %r', arg)
-        db_map[dbname] = (ENV.open_db(dbname), path)
+        db_map[dbname] = (ENV.open_db(dbname.encode('ascii') if dbname else None), path)
 
     if not db_map:
         db_map[':main:'] = (ENV.open_db(None), 'main.cdbmake')
@@ -254,7 +254,7 @@ def cmd_copyfd(opts, args):
 def cmd_dump(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
-        for dbname, (db, path) in db_map.iteritems():
+        for dbname, (db, path) in db_map.items():
             with open(path, 'wb', BUF_SIZE) as fp:
                 print('Dumping to %r...' % (path,))
                 cursor = txn.cursor(db=db)
