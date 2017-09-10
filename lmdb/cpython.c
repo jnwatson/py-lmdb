@@ -688,7 +688,7 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
             *((PyObject **) dst) = val;
             break;
         case ARG_BOOL:
-            *((int *)dst) = val == Py_True;
+            *((int *)dst) = PyObject_IsTrue(val);
             break;
         case ARG_BUF:
             ret = val_from_buffer((MDB_val *)dst, val);
