@@ -71,6 +71,7 @@ Basic tools for working with LMDB.
 
 from __future__ import absolute_import
 from __future__ import with_statement
+from __future__ import unicode_literals
 import array
 import collections
 import csv
