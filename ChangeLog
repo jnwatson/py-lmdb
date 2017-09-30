@@ -1,4 +1,11 @@
 
+2017-09-30 v0.94
+
+* CPython argument parsing now matches the behaviour of CFFI, and most sane
+  Python APIs: a bool parameter is considered to be true if it is any truthy
+  value, not just if it is exactly True. Reported by Nic Watson.
+
+
 2017-07-16 v0.93
 
 * py-lmdb is now built with AppVeyor CI, providing early feedback on Windows
