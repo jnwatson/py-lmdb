@@ -120,31 +120,31 @@ def xxd(s):
     """Return a vaguely /usr/bin/xxd formatted representation of the bytestring
     `s`."""
     sio = StringIO()
-    pr = bytes('')
+    pr = _to_bytes('')
     for idx, ch in enumerate(s):
         ch = chr(ch)
         if not (idx % 16):
             if idx:
-                sio.write(bytes('  '))
+                sio.write(_to_bytes('  '))
                 sio.write(pr)
-                sio.write(bytes('\n'))
+                sio.write(_to_bytes('\n'))
             sio.write(_to_bytes('%07x:' % idx))
-            pr = bytes('')
+            pr = _to_bytes('')
         if not (idx % 2):
-            sio.write(bytes(' '))
+            sio.write(_to_bytes(' '))
         # import pdb; pdb.set_trace()
         sio.write(_to_bytes('%02x' % (ord(ch),)))
-        pr += _to_bytes(ch) if isprint(ch) else bytes('.')
+        pr += _to_bytes(ch) if isprint(ch) else _to_bytes('.')
 
     if idx % 16:
         need = 15 - (idx % 16)
         # fill remainder of last line.
-        sio.write(bytes('  ') * need)
-        sio.write(bytes(' ') * (need // 2))
-        sio.write(bytes('  '))
+        sio.write(_to_bytes('  ') * need)
+        sio.write(_to_bytes(' ') * (need // 2))
+        sio.write(_to_bytes('  '))
         sio.write(pr)
 
-    sio.write(bytes('\n'))
+    sio.write(_to_bytes('\n'))
     return sio.getvalue().decode(ENCODING)
 
 
@@ -208,10 +208,10 @@ def dump_cursor_to_fp(cursor, fp):
     for key, value in cursor:
         fp.write(_to_bytes('+%d,%d:' % (len(key), len(value))))
         fp.write(key)
-        fp.write(bytes('->'))
+        fp.write(_to_bytes('->'))
         fp.write(value)
-        fp.write(bytes('\n'))
-    fp.write(bytes('\n'))
+        fp.write(_to_bytes('\n'))
+    fp.write(_to_bytes('\n'))
 
 
 def db_map_from_args(args):
@@ -551,23 +551,23 @@ def cmd_edit(opts, args):
     with ENV.begin(write=True) as txn:
         cursor = txn.cursor(db=DB)
         for elem in opts.add or []:
-            key, _, value = _to_bytes(elem).partition(bytes('='))
+            key, _, value = _to_bytes(elem).partition(_to_bytes('='))
             cursor.put(key, value, overwrite=False)
 
         for elem in opts.set or []:
-            key, _, value = _to_bytes(elem).partition(bytes('='))
+            key, _, value = _to_bytes(elem).partition(_to_bytes('='))
             cursor.put(key, value)
 
         for key in opts.delete or []:
             txn.delete(_to_bytes(key), db=DB)
 
         for elem in opts.add_file or []:
-            key, _, path = _to_bytes(elem).partition(bytes('='))
+            key, _, path = _to_bytes(elem).partition(_to_bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read(), overwrite=False)
 
         for elem in opts.set_file or []:
-            key, _, path = _to_bytes(elem).partition(bytes('='))
+            key, _, path = _to_bytes(elem).partition(_to_bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read())
 
