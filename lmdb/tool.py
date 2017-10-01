@@ -71,7 +71,6 @@ Basic tools for working with LMDB.
 
 from __future__ import absolute_import
 from __future__ import with_statement
-from __future__ import unicode_literals
 import array
 import collections
 import csv
@@ -121,31 +120,31 @@ def xxd(s):
     """Return a vaguely /usr/bin/xxd formatted representation of the bytestring
     `s`."""
     sio = StringIO()
-    pr = b''
+    pr = bytes('')
     for idx, ch in enumerate(s):
         ch = chr(ch)
         if not (idx % 16):
             if idx:
-                sio.write(b'  ')
+                sio.write(bytes('  '))
                 sio.write(pr)
-                sio.write(b'\n')
+                sio.write(bytes('\n'))
             sio.write(_to_bytes('%07x:' % idx))
-            pr = b''
+            pr = bytes('')
         if not (idx % 2):
-            sio.write(b' ')
+            sio.write(bytes(' '))
         # import pdb; pdb.set_trace()
         sio.write(_to_bytes('%02x' % (ord(ch),)))
-        pr += _to_bytes(ch) if isprint(ch) else b'.'
+        pr += _to_bytes(ch) if isprint(ch) else bytes('.')
 
     if idx % 16:
         need = 15 - (idx % 16)
         # fill remainder of last line.
-        sio.write(b'  ' * need)
-        sio.write(b' ' * (need // 2))
-        sio.write(b'  ')
+        sio.write(bytes('  ') * need)
+        sio.write(bytes(' ') * (need // 2))
+        sio.write(bytes('  '))
         sio.write(pr)
 
-    sio.write(b'\n')
+    sio.write(bytes('\n'))
     return sio.getvalue().decode(ENCODING)
 
 
@@ -209,10 +208,10 @@ def dump_cursor_to_fp(cursor, fp):
     for key, value in cursor:
         fp.write(_to_bytes('+%d,%d:' % (len(key), len(value))))
         fp.write(key)
-        fp.write(b'->')
+        fp.write(bytes('->'))
         fp.write(value)
-        fp.write(b'\n')
-    fp.write(b'\n')
+        fp.write(bytes('\n'))
+    fp.write(bytes('\n'))
 
 
 def db_map_from_args(args):
@@ -552,23 +551,23 @@ def cmd_edit(opts, args):
     with ENV.begin(write=True) as txn:
         cursor = txn.cursor(db=DB)
         for elem in opts.add or []:
-            key, _, value = _to_bytes(elem).partition(b'=')
+            key, _, value = _to_bytes(elem).partition(bytes('='))
             cursor.put(key, value, overwrite=False)
 
         for elem in opts.set or []:
-            key, _, value = _to_bytes(elem).partition(b'=')
+            key, _, value = _to_bytes(elem).partition(bytes('='))
             cursor.put(key, value)
 
         for key in opts.delete or []:
             txn.delete(_to_bytes(key), db=DB)
 
         for elem in opts.add_file or []:
-            key, _, path = _to_bytes(elem).partition(b'=')
+            key, _, path = _to_bytes(elem).partition(bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read(), overwrite=False)
 
         for elem in opts.set_file or []:
-            key, _, path = _to_bytes(elem).partition(b'=')
+            key, _, path = _to_bytes(elem).partition(bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read())
 
