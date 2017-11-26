@@ -103,7 +103,7 @@ if sys.platform.startswith('win'):
     if msvc_ver and not msvc_ver >= 1600:
         extra_include_dirs += ['lib\\win32-stdint']
     extra_include_dirs += ['lib\\win32']
-    extra_compile_args += [r'/FIPython.h']
+    extra_compile_args += [r'/FIPython.h', '/DMDB_VL32']
     libraries += ['Advapi32']
 
 
