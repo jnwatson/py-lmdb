@@ -1,10 +1,12 @@
 
-2017-09-30 v0.94
+2018-XX-XX v0.94
 
 * CPython argument parsing now matches the behaviour of CFFI, and most sane
   Python APIs: a bool parameter is considered to be true if it is any truthy
   value, not just if it is exactly True. Reported by Nic Watson.
-
+* Removed Python 2.6 support due to urllib3warnings and pytest dropping it.
+* LMDB v.0.9.22
+* Improved Python 3 support in lmdb.tools.
 
 2017-07-16 v0.93
 
