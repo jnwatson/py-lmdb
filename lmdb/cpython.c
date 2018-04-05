@@ -145,22 +145,6 @@ typedef struct TransObject TransObject;
 
 #endif
 
-#if (PY_MAJOR_VERSION == 2) && (PY_MINOR_VERSION < 6)
-static PyObject *
-PyUnicode_FromString(const char *u)
-{
-    PyObject *s = PyString_FromString(u);
-    if(s) {
-        PyObject *t = PyUnicode_FromEncodedObject(
-            s, Py_FileSystemDefaultEncoding, "strict");
-        Py_DECREF(s);
-        s = t;
-    }
-    return s;
-}
-#endif
-
-
 struct list_head {
     struct lmdb_object *prev;
     struct lmdb_object *next;
