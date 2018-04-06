@@ -44,13 +44,6 @@ from testlib import B
 from testlib import O
 
 
-try:
-    next(iter([1]))
-except NameError: # Python2.5.
-    def next(it):
-        return it.next()
-
-
 class CrashTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
@@ -232,6 +225,31 @@ class EmptyIterTest(unittest.TestCase):
         assert nex is not None
         self.assertRaises(StopIteration, nex)
 
+
+class MultiputTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_multiput_segfault(self):
+        # https://github.com/dw/py-lmdb/issues/17://github.com/dw/py-lmdb/issues/173
+        _, env = testlib.temp_env()
+        db = env.open_db(b'foo', dupsort=True)
+        txn = env.begin(db=db, write=True)
+        txn.put(b'a', b'\x00\x00\x00\x00\x00\x00\x00\x00')
+        txn.put(b'a', b'\x05')
+        txn.put(b'a', b'\t')
+        txn.put(b'a', b'\r')
+        txn.put(b'a', b'\x11')
+        txn.put(b'a', b'\x15')
+        txn.put(b'a', b'\x19')
+        txn.put(b'a', b'\x1d')
+        txn.put(b'a', b'!')
+        txn.put(b'a', b'%')
+        txn.put(b'a', b')')
+        txn.put(b'a', b'-')
+        txn.put(b'a', b'1')
+        txn.put(b'a', b'5')
+        txn.commit()
 
 if __name__ == '__main__':
     unittest.main()

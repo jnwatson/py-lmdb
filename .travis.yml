@@ -8,7 +8,6 @@ matrix:
     env: LMDB_FORCE_CPYTHON=1
 
 python:
-  - 2.6
   - 2.7
   - 3.3
   - 3.4
@@ -31,12 +30,7 @@ before_script:
 
 script:
   - >
-    if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]];
-      then
-        sudo ./misc/runtests-travisci.sh
-      else
-        with_gdb python -m pytest tests;
-    fi
+    with_gdb python -m pytest tests
 
 notifications:
   email: false
