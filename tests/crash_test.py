@@ -233,7 +233,8 @@ class MultiputTest(unittest.TestCase):
     def test_multiput_segfault(self):
         # https://github.com/dw/py-lmdb/issues/17://github.com/dw/py-lmdb/issues/173
         _, env = testlib.temp_env()
-        txn = env.begin(write=True)
+        db = env.open_db(b'foo', dupsort=True)
+        txn = env.begin(db=db, write=True)
         txn.put(b'a', b'\x00\x00\x00\x00\x00\x00\x00\x00')
         txn.put(b'a', b'\x05')
         txn.put(b'a', b'\t')
