@@ -73,7 +73,6 @@ from __future__ import absolute_import
 from __future__ import with_statement
 import array
 import collections
-import contextlib
 import csv
 import functools
 import optparse
@@ -90,9 +89,9 @@ try:
     from io import BytesIO as StringIO
 except ImportError:
     try:
-        from cStringIO import StringIO
+        from cStringIO import StringIO  # type: ignore
     except ImportError:
-        from StringIO import StringIO
+        from StringIO import StringIO  # type: ignore
 
 import lmdb
 
@@ -101,11 +100,14 @@ BUF_SIZE = 10485760
 ENV = None
 DB = None
 
+# How strings get encoded to and decoded from DB
+ENCODING = 'utf-8'
+
 
 def _to_bytes(s):
     """Given either a Python 2.x or 3.x str, return either a str (Python 2.x)
     or a bytes instance (Python 3.x)."""
-    return globals().get('unicode', str)(s).encode('ascii')
+    return globals().get('unicode', str)(s).encode(ENCODING)
 
 
 def isprint(c):
@@ -118,29 +120,32 @@ def xxd(s):
     """Return a vaguely /usr/bin/xxd formatted representation of the bytestring
     `s`."""
     sio = StringIO()
+    pr = _to_bytes('')
     for idx, ch in enumerate(s):
+        ch = chr(ch)
         if not (idx % 16):
             if idx:
-                sio.write('  ')
+                sio.write(_to_bytes('  '))
                 sio.write(pr)
-                sio.write('\n')
-            sio.write('%07x:' % idx)
-            pr = ''
+                sio.write(_to_bytes('\n'))
+            sio.write(_to_bytes('%07x:' % idx))
+            pr = _to_bytes('')
         if not (idx % 2):
-            sio.write(' ')
-        sio.write('%02x' % (ord(ch),))
-        pr += ch if isprint(ch) else '.'
+            sio.write(_to_bytes(' '))
+        # import pdb; pdb.set_trace()
+        sio.write(_to_bytes('%02x' % (ord(ch),)))
+        pr += _to_bytes(ch) if isprint(ch) else _to_bytes('.')
 
     if idx % 16:
         need = 15 - (idx % 16)
         # fill remainder of last line.
-        sio.write('  ' * need)
-        sio.write(' ' * (need / 2))
-        sio.write('  ')
+        sio.write(_to_bytes('  ') * need)
+        sio.write(_to_bytes(' ') * (need // 2))
+        sio.write(_to_bytes('  '))
         sio.write(pr)
 
-    sio.write('\n')
-    return sio.getvalue()
+    sio.write(_to_bytes('\n'))
+    return sio.getvalue().decode(ENCODING)
 
 
 def make_parser():
@@ -152,8 +157,11 @@ def make_parser():
     parser.add_option('-r', '--read', help='Open environment read-only')
     parser.add_option('-S', '--map_size', type='int', default='10',
                       help='Map size in megabytes (default: 10)')
-    parser.add_option('-a', '--all', action='store_true',
-                      help='Make "dump" dump all databases')
+    parser.add_option('-s', '--use-single-file', action='store_true',
+                      help='The database was created as a single file and not a subdirectory')
+    # FIXME:  implement --all
+    # parser.add_option('-a', '--all', action='store_true',
+    #                   help='Make "dump" dump all databases')
     parser.add_option('-E', '--target_env',
                       help='Target environment file for "dumpfd"')
     parser.add_option('-x', '--xxd', action='store_true',
@@ -198,12 +206,12 @@ def die(fmt, *args):
 
 def dump_cursor_to_fp(cursor, fp):
     for key, value in cursor:
-        fp.write(b'+%d,%d:' % (len(key), len(value)))
+        fp.write(_to_bytes('+%d,%d:' % (len(key), len(value))))
         fp.write(key)
-        fp.write(b'->')
+        fp.write(_to_bytes('->'))
         fp.write(value)
-        fp.write(b'\n')
-    fp.write(b'\n')
+        fp.write(_to_bytes('\n'))
+    fp.write(_to_bytes('\n'))
 
 
 def db_map_from_args(args):
@@ -218,7 +226,7 @@ def db_map_from_args(args):
             dbname = None
         if dbname in db_map:
             die('DB specified twice: %r', arg)
-        db_map[dbname] = (ENV.open_db(dbname.encode('ascii') if dbname else None), path)
+        db_map[dbname] = (ENV.open_db(_to_bytes(dbname) if dbname else None), path)
 
     if not db_map:
         db_map[':main:'] = (ENV.open_db(None), 'main.cdbmake')
@@ -264,7 +272,7 @@ def cmd_dump(opts, args):
 def restore_cursor_from_fp(txn, fp, db):
     read = fp.read
     read1 = functools.partial(read, 1)
-    read_until = lambda sep: ''.join(iter(read1, sep))
+    read_until = lambda sep: ''.join(iter(read1, sep))  # NOQA: E731
 
     rec_nr = 0
 
@@ -276,7 +284,6 @@ def restore_cursor_from_fp(txn, fp, db):
         elif plus != '+':
             die('bad or missing plus, line/record #%d', rec_nr)
 
-        bad = False
         try:
             klen = int(read_until(','), 10)
             dlen = int(read_until(':'), 10)
@@ -303,7 +310,7 @@ def cmd_drop(opts, args):
     if not args:
         die('Must specify at least one sub-database (see --help)')
 
-    dbs = map(ENV.open_db, args)
+    dbs = map(ENV.open_db, (map(_to_bytes, args)))
     for idx, db in enumerate(dbs):
         name = args[idx]
         if name == ':main:':
@@ -322,7 +329,7 @@ def cmd_readers(opts, args):
 def cmd_restore(opts, args):
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True, write=True) as txn:
-        for dbname, (db, path) in db_map.iteritems():
+        for dbname, (db, path) in db_map.items():
             with open(path, 'rb', BUF_SIZE) as fp:
                 print('Restoring from %r...' % (path,))
                 count = restore_cursor_from_fp(txn, fp, db)
@@ -330,10 +337,11 @@ def cmd_restore(opts, args):
 
 
 def delta(hst):
-    return [(hst[i] - hst[i-1]) for i in xrange(1, len(hst))]
+    return [(hst[i] - hst[i - 1]) for i in range(1, len(hst))]
 
 
 SYS_BLOCK = '/sys/block'
+
 
 def _find_diskstat(path):
     if not os.path.exists(SYS_BLOCK):
@@ -344,7 +352,7 @@ def _find_diskstat(path):
     def maybe(rootpath):
         dpath = os.path.join(rootpath, 'dev')
         if os.path.exists(dpath):
-            with file(dpath) as fp:
+            with open(dpath) as fp:
                 if fp.read().strip() == devs:
                     return os.path.join(rootpath, 'stat')
 
@@ -358,6 +366,7 @@ def _find_diskstat(path):
             statpath = maybe(base2path)
             if statpath:
                 return statpath
+
 
 class DiskStatter(object):
     FIELDS = (
@@ -375,7 +384,7 @@ class DiskStatter(object):
     )
 
     def __init__(self, path):
-        self.fp = file(path)
+        self.fp = open(path)
         self.refresh()
 
     def refresh(self):
@@ -390,6 +399,7 @@ def cmd_watch(opts, args):
 
     def window(func):
         history = collections.deque()
+
         def windowfunc():
             history.append(func())
             if len(history) > opts.window:
@@ -400,7 +410,7 @@ def cmd_watch(opts, args):
             return n / opts.interval
         return windowfunc
 
-    envmb = lambda: (info['last_pgno'] * stat['psize']) / 1048576.
+    envmb = lambda: (info['last_pgno'] * stat['psize']) / 1048576.  # NOQA
 
     cols = [
         ('%d',    'Depth', lambda: stat['depth']),
@@ -423,9 +433,7 @@ def cmd_watch(opts, args):
     if statpath:
         statter = DiskStatter(statpath)
         cols += [
-            #('%d', 'SctRd', lambda: statter.sectors_read),
             ('%+d', 'SctRd/s', window(lambda: statter.sectors_read)),
-            #('%d', 'SctWr', lambda: statter.sectors_written),
             ('%+d', 'SctWr/s', window(lambda: statter.sectors_written)),
         ]
 
@@ -477,11 +485,14 @@ def cmd_warm(opts, args):
     buf = array.array('B', _to_bytes('\x00' * bufsize))
     t0 = time.time()
 
-    fp = open(opts.env + '/data.mdb', 'rb', bufsize)
+    if opts.use_single_file:
+        fp = open(opts.env, 'rb', bufsize)
+    else:
+        fp = open(opts.env + '/data.mdb', 'rb', bufsize)
     while fp.tell() < last_offset:
         fp.readinto(buf)
     print('Warmed %.2fmb in %dms' %
-        (last_offset / 1048576., 1000 * (time.time() - t0)))
+          (last_offset / 1048576., 1000 * (time.time() - t0)))
 
 
 def cmd_rewrite(opts, args):
@@ -499,7 +510,7 @@ def cmd_rewrite(opts, args):
     for arg in args:
         name = None if arg == ':main:' else arg
         src_db = ENV.open_db(name)
-        dst_db = ENV.open_db(name)
+        dst_db = target_env.open_db(name)
         dbs.append((arg, src_db, dst_db))
 
     if not dbs:
@@ -508,8 +519,9 @@ def cmd_rewrite(opts, args):
     for name, src_db, dst_db in dbs:
         print('Writing %r...' % (name,))
         with target_env.begin(db=dst_db, write=True) as wtxn:
-            for key, value in ENV.cursor(db=src_db, buffers=True):
-                wtxn.put(key, value, append=True)
+            with ENV.begin(db=src_db, buffers=True) as rtxn:
+                for key, value in rtxn.cursor():
+                    wtxn.put(key, value, append=True)
 
     print('Syncing..')
     target_env.sync(True)
@@ -520,7 +532,7 @@ def cmd_get(opts, args):
 
     with ENV.begin(buffers=True, db=DB) as txn:
         for arg in args:
-            value = txn.get(arg)
+            value = txn.get(_to_bytes(arg))
             if value is None:
                 print('%r: missing' % (arg,))
                 continue
@@ -539,30 +551,30 @@ def cmd_edit(opts, args):
     with ENV.begin(write=True) as txn:
         cursor = txn.cursor(db=DB)
         for elem in opts.add or []:
-            key, _, value = elem.partition('=')
+            key, _, value = _to_bytes(elem).partition(_to_bytes('='))
             cursor.put(key, value, overwrite=False)
 
         for elem in opts.set or []:
-            key, _, value = elem.partition('=')
+            key, _, value = _to_bytes(elem).partition(_to_bytes('='))
             cursor.put(key, value)
 
         for key in opts.delete or []:
-            txn.delete(key, db=DB)
+            txn.delete(_to_bytes(key), db=DB)
 
         for elem in opts.add_file or []:
-            key, _, path = elem.partition('=')
+            key, _, path = _to_bytes(elem).partition(_to_bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read(), overwrite=False)
 
         for elem in opts.set_file or []:
-            key, _, path = elem.partition('=')
+            key, _, path = _to_bytes(elem).partition(_to_bytes('='))
             with open(path, 'rb') as fp:
                 cursor.put(key, fp.read())
 
 
 def cmd_shell(opts, args):
     import code
-    import readline
+    import readline  # NOQA
     code.InteractiveConsole(globals()).interact()
 
 
@@ -581,9 +593,11 @@ def _get_term_width(default=(80, 25)):
     except:
         return default
 
+
 def _on_sigwinch(*args):
     global _TERM_WIDTH, _TERM_HEIGHT
     _TERM_WIDTH, _TERM_HEIGHT = _get_term_width()
+
 
 def main():
     parser = make_parser()
@@ -595,7 +609,7 @@ def main():
         die('Please specify environment (--env)')
 
     global ENV
-    ENV = lmdb.open(opts.env, map_size=opts.map_size*1048576,
+    ENV = lmdb.open(opts.env, map_size=opts.map_size * 1048576, subdir=not opts.use_single_file,
                     max_dbs=opts.max_dbs, create=False, readonly=opts.read == 'READ')
 
     if opts.db:
