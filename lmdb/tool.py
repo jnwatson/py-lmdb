@@ -122,7 +122,8 @@ def xxd(s):
     sio = StringIO()
     pr = _to_bytes('')
     for idx, ch in enumerate(s):
-        ch = chr(ch)
+        if sys.version_info[0] >= 3:
+            ch = chr(ch)
         if not (idx % 16):
             if idx:
                 sio.write(_to_bytes('  '))
@@ -132,7 +133,6 @@ def xxd(s):
             pr = _to_bytes('')
         if not (idx % 2):
             sio.write(_to_bytes(' '))
-        # import pdb; pdb.set_trace()
         sio.write(_to_bytes('%02x' % (ord(ch),)))
         pr += _to_bytes(ch) if isprint(ch) else _to_bytes('.')
 
@@ -541,7 +541,7 @@ def cmd_get(opts, args):
             if opts.xxd:
                 print(xxd(value))
             else:
-                print(value)
+                print(bytes(value))
 
 
 def cmd_edit(opts, args):
