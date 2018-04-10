@@ -11,8 +11,8 @@ lmdb
 This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two variants are provided and automatically selected
 during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
-that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6,
-and a C extension that supports CPython 2.5-2.7 and >=3.3. Both variants
+that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.7,
+and a C extension that supports CPython >=2.7 and >=3.3. Both variants
 provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
@@ -199,10 +199,8 @@ moment they are deployed in production. Always explicitly encode and decode any
 Unicode values before passing them to LMDB.
 
 This documentation uses :py:func:`bytes` in examples. In Python 3.x this is a
-distinct type, whereas in Python 2.6 and 2.7 it is simply an alias for
-:py:func:`str`. Since Python 2.5 does not have this alias, you should
-substitute :py:func:`str` for :py:func:`bytes` in any code examples below when
-running on Python 2.5.
+distinct type, whereas in Python 2.7 it is simply an alias for
+:py:func:`str`.
 
 
 Buffers
