@@ -6,6 +6,8 @@ matrix:
     env: LMDB_FORCE_CPYTHON=1
   - python: pypy
     env: LMDB_FORCE_CPYTHON=1
+  - python: pypy
+    env: LMDB_FORCE_CPYTHON=1 LMDB_FORCE_SYSTEM=1
 
 python:
   - 2.7
