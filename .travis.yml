@@ -19,8 +19,10 @@ python:
 env:
   - LMDB_FORCE_CFFI=1
   - LMDB_FORCE_CPYTHON=1
+  - LMDB_FORCE_CFFI=1 LMDB_FORCE_SYSTEM=1
+  - LMDB_FORCE_CPYTHON=1 LMDB_FORCE_SYSTEM=1
 install:
-  - sudo apt-get install gdb
+  - sudo apt-get install gdb liblmdb-dev
   - pip install cffi
 
   - python setup.py develop
