@@ -23,8 +23,14 @@ env:
   - LMDB_FORCE_CPYTHON=1
   - LMDB_FORCE_CFFI=1 LMDB_FORCE_SYSTEM=1
   - LMDB_FORCE_CPYTHON=1 LMDB_FORCE_SYSTEM=1
+
+addons:
+  apt:
+    packages:
+      - gdb
+      - liblmdb-dev
+
 install:
-  - sudo apt-get install gdb liblmdb-dev
   - pip install cffi
 
   - python setup.py develop
