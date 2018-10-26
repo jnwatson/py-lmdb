@@ -2,8 +2,6 @@ language: python
 
 matrix:
   exclude:
-  - python: 3.2
-    env: LMDB_FORCE_CPYTHON=1
   - python: pypy
     env: LMDB_FORCE_CPYTHON=1
 
@@ -24,7 +22,6 @@ install:
   - pip install cffi
 
   - python setup.py develop
-  - if [[ $TRAVIS_PYTHON_VERSION == '3.2' ]]; then pip install -I py==1.4.20 pytest==2.5.2; fi
 before_script:
   - source misc/helpers.sh
 
