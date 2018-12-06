@@ -1,5 +1,7 @@
-graft .
+graft docs
+graft examples
 graft lib
+graft lmdb
 graft tests
 include ChangeLog
 include LICENSE
