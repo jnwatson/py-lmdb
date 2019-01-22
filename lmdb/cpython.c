@@ -1258,14 +1258,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     fspath = PyBytes_AS_STRING(fspath_obj);
 
     if(arg.create && arg.subdir && !arg.readonly) {
-        struct stat st;
-        errno = 0;
-        stat(fspath, &st);
-        if(errno == ENOENT) {
-            if(mkdir(fspath, arg.mode)) {
-                PyErr_SetFromErrnoWithFilename(PyExc_OSError, fspath);
-                goto fail;
-            }
+        if(mkdir(fspath, arg.mode) && errno != EEXIST) {
+            PyErr_SetFromErrnoWithFilename(PyExc_OSError, fspath);
+            goto fail;
         }
     }
 

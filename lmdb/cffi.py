@@ -29,6 +29,7 @@ Please see https://lmdb.readthedocs.io/
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import errno
 import inspect
 import os
 import sys
@@ -701,8 +702,12 @@ class Environment(object):
         if rc:
             raise _error("mdb_env_set_maxdbs", rc)
 
-        if create and subdir and not (os.path.exists(path) or readonly):
-            os.mkdir(path, mode)
+        if create and subdir and not readonly:
+            try:
+                os.mkdir(path, mode)
+            except EnvironmentError as e:
+                if e.errno != errno.EEXIST:
+                    raise
 
         flags = _lib.MDB_NOTLS
         if not subdir:
