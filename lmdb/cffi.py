@@ -1128,6 +1128,7 @@ class _Database(object):
                  integerkey, integerdup, dupfixed):
         env._deps.add(self)
         self._deps = set()
+        self._name = name
 
         flags = 0
         if reverse_key:
@@ -1335,6 +1336,8 @@ class Transaction(object):
         self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
+        if db._name in self.env._dbs:
+            del self.env._dbs[db._name]
 
     def _cache_spare(self):
         # In order to avoid taking and maintaining a lock, a race is allowed
