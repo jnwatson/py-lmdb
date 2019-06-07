@@ -1,4 +1,9 @@
 
+2018-??-?? v0.95
+
+* Database names may be reused after they are dropped on CFFI, without
+  reopening the environment. Fix contributed by Gareth Bult.
+
 2018-04-09 v0.94
 
 * CPython argument parsing now matches the behaviour of CFFI, and most sane
