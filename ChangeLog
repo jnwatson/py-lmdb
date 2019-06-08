@@ -1,5 +1,17 @@
 
-2018-??-?? v0.95
+2018-06-08 v0.95
+
+* The minimum supported version of Python is now 2.7.
+
+* The library is no longer tested on Python 3.2.
+
+* The address-book.py example was updated for Python 3. Contributed by Jamie
+  Bliss.
+
+* Development-related files were removed from the distribution tarball.
+
+* Handling of the Environment(create=True) flag was improved. Fix contributed
+  by Nir Soffer.
 
 * Database names may be reused after they are dropped on CFFI, without
   reopening the environment. Fix contributed by Gareth Bult.
