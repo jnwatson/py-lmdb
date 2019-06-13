@@ -1,13 +1,7 @@
 
-# py-lmdb Needs a Maintainer!
+# py-lmdb Has a New Maintainer!
 
-I simply don't have time for this project right now, and still the issues keep
-piling in. Are you a heavy py-lmdb user and understand most bits of the API?
-Got some spare time to give a binding you use a little love? Dab hand at C and
-CFFI? Access to a Visual Studio build machine? Please drop me an e-mail: dw at
-botanicus dot net. TLC and hand-holding will be provided as necessary, I just
-have no bandwidth left to write new code.
-
+Hi.  My name is Nic Watson.   With lots of help from David, I'm taking over maintenance of py-lmdb.  Please be patient as we work out the details of the handover.
 
 ### CI State
 
