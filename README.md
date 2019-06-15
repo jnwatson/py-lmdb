@@ -11,16 +11,10 @@ as we work out the details of the handover.
 
 | Platform | Branch | Status |
 | -------- | ------ | ------ |
-| UNIX | ``master`` |
-[![master](https://travis-ci.org/jnwatson/py-lmdb.png?branch=master)](https://travis-ci.org/jnwatson/py-lmdb/branches) |
-| Windows | ``master`` |
-[![master](https://ci.appveyor.com/api/projects/status/cx2sau39bufi3t0t/branch/master?svg=true)](https://ci.appveyor.com/project/NicWatson/py-lmdb/branch/master)
-|
-| UNIX | ``release`` |
-[![release](https://travis-ci.org/jnwatson/py-lmdb.png?branch=release)](https://travis-ci.org/jnwatson/py-lmdb/branches) |
-| Windows | ``release`` |
-[![release](https://ci.appveyor.com/api/projects/status/cx2sau39bufi3t0t/branch/release?svg=true)](https://ci.appveyor.com/project/NicWatson/py-lmdb/branch/release)
-|
+| UNIX | ``master`` | [![master](https://travis-ci.org/jnwatson/py-lmdb.png?branch=master)](https://travis-ci.org/jnwatson/py-lmdb/branches) |
+| Windows | ``master`` | [![master](https://ci.appveyor.com/api/projects/status/cx2sau39bufi3t0t/branch/master?svg=true)](https://ci.appveyor.com/project/NicWatson/py-lmdb/branch/master) |
+| UNIX | ``release`` | [![release](https://travis-ci.org/jnwatson/py-lmdb.png?branch=release)](https://travis-ci.org/jnwatson/py-lmdb/branches) |
+| Windows | ``release`` | [![release](https://ci.appveyor.com/api/projects/status/cx2sau39bufi3t0t/branch/release?svg=true)](https://ci.appveyor.com/project/NicWatson/py-lmdb/branch/release) |
 
 
 If you care whether the tests are passing, check out the repository and execute
