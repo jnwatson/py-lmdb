@@ -266,6 +266,29 @@ class DropTest(unittest.TestCase):
         self.assertRaises(lmdb.InvalidParameterError,
             lambda: txn.drop(db1))
 
+    def test_double_delete(self):
+        _, env = testlib.temp_env()
+
+        db1 = env.open_db(B('db1'))
+        txn = env.begin(write=True, db=db1)
+        txn.put(B('a'), B('a'), db=db1)
+        txn.drop(db1)
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.get(B('a'), db=db1))
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.drop(db1))
+        txn.commit()
+
+        db1 = env.open_db(B('db1'))
+        txn = env.begin(write=True, db=db1)
+        txn.put(B('a'), B('a'), db=db1)
+        txn.drop(db1)
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.get(B('a'), db=db1))
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.drop(db1))
+        txn.commit()
+
 
 class CommitTest(unittest.TestCase):
     def tearDown(self):
