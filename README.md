@@ -1,5 +1,10 @@
 This is a universal Python binding for the LMDB ‘Lightning’ Database.
 
+# py-lmdb Has a New Maintainer!
+
+Hi.  My name is Nic Watson.   With lots of help from David, I'm taking over maintenance of py-lmdb.  Please be patient
+as we work out the details of the handover.
+
 See [the documentation](https://lmdb.readthedocs.io) for more information.
 
 ### CI State: UNIX
@@ -7,7 +12,6 @@ See [the documentation](https://lmdb.readthedocs.io) for more information.
 Release: [![release](https://travis-ci.org/jnwatson/py-lmdb.png?branch=release)](https://travis-ci.org/jnwatson/py-lmdb/branches)
 
 Master: [![master](https://travis-ci.org/jnwatson/py-lmdb.png?branch=master)](https://travis-ci.org/jnwatson/py-lmdb/branches)
-
 
 ### CI State: Windows
 
