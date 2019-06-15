@@ -1,11 +1,12 @@
 This is a universal Python binding for the LMDB ‘Lightning’ Database.
 
+See [the documentation](https://lmdb.readthedocs.io) for more information.
+
 # py-lmdb Has a New Maintainer!
 
 Hi.  My name is Nic Watson.   With lots of help from David, I'm taking over maintenance of py-lmdb.  Please be patient
 as we work out the details of the handover.
 
-See [the documentation](https://lmdb.readthedocs.io) for more information.
 
 ### CI State: UNIX
 
