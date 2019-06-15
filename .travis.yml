@@ -18,6 +18,7 @@ env:
   - LMDB_FORCE_CFFI=1
   - LMDB_FORCE_CPYTHON=1
 install:
+  - if [[ $TRAVIS_PYTHON_VERSION == 3.3 ]]; then pip install virtualenv==15.2.0; fi
   - sudo apt-get install gdb
   - pip install cffi
 
