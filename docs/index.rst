@@ -12,7 +12,7 @@ This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://symas.com/mdb/>`_. Two variants are provided and automatically selected
 during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
 that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.7,
-and a C extension that supports CPython >=2.7 and >=3.3. Both variants
+and a C extension that supports CPython >=2.7 and >=3.4. Both variants
 provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
@@ -369,7 +369,7 @@ Interface
 +++++++++
 
 .. py:function:: lmdb.open(path, **kwargs)
-   
+
    Shortcut for :py:class:`Environment` constructor.
 
 .. autofunction:: lmdb.version
