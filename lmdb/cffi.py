@@ -559,6 +559,12 @@ class Environment(object):
     simultaneous write transaction is allowed, however there is no limit on the
     number of read transactions even when a write transaction exists.
 
+    This class is aliased to `lmdb.open`.
+
+    It is a serious error to have open the same LMDB file in the same process at
+    the same time.  Failure to heed this may lead to data corruption and
+    interpreter crash.
+
     Equivalent to `mdb_env_open()
     <http://symas.com/mdb/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
 

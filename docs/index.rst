@@ -352,7 +352,8 @@ usually it only makes sense to to have a single caller, except in the case of
 :py:class:`Environment`.
 
 Most :py:class:`Environment` methods are thread-safe, and may be called
-concurrently, except for :py:meth:`Environment.close`.
+concurrently, except for :py:meth:`Environment.close`.  Running `close` at the
+same time as other database operations may crash the interpreter.
 
 A write :py:class:`Transaction` may only be used from the thread it was created
 on.
