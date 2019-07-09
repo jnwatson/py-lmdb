@@ -28,7 +28,15 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
-#include <stdbool.h>
+
+#ifdef _WIN32
+#   define bool int
+#   define true 1
+#   define false 0
+#else
+#   include <stdbool.h>
+#endif
+
 #include <sys/stat.h>
 
 #include "Python.h"
