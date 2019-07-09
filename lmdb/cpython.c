@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdbool.h>
 #include <sys/stat.h>
 
 #include "Python.h"
@@ -1927,13 +1928,15 @@ cursor_count(CursorObject *self)
  * invalid before the next attempt to read them.
  */
 static int
-_cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
+_cursor_get_c(CursorObject *self, enum MDB_cursor_op op, bool do_preload)
 {
     int rc;
 
     Py_BEGIN_ALLOW_THREADS;
     rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
-    preload(rc, self->val.mv_data, self->val.mv_size);
+    if (do_preload) {
+        preload(rc, self->val.mv_data, self->val.mv_size);
+    }
     Py_END_ALLOW_THREADS;
 
     self->positioned = rc == 0;
@@ -1961,7 +1964,7 @@ _cursor_get(CursorObject *self, enum MDB_cursor_op op)
     if(! self->valid) {
         return err_invalid();
     }
-    if(_cursor_get_c(self, op)) {
+    if(_cursor_get_c(self, op, false)) {
         return NULL;
     }
     return py_bool(self->positioned);
@@ -2000,7 +2003,7 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
             return err_set("mdb_cursor_del", rc);
         }
         res = 1;
-        _cursor_get_c(self, MDB_GET_CURRENT);
+        _cursor_get_c(self, MDB_GET_CURRENT, false);
     }
     return py_bool(res);
 }
@@ -2052,7 +2055,7 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     self->key = arg.key;
-    if(_cursor_get_c(self, MDB_SET_KEY)) {
+    if(_cursor_get_c(self, MDB_SET_KEY, false)) {
         return NULL;
     }
     if(! self->positioned) {
@@ -2078,7 +2081,7 @@ cursor_item(CursorObject *self)
     }
     /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+       _cursor_get_c(self, MDB_GET_CURRENT, true)) {
         return NULL;
     }
 
@@ -2108,7 +2111,7 @@ cursor_key(CursorObject *self)
     }
     /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+       _cursor_get_c(self, MDB_GET_CURRENT, false)) {
         return NULL;
     }
     return obj_from_val(&self->key, self->trans->flags & TRANS_BUFFERS);
@@ -2341,7 +2344,7 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
 
     if(self->dbi_flags & MDB_DUPSORT) {
         self->key = *key;
-        if(_cursor_get_c(self, MDB_SET_KEY)) {
+        if(_cursor_get_c(self, MDB_SET_KEY, true)) {
             return NULL;
         }
         if(self->positioned) {
@@ -2428,7 +2431,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     self->key = arg.key;
-    if(_cursor_get_c(self, MDB_SET_KEY)) {
+    if(_cursor_get_c(self, MDB_SET_KEY, true)) {
         return NULL;
     }
     if(! self->positioned) {
@@ -2534,7 +2537,7 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
     /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
      * fails to update `key` and `value` on success. Therefore explicitly call
      * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE. */
-    _cursor_get_c(self, MDB_GET_CURRENT);
+    _cursor_get_c(self, MDB_GET_CURRENT, false);
 
     return ret;
 }
@@ -2550,7 +2553,7 @@ cursor_value(CursorObject *self)
     }
     /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+       _cursor_get_c(self, MDB_GET_CURRENT, true)) {
         return NULL;
     }
     return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
@@ -2593,7 +2596,7 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
     }
 
     if(pos_op != -1 && !self->positioned) {
-        if(_cursor_get_c(self, (enum MDB_cursor_op) pos_op)) {
+        if(_cursor_get_c(self, (enum MDB_cursor_op) pos_op, false)) {
             return NULL;
         }
     }
@@ -2692,10 +2695,10 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     }
 
     if((! arg.key.mv_size) && (! arg.reverse)) {
-        rc = _cursor_get_c(self, MDB_FIRST);
+        rc = _cursor_get_c(self, MDB_FIRST, false);
     } else {
         self->key = arg.key;
-        rc = _cursor_get_c(self, MDB_SET_RANGE);
+        rc = _cursor_get_c(self, MDB_SET_RANGE, false);
     }
 
     if(rc) {
@@ -2706,7 +2709,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
     if(arg.reverse) {
         op = MDB_PREV;
         if(! self->positioned) {
-            if(_cursor_get_c(self, MDB_LAST)) {
+            if(_cursor_get_c(self, MDB_LAST, false)) {
                 return NULL;
             }
         }
@@ -2864,7 +2867,7 @@ iter_next(IterObject *self)
     }
 
     if(self->started) {
-        if(_cursor_get_c(self->curs, self->op)) {
+        if(_cursor_get_c(self->curs, self->op, false)) {
             return NULL;
         }
         if(! self->curs->positioned) {
@@ -3324,7 +3327,7 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
 }
 
 static int
-_cursor_get_c(CursorObject *self, enum MDB_cursor_op op);
+_cursor_get_c(CursorObject *self, enum MDB_cursor_op op, bool do_preload);
 
 /**
  * Transaction.pop() -> None|result
@@ -3358,7 +3361,7 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
     }
 
     cursor->key = arg.key;
-    if(_cursor_get_c(cursor, MDB_SET_KEY)) {
+    if(_cursor_get_c(cursor, MDB_SET_KEY, true)) {
         Py_DECREF((PyObject *)cursor);
         return NULL;
     }
