@@ -1430,7 +1430,9 @@ class Transaction(object):
                 overwrite any existing matching key.
 
             `overwrite`:
-                If ``False``, do not overwrite any existing matching key.
+                If ``False``, do not overwrite any existing matching key.  If
+                False and writing to a dupsort=True database, this will not add a value
+                to the key and this function will return False.
 
             `append`:
                 If ``True``, append the pair to the end of the database without
