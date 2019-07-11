@@ -24,6 +24,7 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import sys
 import unittest
 
 import testlib
@@ -181,7 +182,7 @@ class ReplaceTest(CursorTestBase):
         assert B('x') == self.c.replace(B('a'), B('y'))
 
 
-class ContextManagerTest(CursorTestBase):
+class ContextManagerTest2(CursorTestBase):
     def test_enter(self):
         with self.c as c:
             assert c is self.c
@@ -217,6 +218,52 @@ class ContextManagerTest(CursorTestBase):
         self.assertRaises(Exception,
             lambda: self.c.put(B('a'), B('a')))
 
+GiB = 1024 * 1024 * 1024
+
+class PreloadTest(CursorTestBase):
+
+    def setUp(self, redo=False):
+        env_args = {'writemap': True, 'map_size': GiB}
+        if not redo:
+            self.path, self.env = testlib.temp_env(**env_args)
+        else:
+            self.path, self.env = testlib.temp_env(path=self.path, **env_args)
+        self.txn = self.env.begin(write=True)
+        self.c = self.txn.cursor()
+
+    if sys.platform == 'linux':
+        def test_preload(self):
+            """
+            Test that reading just the key doesn't prefault the value contents, but
+            reading the data does.
+            """
+            import resource
+            self.c.put(B('a'), B('a') * (256 * 1024 * 1024))
+            self.txn.commit()
+            self.env.close()
+            # Just reading the data is obviously going to fault the value in.  The
+            # point is to fault it in while the GIL is unlocked.  We use the buffers
+            # API so that we're not actually copying the data in.  This doesn't
+            # actually show that we're prefaulting with the GIL unlocked, but it
+            # does prove we prefault at all, and in 2 correct places.
+            self.path, self.env = testlib.temp_env(path=self.path, writemap=True)
+            self.txn = self.env.begin(write=True, buffers=True)
+            self.c = self.txn.cursor()
+            minflts_before = resource.getrusage(resource.RUSAGE_THREAD)[6]
+            self.c.set_key(B('a'))
+            assert self.c.key() == B('a')
+            minflts_after_key = resource.getrusage(resource.RUSAGE_THREAD)[6]
+
+            self.c.value()
+            minflts_after_value = resource.getrusage(resource.RUSAGE_THREAD)[6]
+
+            epsilon = 5
+
+            # Setting the position doesn't prefault the data
+            assert minflts_after_key - minflts_before < epsilon
+
+            # Getting the value does prefault the data, even if we only get it by pointer
+            assert minflts_after_value - minflts_after_key > 1000
 
 if __name__ == '__main__':
     unittest.main()
