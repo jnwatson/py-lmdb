@@ -277,7 +277,7 @@ _CFFI_CDEF = '''
                                 char *val_s, size_t vallen, int flags);
 
     // Prefaults a range
-    static void pymdb_preload(int rc, void *x, size_t size);
+    static void preload(int rc, void *x, size_t size);
 
 '''
 
@@ -339,12 +339,6 @@ _CFFI_VERIFY = '''
         MDB_val tmpkey = {keylen, key_s};
         MDB_val tmpval = {vallen, val_s};
         return mdb_cursor_put(cursor, &tmpkey, &tmpval, flags);
-    }
-
-    static void pymdb_preload(int rc, void *x, size_t size)
-    {
-        int f = 42;
-        preload(rc, x, size);
     }
 
 '''
@@ -545,7 +539,7 @@ def _mvstr(mv):
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
 
 def preload(mv):
-    _lib.pymdb_preload(0, mv.mv_data, mv.mv_size)
+    _lib.preload(0, mv.mv_data, mv.mv_size)
 
 def enable_drop_gil():
     """Deprecated."""
