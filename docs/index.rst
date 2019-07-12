@@ -365,6 +365,31 @@ used concurrently from multiple threads.
 any thread except the thread that currently owns its associated
 :py:class:`Transaction`.
 
+Limitations running on 32-bit Processes
++++++++++++++++++++++++++++++++++++++++
+32-bit processes (for example 32-bit builds of Python on Windows) are severely
+limited in the amount of virtual memory that can be mapped in.  This is
+particularly true for any 32-bit process but is particularly true for
+Python running on Windows and long running processes.
+
+Virtual address space fragmentation is a significant issue for mapping files
+into memory, a requirement for lmdb, as lmdb requires a contiguous range of
+virtual addresses. See
+https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation
+for more information and a solution that potentially gives another 50% of
+virtual address space on Windows.
+
+Importantly, using a 32-bit instance of Python (even with the OS being 64-bits)
+means that the maximum size file that can be ever be mapped into memory is
+around 1.1 GiB, and that number decreases as the python process lives and
+allocates/deallocates memory.  That means the DB file you can open now might not
+be the DB file you can open in a hour, given the same process.
+
+On Windows, You can see the see the precise maximum mapping size by using the
+SysInternals tool VMMap, then selecting your Python process, then selecting the
+"free" row, then sorting by size.
+
+This is not a problem at all for 64-bit processes.
 
 Interface
 +++++++++

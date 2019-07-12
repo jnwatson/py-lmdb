@@ -116,8 +116,6 @@ try:
     B = lambda s: s
 except TypeError: # Python3.x, requires encoding parameter.
     B = lambda s: bytes(s, 'ascii')
-except NameError: # Python<=2.5.
-    B = lambda s: s
 
 # BL('s1', 's2') -> ['bytes1', 'bytes2']
 BL = lambda *args: list(map(B, args))

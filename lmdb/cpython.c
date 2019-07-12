@@ -28,6 +28,15 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
+
+#ifdef _WIN32
+#   define bool int
+#   define true 1
+#   define false 0
+#else
+#   include <stdbool.h>
+#endif
+
 #include <sys/stat.h>
 
 #include "Python.h"
@@ -1933,7 +1942,6 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 
     Py_BEGIN_ALLOW_THREADS;
     rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
-    preload(rc, self->val.mv_data, self->val.mv_size);
     Py_END_ALLOW_THREADS;
 
     self->positioned = rc == 0;
@@ -2072,6 +2080,7 @@ cursor_item(CursorObject *self)
     PyObject *key;
     PyObject *val;
     PyObject *tup;
+    int rc = 0;
 
     if(! self->valid) {
         return err_invalid();
@@ -2084,6 +2093,9 @@ cursor_item(CursorObject *self)
 
     as_buffer = self->trans->flags & TRANS_BUFFERS;
     key = obj_from_val(&self->key, as_buffer);
+    Py_BEGIN_ALLOW_THREADS;
+    preload(rc, self->val.mv_data, self->val.mv_size);
+    Py_END_ALLOW_THREADS;
     val = obj_from_val(&self->val, as_buffer);
     tup = PyTuple_New(2);
     if(tup && key && val) {
@@ -2335,7 +2347,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
 {
-    int rc;
+    int rc = 0;
     PyObject *old;
     MDB_val newval = *val;
 
@@ -2345,6 +2357,9 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
             return NULL;
         }
         if(self->positioned) {
+            Py_BEGIN_ALLOW_THREADS;
+            preload(rc, self->val.mv_data, self->val.mv_size);
+            Py_END_ALLOW_THREADS;
             if(! ((old = obj_from_val(&self->val, 0)))) {
                 return NULL;
             }
@@ -2420,7 +2435,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
         {"key", ARG_BUF, OFFSET(cursor_pop, key)},
     };
     PyObject *old;
-    int rc;
+    int rc = 0;
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
@@ -2434,6 +2449,9 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     if(! self->positioned) {
         Py_RETURN_NONE;
     }
+    Py_BEGIN_ALLOW_THREADS;
+    preload(rc, self->val.mv_data, self->val.mv_size);
+    Py_END_ALLOW_THREADS;
     if(! ((old = obj_from_val(&self->val, 0)))) {
         return NULL;
     }
@@ -2550,9 +2568,13 @@ cursor_value(CursorObject *self)
     }
     /* Must refresh `key` and `val` following mutation. */
     if(self->last_mutation != self->trans->mutations &&
-       _cursor_get_c(self, MDB_GET_CURRENT)) {
+        _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
+    Py_BEGIN_ALLOW_THREADS;
+    preload(0, self->val.mv_data, self->val.mv_size);
+    Py_END_ALLOW_THREADS;
+
     return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
 }
 
@@ -3343,7 +3365,7 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
     };
     CursorObject *cursor;
     PyObject *old;
-    int rc;
+    int rc = 0;
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
@@ -3366,6 +3388,8 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         Py_DECREF((PyObject *)cursor);
         Py_RETURN_NONE;
     }
+
+    preload(rc, cursor->val.mv_data, cursor->val.mv_size);
     if(! ((old = obj_from_val(&cursor->val, 0)))) {
         Py_DECREF((PyObject *)cursor);
         return NULL;

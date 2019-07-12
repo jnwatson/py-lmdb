@@ -275,6 +275,10 @@ _CFFI_CDEF = '''
     static int pymdb_cursor_put(MDB_cursor *cursor,
                                 char *key_s, size_t keylen,
                                 char *val_s, size_t vallen, int flags);
+
+    // Prefaults a range
+    static void preload(int rc, void *x, size_t size);
+
 '''
 
 _CFFI_VERIFY = '''
@@ -289,7 +293,6 @@ _CFFI_VERIFY = '''
     {
         MDB_val key = {keylen, key_s};
         int rc = mdb_get(txn, dbi, &key, val_out);
-        preload(rc, val_out->mv_data, val_out->mv_size);
         return rc;
     }
 
@@ -324,7 +327,6 @@ _CFFI_VERIFY = '''
         MDB_val tmp_data = {data_len, data_s};
         int rc = mdb_cursor_get(cursor, &tmp_key, &tmp_data, op);
         if(! rc) {
-            preload(rc, tmp_data.mv_data, tmp_data.mv_size);
             *key = tmp_key;
             *data = tmp_data;
         }
@@ -338,6 +340,7 @@ _CFFI_VERIFY = '''
         MDB_val tmpval = {vallen, val_s};
         return mdb_cursor_put(cursor, &tmpkey, &tmpval, flags);
     }
+
 '''
 
 if not lmdb._reading_docs():
@@ -534,6 +537,9 @@ def _mvbuf(mv):
 def _mvstr(mv):
     """Convert a MDB_val cdata to Python bytes."""
     return _ffi.buffer(mv.mv_data, mv.mv_size)[:]
+
+def preload(mv):
+    _lib.preload(0, mv.mv_data, mv.mv_size)
 
 def enable_drop_gil():
     """Deprecated."""
@@ -1407,6 +1413,8 @@ class Transaction(object):
             if rc == _lib.MDB_NOTFOUND:
                 return default
             raise _error("mdb_cursor_get", rc)
+
+        preload(self._val)
         return self._to_py(self._val)
 
     def put(self, key, value, dupdata=True, overwrite=True, append=False,
@@ -1430,7 +1438,9 @@ class Transaction(object):
                 overwrite any existing matching key.
 
             `overwrite`:
-                If ``False``, do not overwrite any existing matching key.
+                If ``False``, do not overwrite any existing matching key.  If
+                False and writing to a dupsort=True database, this will not add a value
+                to the key and this function will return False.
 
             `append`:
                 If ``True``, append the pair to the end of the database without
@@ -1648,6 +1658,7 @@ class Cursor(object):
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self.txn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
+        preload(self._val)
         return self._to_py(self._val)
 
     def item(self):
@@ -1655,6 +1666,7 @@ class Cursor(object):
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self.txn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
+        preload(self._val)
         return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, op, keys, values):
@@ -2167,6 +2179,7 @@ class Cursor(object):
         """
         if self.db._flags & _lib.MDB_DUPSORT:
             if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+                preload(self._val)
                 old = _mvstr(self._val)
                 self.delete(True)
             else:
@@ -2184,6 +2197,7 @@ class Cursor(object):
             raise _error("mdb_cursor_put", rc)
 
         self._cursor_get(_lib.MDB_GET_CURRENT)
+        preload(self._val)
         old = _mvstr(self._val)
         rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
         self.txn._mutations += 1
@@ -2204,6 +2218,7 @@ class Cursor(object):
                 Bytestring key to delete.
         """
         if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+            preload(self._val)
             old = _mvstr(self._val)
             rc = _lib.mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
