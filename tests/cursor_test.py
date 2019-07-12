@@ -231,13 +231,12 @@ class PreloadTest(CursorTestBase):
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
+    @unittest.skipIf(sys.platform != 'linux', "test only works on Linux")
     def test_preload(self):
         """
         Test that reading just the key doesn't prefault the value contents, but
         reading the data does.
         """
-        if not sys.platform == 'linux':
-            self.skip('Preload test only works on Linux')
 
         import resource
         self.c.put(B('a'), B('a') * (256 * 1024 * 1024))
