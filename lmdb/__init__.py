@@ -50,10 +50,5 @@ except ImportError:
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__version__ = '0.96'
+__version__ = '0.95'
 
-# Hack to support Python v2.5 'python -mlmdb'
-if __name__ == '__main__':
-    import lmdb.tool
-    import atexit
-    atexit.register(lmdb.tool.main)
