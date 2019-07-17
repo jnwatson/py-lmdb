@@ -600,6 +600,10 @@ val_from_buffer(MDB_val *val, PyObject *buf)
     out = (e); \
     Py_END_ALLOW_THREADS
 
+#define PRELOAD_UNLOCKED(_rc, _data, _size) \
+    Py_BEGIN_ALLOW_THREADS \
+    preload(_rc, _data, _size); \
+    Py_END_ALLOW_THREADS
 
 /* ---------------- */
 /* Argument parsing */
@@ -2093,9 +2097,7 @@ cursor_item(CursorObject *self)
 
     as_buffer = self->trans->flags & TRANS_BUFFERS;
     key = obj_from_val(&self->key, as_buffer);
-    Py_BEGIN_ALLOW_THREADS;
-    preload(rc, self->val.mv_data, self->val.mv_size);
-    Py_END_ALLOW_THREADS;
+    PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
     val = obj_from_val(&self->val, as_buffer);
     tup = PyTuple_New(2);
     if(tup && key && val) {
@@ -2357,9 +2359,7 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
             return NULL;
         }
         if(self->positioned) {
-            Py_BEGIN_ALLOW_THREADS;
-            preload(rc, self->val.mv_data, self->val.mv_size);
-            Py_END_ALLOW_THREADS;
+            PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
             if(! ((old = obj_from_val(&self->val, 0)))) {
                 return NULL;
             }
@@ -2449,9 +2449,7 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     if(! self->positioned) {
         Py_RETURN_NONE;
     }
-    Py_BEGIN_ALLOW_THREADS;
-    preload(rc, self->val.mv_data, self->val.mv_size);
-    Py_END_ALLOW_THREADS;
+    PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
     if(! ((old = obj_from_val(&self->val, 0)))) {
         return NULL;
     }
@@ -2571,9 +2569,7 @@ cursor_value(CursorObject *self)
         _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
-    Py_BEGIN_ALLOW_THREADS;
-    preload(0, self->val.mv_data, self->val.mv_size);
-    Py_END_ALLOW_THREADS;
+    PRELOAD_UNLOCKED(0, self->val.mv_data, self->val.mv_size);
 
     return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
 }
@@ -3389,7 +3385,7 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         Py_RETURN_NONE;
     }
 
-    preload(rc, cursor->val.mv_data, cursor->val.mv_size);
+    PRELOAD_UNLOCKED(rc, cursor->val.mv_data, cursor->val.mv_size);
     if(! ((old = obj_from_val(&cursor->val, 0)))) {
         Py_DECREF((PyObject *)cursor);
         return NULL;
