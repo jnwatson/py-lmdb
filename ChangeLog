@@ -1,3 +1,7 @@
+2019-08-11 v0.97
+* Fix a missed GIL unlock sequence.  Reported by ajschorr.
+* Fix argv check in JEP (cpython under Java) environment.  Contributed by
+  de-code.
 
 2019-07-14 v0.96
 * First release under new maintainer, Nic Watson.
