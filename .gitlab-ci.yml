@@ -1,0 +1,66 @@
+#image: pypy:latest
+image: registry.gitlab.com/kolanich/fixed_python:latest
+
+build:
+  tags:
+    - shared
+  stage: build
+  variables:
+    GIT_DEPTH: "1"
+    PYTHONUSERBASE: "${CI_PROJECT_DIR}/python_user_packages"
+
+  before_script:
+    - export PATH="$PATH:$PYTHONUSERBASE/bin" # don't move into `variables`
+    - apt-get update
+    - apt-get install -y gdb
+    - pip3 install --upgrade cffi
+    - source misc/helpers.sh
+
+  script:
+    - mkdir -p wheels
+    - LMDB_FORCE_CPYTHON=1 python3 setup.py bdist_wheel
+    - mv ./dist/*.whl ./wheels/lmdb-0.CI_cpython-py3-none-any.whl
+    - pip3 install --upgrade ./wheels/lmdb-0.CI_cpython-py3-none-any.whl
+    - mkdir sterile && ln -s `realpath ./misc` ./sterile/misc && cd sterile
+    - with_gdb python3 -m coverage run --source=lmdb -m pytest --junitxml=../rspec.xml ../tests
+    - coverage report -m
+    - coveralls || true
+    - codecov || true
+    - cd ..
+    - rm -rf ./build ./dist && LMDB_FORCE_CFFI=1 python3 setup.py bdist_wheel && mv ./dist/*.whl ./wheels/lmdb-0.CI_cffi-py3-none-any.whl
+    - git clone --depth=1 https://github.com/LMDB/lmdb.git latest_lmdb
+    - cp ./latest_lmdb/libraries/liblmdb/{lmdb.h,mdb.c,midl.c,midl.h} ./lib/
+    - rm -rf ./build ./dist && LMDB_FORCE_CPYTHON=1 python3 setup.py bdist_wheel && mv ./dist/*.whl ./wheels/lmdb-0.CI_cpython_latest-py3-none-any.whl
+    - rm -rf ./build ./dist && LMDB_FORCE_CFFI=1 python3 setup.py bdist_wheel && mv ./dist/*.whl ./wheels/lmdb-0.CI_cffi_latest-py3-none-any.whl
+
+  coverage: "/^TOTAL(?:\\s+\\d+){4}\\s+(\\d+%).+/"
+
+  cache:
+    paths:
+      - $PYTHONUSERBASE
+
+  artifacts:
+    paths:
+      - wheels
+    reports:
+      junit: ./rspec.xml
+
+checks:
+  tags:
+    - shared
+  image: docker:latest
+  variables:
+    DOCKER_DRIVER: overlay2
+  allow_failure: true
+  services:
+    - docker:dind
+  script:
+    - docker run --env SAST_CONFIDENCE_LEVEL=5 --volume "$PWD:/code" --volume /var/run/docker.sock:/var/run/docker.sock "registry.gitlab.com/gitlab-org/security-products/sast:latest" /app/bin/run /code
+    #- docker run --env SOURCE_CODE="$PWD" --env CODECLIMATE_VERSION="latest" --volume "$PWD":/code --volume /var/run/docker.sock:/var/run/docker.sock "registry.gitlab.com/gitlab-org/security-products/codequality:latest" /code
+    #- docker run --env DEP_SCAN_DISABLE_REMOTE_CHECKS="${DEP_SCAN_DISABLE_REMOTE_CHECKS:-false}" --volume "$PWD:/code" --volume /var/run/docker.sock:/var/run/docker.sock "registry.gitlab.com/gitlab-org/security-products/dependency-scanning:latest" /code
+
+  artifacts:
+    reports:
+      #codequality: gl-code-quality-report.json
+      sast: gl-sast-report.json
+      #dependency_scanning: gl-dependency-scanning-report.json 
