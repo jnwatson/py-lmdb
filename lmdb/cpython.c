@@ -791,8 +791,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
 
             i = READ_ID(specidx);
             if(set & (1 << i)) {
-                PyErr_Format(PyExc_TypeError, "duplicate argument: %s",
-                             PyBytes_AS_STRING(pkey));
+                PyErr_Format(PyExc_TypeError, "duplicate argument: %U", pkey);
                 return -1;
             }
 
