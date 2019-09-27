@@ -22,6 +22,9 @@
 
 #define PY_SSIZE_T_CLEAN
 
+/* Include order matters! */
+#include "Python.h"
+
 /* Search lib/win32 first, then fallthrough to <stdint.h> as required.*/
 #include "stdint.h"
 
@@ -39,7 +42,6 @@
 
 #include <sys/stat.h>
 
-#include "Python.h"
 #include "structmember.h"
 
 #ifdef HAVE_MEMSINK
