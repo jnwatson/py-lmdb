@@ -757,7 +757,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
     }
 
     if(args) {
-        int size = (int) PyTuple_GET_SIZE(args);
+        Py_ssize_t size = PyTuple_GET_SIZE(args);
         if(size > specsize) {
             type_error("too many positional arguments.");
             return -1;
@@ -863,7 +863,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         env->spare_txns = self->spare_next;
         env->max_spare_txns++;
         self->flags &= ~TRANS_SPARE;
-        _Py_NewReference(self);
+        _Py_NewReference((PyObject *)self);
         UNLOCKED(rc, mdb_txn_renew(self->txn));
 
         if(rc) {
@@ -885,6 +885,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
     }
 
     if(rc) {
+        _Py_ForgetReference((PyObject *)self);
         PyObject_Del(self);
         return err_set("mdb_txn_begin", rc);
     }
@@ -930,6 +931,7 @@ make_cursor(DbObject *db, TransObject *trans)
     self = PyObject_New(CursorObject, &PyCursor_Type);
     UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &self->curs));
     if(rc) {
+        _Py_ForgetReference((PyObject *)self);
         PyObject_Del(self);
         return err_set("mdb_cursor_open", rc);
     }
@@ -3657,7 +3659,7 @@ static int init_errors(PyObject *mod, PyObject *__all__)
 {
     size_t count;
     char qualname[64];
-    int i;
+    size_t i;
 
     Error = PyErr_NewException("lmdb.Error", NULL, NULL);
     if(! Error) {
