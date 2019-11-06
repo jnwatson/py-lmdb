@@ -1,9 +1,22 @@
+2019-11-06 v0.98
+* Fix that a duplicate argument to a lmdb method would cause an assert.
+
+* Solaris needs ```#include "python.h"``` as soon as possible.  Fix
+  contributed by Jesús Cea.
+
+* Fix crash under debug cpython when mdb_cursor_open failed
+
+
 2019-08-11 v0.97
+
 * Fix a missed GIL unlock sequence.  Reported by ajschorr.
+
 * Fix argv check in JEP (cpython under Java) environment.  Contributed by
   de-code.
 
+
 2019-07-14 v0.96
+
 * First release under new maintainer, Nic Watson.
 
 * Doc updates.
@@ -13,6 +26,7 @@
 * Only preload the value with the GIL unlocked when the value is actually
   requested. This significantly improves read performance to retrieve keys
   with large values when the value isn't retrieved. Reported by Dan Patton.
+
 
 2019-06-08 v0.95
 
@@ -31,6 +45,7 @@
 * Database names may be reused after they are dropped on CFFI, without
   reopening the environment. Fix contributed by Gareth Bult.
 
+
 2018-04-09 v0.94
 
 * CPython argument parsing now matches the behaviour of CFFI, and most sane
@@ -42,6 +57,7 @@
 * Updared LMDB to version 0.9.22.
 
 * Fixed several 2.7/3 bugs in command line tool.
+
 
 2017-07-16 v0.93
 
