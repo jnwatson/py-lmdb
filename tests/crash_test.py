@@ -255,5 +255,28 @@ class InvalidArgTest(unittest.TestCase):
         c = txn.cursor()
         self.assertRaises(TypeError, c.get, b'a', key=True)
 
+class BadCursorTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_cursor_open_failure(self):
+        '''
+        Test the error path for when mdb_cursor_open fails
+
+        Note:
+            this only would crash if cpython is built with Py_TRACE_REFS
+        '''
+        # https://github.com/jnwatson/py-lmdb/issues/216
+        path, env = testlib.temp_env()
+        db = env.open_db(b'db', dupsort=True)
+        env.close()
+        del env
+
+        env = lmdb.open(path, readonly=True, max_dbs=4)
+        txn1 = env.begin(write=False)
+        db = env.open_db(b'db', dupsort=True, txn=txn1)
+        txn2 = env.begin(write=False)
+        self.assertRaises(lmdb.InvalidParameterError, txn2.cursor, db=db)
+
 if __name__ == '__main__':
     unittest.main()
