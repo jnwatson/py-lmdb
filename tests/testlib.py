@@ -29,6 +29,7 @@ import stat
 import sys
 import tempfile
 import traceback
+import unittest
 
 try:
     import __builtin__
@@ -49,6 +50,10 @@ def cleanup():
             traceback.print_exc()
 
 atexit.register(cleanup)
+
+class LmdbTest(unittest.TestCase):
+    def tearDown(self):
+        cleanup()
 
 
 def temp_dir(create=True):
