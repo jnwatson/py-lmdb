@@ -21,16 +21,21 @@
 #
 
 from __future__ import absolute_import
+
+import sys
+import shlex
 import unittest
 
 import lmdb
-import shlex
 import lmdb.tool
-
 import testlib
 
 def call_tool(cmdline):
-    return lmdb.tool.main(shlex.split(cmdline))
+    if sys.platform == 'win32':
+        args = cmdline.split()
+    else:
+        args = shlex.split(cmdline)
+    return lmdb.tool.main(args)
 
 class ToolTest(testlib.LmdbTest):
     def test_cmd_get(self):
