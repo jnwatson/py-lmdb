@@ -251,7 +251,7 @@ def cmd_copyfd(opts, args):
         die('"copyfd" command takes no arguments (see --help)')
 
     try:
-        fp = os.fdopen(opts.out_fd, 'w', 0)
+        os.fdopen(opts.out_fd, 'w', 0)
     except OSError:
         e = sys.exc_info()[1]
         die('Bad --out-fd %d: %s', opts.out_fd, e)
@@ -509,8 +509,8 @@ def cmd_rewrite(opts, args):
     dbs = []
     for arg in args:
         name = None if arg == ':main:' else arg
-        src_db = ENV.open_db(name)
-        dst_db = target_env.open_db(name)
+        src_db = ENV.open_db(_to_bytes(name))
+        dst_db = target_env.open_db(_to_bytes(name))
         dbs.append((arg, src_db, dst_db))
 
     if not dbs:
@@ -590,7 +590,7 @@ def _get_term_width(default=(80, 25)):
         s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
         height, width = struct.unpack('hh', s)
         return width, height
-    except:
+    except Exception:
         return default
 
 
@@ -599,9 +599,9 @@ def _on_sigwinch(*args):
     _TERM_WIDTH, _TERM_HEIGHT = _get_term_width()
 
 
-def main():
+def main(argv):
     parser = make_parser()
-    opts, args = parser.parse_args()
+    opts, args = parser.parse_args(argv)
 
     if not args:
         die('Please specify a command (see --help)')
@@ -614,7 +614,7 @@ def main():
 
     if opts.db:
         global DB
-        DB = ENV.open_db(opts.db)
+        DB = ENV.open_db(_to_bytes(opts.db))
 
     if hasattr(signal, 'SIGWINCH'):  # Disable on win32.
         signal.signal(signal.SIGWINCH, _on_sigwinch)
@@ -628,4 +628,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

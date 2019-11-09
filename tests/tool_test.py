@@ -24,14 +24,29 @@ from __future__ import absolute_import
 import unittest
 
 import lmdb
+import shlex
 import lmdb.tool
 
+import testlib
 
-class ToolTest(unittest.TestCase):
-    def test_ok(self):
-        # For now, simply ensure the module can be compiled (3.x compat).
-        pass
+def call_tool(cmdline):
+    return lmdb.tool.main(shlex.split(cmdline))
 
+class ToolTest(testlib.LmdbTest):
+    def test_cmd_get(self):
+        frompath, env = testlib.temp_env()
+        db = env.open_db(b'subdb')
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'foo', b'bar', db=db)
+        env.close()
+        call_tool('-d subdb get --env %s' % (frompath,))
+
+    def test_cmd_rewrite(self):
+        frompath, env = testlib.temp_env()
+        env.open_db(b'subdb')
+        env.close()
+        topath = testlib.temp_dir()
+        call_tool('rewrite -e %s -E %s subdb' % (frompath, topath))
 
 if __name__ == '__main__':
     unittest.main()
