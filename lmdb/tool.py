@@ -599,7 +599,7 @@ def _on_sigwinch(*args):
     _TERM_WIDTH, _TERM_HEIGHT = _get_term_width()
 
 
-def main(argv):
+def main(argv=None):
     parser = make_parser()
     opts, args = parser.parse_args(argv)
 
