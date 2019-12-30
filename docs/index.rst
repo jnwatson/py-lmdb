@@ -407,6 +407,11 @@ Environment class
 .. autoclass:: lmdb.Environment
     :members:
 
+Database class
+##############
+
+.. autoclass:: lmdb._Database
+    :members:
 
 Transaction class
 #################
@@ -414,13 +419,11 @@ Transaction class
 .. autoclass:: lmdb.Transaction
     :members:
 
-
 Cursor class
 ############
 
 .. autoclass:: lmdb.Cursor
     :members:
-
 
 Exceptions
 ##########

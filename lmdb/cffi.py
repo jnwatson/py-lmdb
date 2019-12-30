@@ -55,6 +55,7 @@ __all__ = [
     'Cursor',
     'Environment',
     'Transaction',
+    '_Database',
     'enable_drop_gil',
     'version',
 ]
@@ -1135,7 +1136,7 @@ class Environment(object):
 
 
 class _Database(object):
-    """Internal database handle."""
+    """Internal database handle.  This class is opaque, save a single method."""
     def __init__(self, env, txn, name, reverse_key, dupsort, create,
                  integerkey, integerdup, dupfixed):
         env._deps.add(self)
