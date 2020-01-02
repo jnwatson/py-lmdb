@@ -3618,15 +3618,18 @@ static int init_types(PyObject *mod, PyObject *__all__)
     int i;
     for(i = 0; types[i]; i++) {
         PyTypeObject *type = types[i];
+        char const * name = type->tp_name;
 
         if(PyType_Ready(type)) {
             return -1;
         }
-        if(PyObject_SetAttrString(mod, type->tp_name, (PyObject *)type)) {
+        if(PyObject_SetAttrString(mod, name, (PyObject *)type)) {
             return -1;
         }
 
-        if(type->tp_name[0] != '_' && append_string(__all__, type->tp_name)) {
+        /* As a special case, export _Database */
+        if((name[0] != '_' || 0 == strcmp(name, "_Database")) &&
+           append_string(__all__, name)) {
             return -1;
         }
     }
