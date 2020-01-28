@@ -55,6 +55,7 @@ __all__ = [
     'Cursor',
     'Environment',
     'Transaction',
+    '_Database',
     'enable_drop_gil',
     'version',
 ]
@@ -1031,7 +1032,7 @@ class Environment(object):
                 create=True, integerkey=False, integerdup=False,
                 dupfixed=False):
         """
-        Open a database, returning an opaque handle. Repeat
+        Open a database, returning an instance of :py:class:`_Database`. Repeat
         :py:meth:`Environment.open_db` calls for the same name will return the
         same handle. As a special case, the main database is always open.
 
@@ -1135,7 +1136,12 @@ class Environment(object):
 
 
 class _Database(object):
-    """Internal database handle."""
+    """
+    Internal database handle.  This class is opaque, save a single method.
+
+    Should not be constructed directly.  Use :py:meth:`Environment.open_db`
+    instead.
+    """
     def __init__(self, env, txn, name, reverse_key, dupsort, create,
                  integerkey, integerdup, dupfixed):
         env._deps.add(self)
@@ -1526,7 +1532,7 @@ class Cursor(object):
     <http://symas.com/mdb/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa>`_
 
         `db`:
-            :py:class:`Database` to navigate.
+            :py:class:`_Database` to navigate.
 
         `txn`:
             :py:class:`Transaction` to navigate.

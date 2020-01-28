@@ -63,6 +63,7 @@ class PackageExportsTest(unittest.TestCase):
             'Transaction',
             'TxnFullError',
             'VersionMismatchError',
+            '_Database',
             'enable_drop_gil',
             'version',
         ]
