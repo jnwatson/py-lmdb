@@ -43,7 +43,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'lmdb'
-copyright = u'2013, David Wilson'
+copyright = u'2013-2019 David Wilson, 2019-2020 Nic Watson'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -107,7 +107,7 @@ html_theme = 'acid'
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
-    'github_repo': 'https://github.com/dw/py-lmdb/'
+    'github_repo': 'https://github.com/jnwatson/py-lmdb/'
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -196,7 +196,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
   ('index', 'lmdb.tex', u'lmdb Documentation',
-   u'David Wilson', 'manual'),
+   u'David Wilson and Nic Watson', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
