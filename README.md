@@ -15,6 +15,18 @@ If you care whether the tests are passing, check out the repository and execute
 the tests under your desired target Python release, as the Travis CI build has
 a bad habit of breaking due to external factors approximately every 3 months.
 
+# Python Version Support Statement
+
+This project has been around for a while.  Previously, it supported all the way back to before 2.5.  Currently py-lmdb
+supports Python 2.7, Python >= 3.4, and pypy.
+
+Python 2.7 is now end-of-life.  If you are still using Python 2.7, you should strongly considering porting to Python
+3.
+
+That said, this project will continue to support running on Python 2.7 until Travis CI or Appveyor remove support for
+it.
+
 # Sponsored by The Vertex Project
 
-My current employer, [The Vertex Project](https://vertex.link/) is generously sponsoring my time to maintain py-lmdb.  If you like open source and systems programming in Python, check us out.  We could definitely use some more hands.
+My current employer, [The Vertex Project](https://vertex.link/) is generously sponsoring my time to maintain py-lmdb.
+If you like open source and systems programming in Python, check us out.
