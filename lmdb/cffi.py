@@ -1063,6 +1063,13 @@ class Environment(object):
         process. Only one thread should call this function; it is not
         mutex-protected in a read-only transaction.
 
+        The `dupsort`, `integerkey`, `integerdup`, and `dupfixed` parameters are
+        ignored if the database already exists.  The state of those settings are
+        persistent and immutable per database.  See the :py:meth:`flags` method
+        of _Database to see the state of those options for an opened database.
+        A consequence of the immutability of these flags is that the default
+        non-named database will never have these flags set.
+
         Preexisting transactions, other than the current transaction and any
         parents, must not use the new handle, nor must their children.
 
