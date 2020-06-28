@@ -23,6 +23,8 @@
 #ifndef LMDB_PRELOAD_H
 #define LMDB_PRELOAD_H
 
+#include <stdlib.h>
+
 /**
  * Touch a byte from every page in `x`, causing any read faults necessary for
  * copying the value to occur. This should be called with the GIL released, in
@@ -37,7 +39,7 @@
 static void preload(int rc, void *x, size_t size) {
     if(rc == 0) {
         volatile char j;
-        int i;
+        size_t i;
         for(i = 0; i < size; i += 4096) {
             j = ((volatile char *)x)[i];
         }
