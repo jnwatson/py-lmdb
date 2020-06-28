@@ -99,7 +99,7 @@ O_0111 = int('0111', 8)
 EMPTY_BYTES = UnicodeType().encode()
 
 
-# Used to track context across CFFI callbcks.
+# Used to track context across CFFI callbacks.
 _callbacks = threading.local()
 
 _CFFI_CDEF = '''
@@ -237,6 +237,7 @@ _CFFI_CDEF = '''
     #define MDB_VERSION_MISMATCH ...
 
     #define MDB_APPEND ...
+    #define MDB_APPENDDUP ...
     #define MDB_CP_COMPACT ...
     #define MDB_CREATE ...
     #define MDB_DUPFIXED ...
@@ -2150,7 +2151,10 @@ class Cursor(object):
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            flags |= _lib.MDB_APPEND
+            if self.txn._db._flags & _lib.MDB_DUPSORT:
+                flags |= _lib.MDB_APPENDDUP
+            else:
+                flags |= _lib.MDB_APPEND
 
         added = 0
         skipped = 0
