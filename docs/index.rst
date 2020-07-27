@@ -284,10 +284,9 @@ overwrite the map, resulting in database corruption.
 
 .. caution::
 
-    This option may cause filesystems that don't support sparse files, such as
-    OSX, to immediately preallocate `map_size=` bytes of underlying storage
-    when the environment is opened or closed for the first time.
-
+    A filesystem failure (such as running out of space), will crash the Python
+    process if this option is enabled.  (This is a general OS limitation, and
+    not limited to LMDB).
 
 Resource Management
 +++++++++++++++++++
