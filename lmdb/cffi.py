@@ -1063,6 +1063,13 @@ class Environment(object):
         process. Only one thread should call this function; it is not
         mutex-protected in a read-only transaction.
 
+        The `dupsort`, `integerkey`, `integerdup`, and `dupfixed` parameters are
+        ignored if the database already exists.  The state of those settings are
+        persistent and immutable per database.  See :py:meth:`_Database.flags`
+        to view the state of those options for an opened database.  A consequence
+        of the immutability of these flags is that the default non-named database
+        will never have these flags set.
+
         Preexisting transactions, other than the current transaction and any
         parents, must not use the new handle, nor must their children.
 
@@ -2013,8 +2020,8 @@ class Cursor(object):
 
     def set_range_dup(self, key, value):
         """Seek to the first key/value pair greater than or equal to `key`,
-        returning ``True`` on success, or ``False`` to indicate `(key, value)`
-        was past end of database.
+        returning ``True`` on success, or ``False`` to indicate that `value` was past the
+        last value of `key` or that `(key, value)` was past the end end of database.
 
         Only meaningful for databases opened with `dupsort=True`.
 
