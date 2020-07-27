@@ -1185,9 +1185,12 @@ class _Database(object):
             raise _error("mdb_dbi_flags", rc)
         self._flags = flags_[0]
 
-    def flags(self, txn):
+    def flags(self, *args):
         """Return the database's associated flags as a dict of _Database
         constructor kwargs."""
+        if len(args) > 1:
+            raise TypeError('flags takes 0 or 1 arguments')
+
         return {
             'reverse_key': bool(self._flags & _lib.MDB_REVERSEKEY),
             'dupsort': bool(self._flags & _lib.MDB_DUPSORT),

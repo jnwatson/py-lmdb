@@ -1041,23 +1041,11 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     PyObject *dct;
     unsigned int f;
 
-    struct db_flags {
-        TransObject *txn;
-    } arg = {NULL};
-
-    static const struct argspec argspec[] = {
-        {"txn", ARG_TRANS, OFFSET(db_flags, txn)}
-    };
-
-    static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
-    }
-    if(! arg.txn) {
-        return type_error("'txn' argument required");
-    }
-    if(! arg.txn->valid) {
-        return err_invalid();
+    if (args) {
+        Py_ssize_t size = PyTuple_GET_SIZE(args);
+        if(size > 1) {
+            return type_error("too many positional arguments.");
+        }
     }
 
     dct = PyDict_New();
