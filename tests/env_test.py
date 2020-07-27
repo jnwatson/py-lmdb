@@ -704,6 +704,9 @@ class OpenDbTest(unittest.TestCase):
             key = B('%s-%s' % (flag, val))
             db = env.open_db(key, txn=txn, **{flag: val})
             assert db.flags(txn)[flag] == val
+            assert db.flags(None)[flag] == val
+            assert db.flags()[flag] == val
+            self.assertRaises(TypeError, lambda: db.flags(1, 2, 3))
 
         txn.commit()
         # Test flag persistence.
