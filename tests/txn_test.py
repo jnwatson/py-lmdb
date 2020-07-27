@@ -28,11 +28,8 @@ import weakref
 
 import testlib
 from testlib import B
-from testlib import BT
-from testlib import OCT
 from testlib import INT_TYPES
 from testlib import BytesType
-from testlib import UnicodeType
 
 import lmdb
 

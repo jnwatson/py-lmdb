@@ -50,7 +50,7 @@ class ContextManagerTest(unittest.TestCase):
         try:
             with txn.cursor() as curs:
                 curs.put(123, 123)
-        except:
+        except Exception:
             pass
         self.assertRaises(Exception, lambda: curs.get(B('foo')))
 
@@ -174,6 +174,21 @@ class PutmultiTest(CursorTestBase):
         self.assertRaises(Exception,
              lambda: self.c.putmulti(range(2)))
 
+    def test_dupsort(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True)
+        txn = env.begin(write=True, db=db1)
+        with txn.cursor() as c:
+            tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
+            assert (3, 3) == c.putmulti(tups)
+
+    def test_dupsort_append(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True)
+        txn = env.begin(write=True, db=db1)
+        with txn.cursor() as c:
+            tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
+            assert (3, 3) == c.putmulti(tups, append=True)
 
 class ReplaceTest(CursorTestBase):
     def test_replace(self):
