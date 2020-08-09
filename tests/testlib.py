@@ -38,7 +38,6 @@ except ImportError:
 
 import lmdb
 
-
 _cleanups = []
 
 def cleanup():
@@ -104,11 +103,8 @@ def debug_collect():
             # PyPy doesn't collect objects with __del__ on first attempt.
             gc.collect()
 
-
-# Handle moronic Python >=3.0 <3.3.
 UnicodeType = getattr(__builtin__, 'unicode', str)
 BytesType = getattr(__builtin__, 'bytes', str)
-
 
 try:
     INT_TYPES = (int, long)

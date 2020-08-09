@@ -31,7 +31,6 @@ import testlib
 from testlib import B
 from testlib import BT
 
-
 class ContextManagerTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()

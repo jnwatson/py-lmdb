@@ -23,14 +23,12 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 import os
-import signal
 import sys
 import unittest
 import weakref
 
 import testlib
 from testlib import B
-from testlib import BT
 from testlib import OCT
 from testlib import INT_TYPES
 from testlib import UnicodeType
