@@ -948,7 +948,9 @@ make_cursor(DbObject *db, TransObject *trans)
     self->curs = curs;
     self->positioned = 0;
     self->key.mv_size = 0;
+    self->key.mv_data = NULL;
     self->val.mv_size = 0;
+    self->val.mv_data = NULL;
     self->trans = trans;
     self->last_mutation = trans->mutations;
     self->dbi_flags = db->flags;
