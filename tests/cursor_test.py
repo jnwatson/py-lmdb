@@ -272,7 +272,7 @@ class PreloadTest(CursorTestBase):
         self.c.value()
         minflts_after_value = resource.getrusage(resource.RUSAGE_THREAD)[6]
 
-        epsilon = 5
+        epsilon = 20
 
         # Setting the position doesn't prefault the data
         assert minflts_after_key - minflts_before < epsilon
