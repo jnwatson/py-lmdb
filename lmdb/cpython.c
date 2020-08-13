@@ -861,33 +861,35 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         self = env->spare_txns;
         DEBUG("found freelist txn; self=%p self->txn=%p", self, self->txn)
         env->spare_txns = self->spare_next;
-        env->max_spare_txns++;
-        self->flags &= ~TRANS_SPARE;
-        _Py_NewReference((PyObject *)self);
-        UNLOCKED(rc, mdb_txn_renew(self->txn));
 
+        UNLOCKED(rc, mdb_txn_renew(self->txn));
         if(rc) {
             mdb_txn_abort(self->txn);
-            self->txn = NULL;
+            PyObject_Del(self);
+            return err_set("mdb_txn_begin", rc);
         }
+
+        env->max_spare_txns++;
+        self->flags &= ~TRANS_SPARE;
+
     } else {
+        MDB_txn *txn;
         if(write && env->readonly) {
             const char *msg = "Cannot start write transaction with read-only env";
             return err_set(msg, EACCES);
         }
 
-        if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
-            return NULL;
+        flags = write ? 0 : MDB_RDONLY;
+        UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &txn));
+        if(rc) {
+            return err_set("mdb_txn_begin", rc);
         }
 
-        flags = write ? 0 : MDB_RDONLY;
-        UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &self->txn));
-    }
-
-    if(rc) {
-        _Py_ForgetReference((PyObject *)self);
-        PyObject_Del(self);
-        return err_set("mdb_txn_begin", rc);
+        if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
+            mdb_txn_abort(txn);
+            return NULL;
+        }
+        self->txn = txn;
     }
 
     OBJECT_INIT(self)
@@ -917,6 +919,7 @@ static PyObject *
 make_cursor(DbObject *db, TransObject *trans)
 {
     CursorObject *self;
+    MDB_cursor *curs;
     int rc;
 
     if(! trans->valid) {
@@ -928,20 +931,26 @@ make_cursor(DbObject *db, TransObject *trans)
         return NULL;
     }
 
-    self = PyObject_New(CursorObject, &PyCursor_Type);
-    UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &self->curs));
+    UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &curs));
     if(rc) {
-        _Py_ForgetReference((PyObject *)self);
-        PyObject_Del(self);
         return err_set("mdb_cursor_open", rc);
+    }
+
+    self = PyObject_New(CursorObject, &PyCursor_Type);
+    if (!self) {
+        mdb_cursor_close(curs);
+        return NULL;
     }
 
     DEBUG("sizeof cursor = %d", (int) sizeof *self)
     OBJECT_INIT(self)
     LINK_CHILD(trans, self)
+    self->curs = curs;
     self->positioned = 0;
     self->key.mv_size = 0;
+    self->key.mv_data = NULL;
     self->val.mv_size = 0;
+    self->val.mv_data = NULL;
     self->trans = trans;
     self->last_mutation = trans->mutations;
     self->dbi_flags = db->flags;
@@ -2569,14 +2578,17 @@ static PyObject *
 new_iterator(CursorObject *cursor, IterValFunc val_func, MDB_cursor_op op)
 {
     IterObject *iter = PyObject_New(IterObject, &PyIterator_Type);
-    if(iter) {
-        iter->val_func = val_func;
-        iter->curs = cursor;
-        Py_INCREF(cursor);
-        iter->started = 0;
-        iter->op = op;
+    if (!iter) {
+        return NULL;
     }
-    DEBUG("new_iterator: %#p", (void *)iter)
+
+    iter->val_func = val_func;
+    iter->curs = cursor;
+    Py_INCREF(cursor);
+    iter->started = 0;
+    iter->op = op;
+
+    DEBUG("new_iterator: %p", (void *)iter)
     return (PyObject *) iter;
 }
 
@@ -2980,15 +2992,17 @@ trans_dealloc(TransObject *self)
         self->spare_next = self->env->spare_txns;
         self->env->spare_txns = self;
         self->env->max_spare_txns--;
+        Py_INCREF(self);
 
         Py_CLEAR(self->db);
         UNLINK_CHILD(self->env, self)
         Py_CLEAR(self->env);
-    } else {
-        MDEBUG("deleting trans")
-        trans_clear(self);
-        PyObject_Del(self);
+        return;
     }
+
+    MDEBUG("deleting trans")
+    trans_clear(self);
+    PyObject_Del(self);
 }
 
 /**
