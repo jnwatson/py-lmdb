@@ -19,7 +19,7 @@
 # <http://www.openldap.org/>.
 
 """
-cffi wrapper for OpenLDAP's "Lightning" MDB database.
+Python wrapper for OpenLDAP's "Lightning" MDB database.
 
 Please see https://lmdb.readthedocs.io/
 """
@@ -51,4 +51,3 @@ except ImportError:
     from lmdb.cffi import __doc__
 
 __version__ = '0.99'
-
