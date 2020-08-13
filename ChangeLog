@@ -1,3 +1,20 @@
+2020-08-13 v0.99
+* Fix lmdb.tool encoding issues.
+
+* Fix -l lmdb invocation issue.
+
+* Minor documentation improvements.
+
+* Update LMDB to version 0.9.24.
+
+* Update for Python 3.9 (current release candidate) support.
+
+* Resolve a bug when using cursor.putmulti and append=True on dupsort DBs.
+
+* Allow _Database.flags method to take no arguments since the one argument
+  wasn't being used.
+
+
 2019-11-06 v0.98
 * Fix that a duplicate argument to a lmdb method would cause an assert.
 
