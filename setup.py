@@ -44,7 +44,7 @@ else:
 if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
 
-if sys.version[:3] < '2.7' or (sys.version_info[0] == 3 and sys.version[:3] < '3.4'):
+if sys.version[:3] < '2.7' or (3, 0) < sys.version_info[:2] < (3, 4):
     sys.stderr.write('Error: py-lmdb requires at least CPython 2.7 or 3.4\n')
     raise SystemExit(1)
 
