@@ -1,13 +1,15 @@
 diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
-index 2f55290..8f6a21e 100644
+index 2f55290..6691b94 100644
 --- a/libraries/liblmdb/lmdb.h
 +++ b/libraries/liblmdb/lmdb.h
-@@ -682,9 +682,12 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
+@@ -682,9 +682,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
  	 *		consumes more CPU and runs more slowly than the default.
  	 *		Currently it fails if the environment has suffered a page leak.
  	 * </ul>
 +	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
-+	 * transaction will be used.
++	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
++	 * flag is set.
++	 *
  	 * @return A non-zero error value on failure and 0 on success.
  	 */
  int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
@@ -15,12 +17,13 @@ index 2f55290..8f6a21e 100644
  
  	/** @brief Copy an LMDB environment to the specified file descriptor,
  	 *	with options.
-@@ -701,9 +704,12 @@ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
+@@ -701,9 +706,13 @@ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
  	 * have already been opened for Write access.
  	 * @param[in] flags Special options for this operation.
  	 * See #mdb_env_copy2() for options.
 +	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
-+	 * transaction will be used.
++	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
++	 * flag is set.
  	 * @return A non-zero error value on failure and 0 on success.
  	 */
  int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd, unsigned int flags);
@@ -29,7 +32,7 @@ index 2f55290..8f6a21e 100644
  	/** @brief Return statistics about the LMDB environment.
  	 *
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
-index 692feaa..4de0d0a 100644
+index 692feaa..5fdabd9 100644
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
 @@ -9309,12 +9309,12 @@ done:
@@ -72,41 +75,7 @@ index 692feaa..4de0d0a 100644
  
  done:
  #ifdef _WIN32
-@@ -9440,9 +9443,9 @@ done2:
- 
- 	/** Copy environment as-is. */
- static int ESECT
--mdb_env_copyfd0(MDB_env *env, HANDLE fd)
-+mdb_env_copyfd0(MDB_env *env, HANDLE fd, MDB_txn *txn)
- {
--	MDB_txn *txn = NULL;
-+	MDB_txn *orig_txn = txn;
- 	mdb_mutexref_t wmutex = NULL;
- 	int rc;
- 	size_t wsize, w3;
-@@ -9459,9 +9462,11 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
- 	/* Do the lock/unlock of the reader mutex before starting the
- 	 * write txn.  Otherwise other read txns could block writers.
- 	 */
--	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
--	if (rc)
--		return rc;
-+	if (!txn) {
-+		rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-+		if (rc)
-+			return rc;
-+	}
- 
- 	if (env->me_txns) {
- 		/* We must start the actual read txn after blocking writers */
-@@ -9534,17 +9539,24 @@ mdb_env_copyfd0(MDB_env *env, HANDLE fd)
- 	}
- 
- leave:
--	mdb_txn_abort(txn);
-+	if (!orig_txn)
-+		mdb_txn_abort(txn);
- 	return rc;
+@@ -9539,12 +9542,22 @@ leave:
  }
  
  int ESECT
@@ -117,8 +86,11 @@ index 692feaa..4de0d0a 100644
 -		return mdb_env_copyfd1(env, fd);
 +		return mdb_env_copyfd1(env, fd, txn);
  	else
--		return mdb_env_copyfd0(env, fd);
-+		return mdb_env_copyfd0(env, fd, txn);
++	{
++		if (txn) /* may only use txn with compact */
++			return EINVAL;
+ 		return mdb_env_copyfd0(env, fd);
++	}
 +}
 +
 +int ESECT
@@ -128,7 +100,7 @@ index 692feaa..4de0d0a 100644
  }
  
  int ESECT
-@@ -9555,6 +9567,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
+@@ -9555,6 +9568,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
  
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
@@ -141,7 +113,7 @@ index 692feaa..4de0d0a 100644
  {
  	int rc;
  	MDB_name fname;
-@@ -9566,7 +9584,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+@@ -9566,7 +9585,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
  		mdb_fname_destroy(fname);
  	}
  	if (rc == MDB_SUCCESS) {
