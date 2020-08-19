@@ -89,7 +89,7 @@ else:
 if patch_lmdb_source:
     if sys.platform.startswith('win'):
         try:
-            import patch
+            import patch_ng as patch
         except ImportError:
             raise Exception('Building py-lmdb from source on Windows requires the "patch" python module.')
 
@@ -108,8 +108,11 @@ if patch_lmdb_source:
 
     # Copy away the lmdb source then patch it
     if sys.platform.startswith('win'):
-        patchset = patch.fromfile('lib' + os.sep + 'py-lmdb' + os.sep + 'env-copy-txn.patch')
-        patchset.apply(3, root=dest)
+        patchfile = 'lib' + os.sep + 'py-lmdb' + os.sep + 'env-copy-txn.patch'
+        patchset = patch.fromfile(patchfile)
+        rv = patchset.apply(2, root=dest)
+        if not rv:
+            raise Exception('Applying patch failed')
     else:
         rv = os.system('/usr/bin/patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
         if rv:
