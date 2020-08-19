@@ -1,9 +1,16 @@
+---
 language: python
 
 matrix:
   exclude:
-  - python: pypy
-    env: LMDB_FORCE_CPYTHON=1
+    - python: pypy
+      env: LMDB_FORCE_CPYTHON=1
+    - python: pypy
+      env: LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
+    - python: pypy3
+      env: LMDB_FORCE_CPYTHON=1
+    - python: pypy3
+      env: LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
 
 python:
   - 2.7
@@ -12,13 +19,16 @@ python:
   - 3.6
   - 3.7
   - 3.8
-  - 3.9
-  # - nightly
+  - 3.9-dev
   - pypy
+  - pypy3
+  # - nightly
 
 env:
   - LMDB_FORCE_CFFI=1
   - LMDB_FORCE_CPYTHON=1
+  - LMDB_FORCE_CFFI=1 LMDB_PURE=1
+  - LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
 install:
   - sudo apt-get install gdb
   - pip install cffi
