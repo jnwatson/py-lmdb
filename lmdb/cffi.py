@@ -282,6 +282,10 @@ _CFFI_CDEF = '''
     static void preload(int rc, void *x, size_t size);
 
 '''
+_CFFI_CDEF_PATCHED = '''
+    int mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn);
+    int mdb_env_copyfd3(MDB_env *env, int fd, unsigned int flags, MDB_txn *txn);
+'''
 
 _CFFI_VERIFY = '''
     #include <sys/stat.h>
@@ -357,6 +361,11 @@ if not lmdb._reading_docs():
         'extra_library_dirs': [],
         'libraries': []
     }
+
+    _have_patched_lmdb = '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']
+
+    if _have_patched_lmdb:
+        _CFFI_CDEF += _CFFI_CDEF_PATCHED
 
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
@@ -546,14 +555,26 @@ def preload(mv):
 def enable_drop_gil():
     """Deprecated."""
 
-def version():
+def version(subpatch=False):
     """
     Return a tuple of integers `(major, minor, patch)` describing the LMDB
     library version that the binding is linked against. The version of the
     binding itself is available from ``lmdb.__version__``.
+
+        `subpatch`:
+            If true, returns a 4 integer tuple consisting of the same plus
+            an extra integer that represents any patches applied by py-lmdb
+            itself (0 representing no patches).
+
     """
-    return (_lib.MDB_VERSION_MAJOR, \
-            _lib.MDB_VERSION_MINOR, \
+    if subpatch:
+        return (_lib.MDB_VERSION_MAJOR,
+                _lib.MDB_VERSION_MINOR,
+                _lib.MDB_VERSION_PATCH,
+                1 if _have_patched_lmdb else 0)
+
+    return (_lib.MDB_VERSION_MAJOR,
+            _lib.MDB_VERSION_MINOR,
             _lib.MDB_VERSION_PATCH)
 
 
@@ -833,7 +854,7 @@ class Environment(object):
             raise _error("mdb_env_get_path", rc)
         return _ffi.string(path[0]).decode(sys.getfilesystemencoding())
 
-    def copy(self, path, compact=False):
+    def copy(self, path, compact=False, txn=None):
         """Make a consistent copy of the environment in the given destination
         directory.
 
@@ -843,16 +864,34 @@ class Environment(object):
             more CPU and runs more slowly than the default, but may produce a
             smaller output database.
 
-        Equivalent to `mdb_env_copy()
+        `txn`:
+            If provided, the backup will be taken from the database with
+            respect to that transaction, otherwise a temporary read-only
+            transaction will be created.  Note:  this parameter being non-None
+            is not available if the module was built with LMDB_PURE.  Note:
+            this parameter may be set only if compact=True.
+
+        Equivalent to `mdb_env_copy2() or mdb_env_copy3()
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
         flags = _lib.MDB_CP_COMPACT if compact else 0
-        encoded = path.encode(sys.getfilesystemencoding())
-        rc = _lib.mdb_env_copy2(self._env, encoded, flags)
-        if rc:
-            raise _error("mdb_env_copy2", rc)
+        if txn and not _have_patched_lmdb:
+            raise TypeError("Non-patched LMDB doesn't support transaction with env.copy")
 
-    def copyfd(self, fd, compact=False):
+        if txn and not flags:
+            raise TypeError("txn argument only compatible with compact=True")
+
+        encoded = path.encode(sys.getfilesystemencoding())
+        if _have_patched_lmdb:
+            rc = _lib.mdb_env_copy3(self._env, encoded, flags, txn._txn if txn else _ffi.NULL)
+            if rc:
+                raise _error("mdb_env_copy3", rc)
+        else:
+            rc = _lib.mdb_env_copy2(self._env, encoded, flags)
+            if rc:
+                raise _error("mdb_env_copy2", rc)
+
+    def copyfd(self, fd, compact=False, txn=None):
         """Copy a consistent version of the environment to file descriptor
         `fd`.
 
@@ -862,16 +901,33 @@ class Environment(object):
             more CPU and runs more slowly than the default, but may produce a
             smaller output database.
 
-        Equivalent to `mdb_env_copyfd()
+        `txn`:
+            If provided, the backup will be taken from the database with
+            respect to that transaction, otherwise a temporary read-only
+            transaction will be created.  Note:  this parameter being non-None
+            is not available if the module was built with LMDB_PURE.
+
+        Equivalent to `mdb_env_copyfd2() or mdb_env_copyfd3
         <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
+        if txn and not _have_patched_lmdb:
+            raise TypeError("Non-patched LMDB doesn't support transaction with env.copy")
         if is_win32:
             # Convert C library handle to kernel handle.
             fd = msvcrt.get_osfhandle(fd)
         flags = _lib.MDB_CP_COMPACT if compact else 0
-        rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
-        if rc:
-            raise _error("mdb_env_copyfd2", rc)
+
+        if txn and not flags:
+            raise TypeError("txn argument only compatible with compact=True")
+
+        if _have_patched_lmdb:
+            rc = _lib.mdb_env_copyfd3(self._env, fd, flags, txn._txn if txn else _ffi.NULL)
+            if rc:
+                raise _error("mdb_env_copyfd3", rc)
+        else:
+            rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
+            if rc:
+                raise _error("mdb_env_copyfd2", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.

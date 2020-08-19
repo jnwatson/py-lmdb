@@ -1367,17 +1367,22 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     struct env_copy {
         PyObject *path;
         int compact;
-    } arg = {NULL, 0};
+        TransObject *txn;
+    } arg = {NULL, 0, NULL};
 
     static const struct argspec argspec[] = {
         {"path", ARG_OBJ, OFFSET(env_copy, path)},
-        {"compact", ARG_BOOL, OFFSET(env_copy, compact)}
+        {"compact", ARG_BOOL, OFFSET(env_copy, compact)},
+        {"txn", ARG_TRANS, OFFSET(env_copy, txn)}
     };
 
     PyObject *fspath_obj;
     const char *fspath_s;
     int flags;
     int rc;
+#ifdef HAVE_PATCHED_LMDB
+    MDB_txn *txn;
+#endif
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
@@ -1390,12 +1395,36 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+#ifdef HAVE_PATCHED_LMDB
+    if (arg.txn) {
+        txn = arg.txn->txn;
+        if (!arg.compact) {
+            return type_error("txn argument only compatible with compact=True");
+        }
+    }
+    else {
+        txn = NULL;
+    }
+#else
+    if (arg.txn) {
+        return type_error("Non-patched LMDB doesn't support transaction with env.copy");
+    }
+#endif
+
     fspath_s = PyBytes_AS_STRING(fspath_obj);
     flags = arg.compact ? MDB_CP_COMPACT : 0;
+#ifdef HAVE_PATCHED_LMDB
+    UNLOCKED(rc, mdb_env_copy3(self->env, fspath_s, flags, txn));
+#else
     UNLOCKED(rc, mdb_env_copy2(self->env, fspath_s, flags));
+#endif
     Py_CLEAR(fspath_obj);
     if(rc) {
+#ifdef HAVE_PATCHED_LMDB
+        return err_set("mdb_env_copy3", rc);
+#else
         return err_set("mdb_env_copy2", rc);
+#endif
     }
     Py_RETURN_NONE;
 }
@@ -1409,8 +1438,12 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
     struct env_copyfd {
         int fd;
         int compact;
+        TransObject *txn;
     } arg = {-1, 0};
     int rc;
+#ifdef HAVE_PATCHED_LMDB
+    MDB_txn *txn;
+#endif
 #ifdef _WIN32
     PyObject *temp;
     Py_ssize_t handle;
@@ -1418,7 +1451,8 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
 
     static const struct argspec argspec[] = {
         {"fd", ARG_INT, OFFSET(env_copyfd, fd)},
-        {"compact", ARG_BOOL, OFFSET(env_copyfd, compact)}
+        {"compact", ARG_BOOL, OFFSET(env_copyfd, compact)},
+        {"txn", ARG_TRANS, OFFSET(env_copyfd, txn)},
     };
     int flags;
 
@@ -1431,6 +1465,22 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
     }
     flags = arg.compact ? MDB_CP_COMPACT : 0;
 
+#ifdef HAVE_PATCHED_LMDB
+    if (arg.txn) {
+        txn = arg.txn->txn;
+        if (!arg.compact) {
+            return type_error("txn argument only compatible with compact=True");
+        }
+    }
+    else {
+        txn = NULL;
+    }
+#else
+    if (arg.txn) {
+        return type_error("Non-patched LMDB doesn't support transaction with env.copyfd");
+    }
+#endif
+
 #ifdef _WIN32
     temp = PyObject_CallMethod(msvcrt, "get_osfhandle", "i", arg.fd);
     if(! temp) {
@@ -1441,13 +1491,19 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
     if(PyErr_Occurred()) {
         return NULL;
     }
-    UNLOCKED(rc, mdb_env_copyfd2(self->env, (HANDLE)handle, flags));
+    #define HANDLE_ARG (HANDLE)handle
 #else
-    UNLOCKED(rc, mdb_env_copyfd2(self->env, arg.fd, flags));
+    #define HANDLE_ARG arg.fd
+#endif
+
+#ifdef HAVE_PATCHED_LMDB
+    UNLOCKED(rc, mdb_env_copyfd3(self->env, HANDLE_ARG, flags, txn));
+#else
+    UNLOCKED(rc, mdb_env_copyfd2(self->env, HANDLE_ARG, flags));
 #endif
 
     if(rc) {
-        return err_set("mdb_env_copyfd2", rc);
+        return err_set("mdb_env_copyfd3", rc);
     }
     Py_RETURN_NONE;
 }
@@ -3577,15 +3633,37 @@ enable_drop_gil(void)
  * lmdb.get_version() -> tuple
  */
 static PyObject *
-get_version(void)
+get_version(PyObject *mod, PyObject *args, PyObject *kwds)
 {
+    struct version_args {
+        int subpatch;
+    } arg = {0};
+
+    static const struct argspec argspec[] = {
+        {"subpatch", ARG_BOOL, OFFSET(version_args, subpatch)},
+    };
+
+    static PyObject *cache = NULL;
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if (arg.subpatch) {
+#ifdef HAVE_PATCHED_LMDB
+        const int subpatch = 1;
+#else
+        const int subpatch = 0;
+#endif
+        return Py_BuildValue("iiii", MDB_VERSION_MAJOR,
+            MDB_VERSION_MINOR, MDB_VERSION_PATCH, subpatch);
+    }
     return Py_BuildValue("iii", MDB_VERSION_MAJOR,
         MDB_VERSION_MINOR, MDB_VERSION_PATCH);
 }
 
 static struct PyMethodDef module_methods[] = {
     {"enable_drop_gil", (PyCFunction) enable_drop_gil, METH_NOARGS, ""},
-    {"version", (PyCFunction) get_version, METH_NOARGS, ""},
+    {"version", (PyCFunction) get_version, METH_VARARGS|METH_KEYWORDS, ""},
     {0, 0, 0, 0}
 };
 

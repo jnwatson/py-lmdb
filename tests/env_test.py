@@ -35,6 +35,8 @@ from testlib import UnicodeType
 
 import lmdb
 
+# Whether we have the patch that allows env.copy* to take a txn
+have_txn_patch = lmdb.version(subpatch=True)[3]
 
 NO_READERS = UnicodeType('(no active readers)\n')
 
@@ -54,6 +56,11 @@ class VersionTest(unittest.TestCase):
         assert all(isinstance(i, INT_TYPES) for i in ver)
         assert all(i >= 0 for i in ver)
 
+    def test_version_subpatch(self):
+        ver = lmdb.version(subpatch=True)
+        assert len(ver) == 4
+        assert all(isinstance(i, INT_TYPES) for i in ver)
+        assert all(i >= 0 for i in ver)
 
 class OpenTest(unittest.TestCase):
     def tearDown(self):
@@ -417,7 +424,13 @@ class OtherMethodsTest(unittest.TestCase):
         txn.commit()
 
         dest_dir = testlib.temp_dir()
-        env.copy(dest_dir)
+
+        if have_txn_patch:
+            with env.begin() as txn:
+                self.assertRaises(Exception,
+                                  lambda: env.copy(dest_dir, txn=txn))
+
+        env.copy(dest_dir, compact=True)
         assert os.path.exists(dest_dir + '/data.mdb')
 
         cenv = lmdb.open(dest_dir)
@@ -442,11 +455,34 @@ class OtherMethodsTest(unittest.TestCase):
         ctxn = cenv.begin()
         assert ctxn.get(B('a')) == B('b')
 
+        # Test copy with transaction provided
+        dest_dir = testlib.temp_dir()
+        with env.begin(write=True) as txn:
+            copy_txn = env.begin()
+            txn.put(B('b'), B('b'))
+        assert ctxn.get(B('b')) is None
+
+        if have_txn_patch:
+
+            env.copy(dest_dir, compact=True, txn=copy_txn)
+            assert os.path.exists(dest_dir + '/data.mdb')
+
+            cenv = lmdb.open(dest_dir)
+            ctxn = cenv.begin()
+            assert ctxn.get(B('a')) == B('b')
+            # Verify that the write that occurred outside the txn isn't seen in the
+            # copy
+            assert ctxn.get(B('b')) is None
+
+        else:
+            self.assertRaises(Exception,
+                              lambda: env.copy(dest_dir, compact=True, txn=copy_txn))
+
         env.close()
         self.assertRaises(Exception,
             lambda: env.copy(testlib.temp_dir()))
 
-    def test_copyfd(self):
+    def test_copyfd_compact(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
         txn.put(B('a'), B('b'))
@@ -459,13 +495,38 @@ class OtherMethodsTest(unittest.TestCase):
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()
         assert dtxn.get(B('a')) == B('b')
+        fp.close()
+
+        # Test copy with transaction provided
+        dst_path = testlib.temp_file(create=False)
+        fp = open(dst_path, 'wb')
+        with env.begin(write=True) as txn:
+            copy_txn = env.begin()
+            txn.put(B('b'), B('b'))
+        assert dtxn.get(B('b')) is None
+
+        if have_txn_patch:
+
+            env.copyfd(fp.fileno(), compact=True, txn=copy_txn)
+
+            dstenv = lmdb.open(dst_path, subdir=False)
+            dtxn = dstenv.begin()
+            assert dtxn.get(B('a')) == B('b')
+            # Verify that the write that occurred outside the txn isn't seen in the
+            # copy
+            assert dtxn.get(B('b')) is None
+            dstenv.close()
+
+        else:
+            self.assertRaises(Exception,
+                lambda: env.copyfd(fp.fileno(), compact=True, txn=copy_txn))
 
         env.close()
         self.assertRaises(Exception,
             lambda: env.copyfd(fp.fileno()))
         fp.close()
 
-    def test_copyfd_compact(self):
+    def test_copyfd(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
         txn.put(B('a'), B('b'))
@@ -473,7 +534,12 @@ class OtherMethodsTest(unittest.TestCase):
 
         dst_path = testlib.temp_file(create=False)
         fp = open(dst_path, 'wb')
-        env.copyfd(fp.fileno(), compact=True)
+
+        if have_txn_patch:
+            with env.begin() as txn:
+                self.assertRaises(Exception,
+                                  lambda: env.copyfd(fp.fileno(), txn=txn))
+        env.copyfd(fp.fileno())
 
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()
