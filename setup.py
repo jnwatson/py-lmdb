@@ -64,6 +64,7 @@ else:
     extra_library_dirs = []
 
 extra_include_dirs += ['lib/py-lmdb']
+extra_compile_args = []
 
 patch_lmdb_source = False
 
@@ -81,6 +82,7 @@ else:
     print('py-lmdb: Using bundled liblmdb with py-lmdb patches; override with LMDB_FORCE_SYSTEM=1 or LMDB_PURE=1.')
     extra_sources = ['build/lib/mdb.c', 'build/lib/midl.c']
     extra_include_dirs += ['build/lib']
+    extra_compile_args += ['-DHAVE_PATCHED_LMDB=1']
     libraries = []
     patch_lmdb_source = True
 
@@ -114,7 +116,7 @@ if patch_lmdb_source:
             raise Exception('Applying patch failed')
 
 # distutils perplexingly forces NDEBUG for package code!
-extra_compile_args = ['-UNDEBUG']
+extra_compile_args += ['-UNDEBUG']
 
 # Disable some Clang/GCC warnings.
 if not os.getenv('LMDB_MAINTAINER'):
