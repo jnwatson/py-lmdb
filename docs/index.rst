@@ -65,6 +65,11 @@ built statically by default. If your system distribution includes LMDB, set the
 ``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
 and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
+By default, the LMDB library is patched before building.  This patch (located
+at ``lib/py-lmdb/env-copy-txn.patch``) provides a minor feature:  the ability
+to copy/backup an environment under a particular transaction.   If you prefer
+to bypass the patch, set the environment variable ``LMDB_PURE``.
+
 The CFFI variant depends on CFFI, which in turn depends on ``libffi``, which
 may need to be installed from a package. On CPython, both variants additionally
 depend on the CPython development headers. On Debian/Ubuntu:
