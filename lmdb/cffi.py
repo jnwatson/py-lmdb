@@ -2060,6 +2060,54 @@ class Cursor(object):
             return self.value()
         return default
 
+    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None):
+        """Returns an iterable of `(key, value)` 2-tuples containing results
+        for each key in the iterable `keys`.
+
+            `keys`:
+                Iterable to read keys from.
+
+            `dupdata`:
+                If ``True`` and database was opened with `dupsort=True`, read
+                all duplicate values for each matching key.
+
+            `dupfixed_bytes`:
+                If database was opened with `dupsort=True` and `dupfixed=True`,
+                accepts the size of each value, in bytes, and applies an
+                optimization reducing the number of database lookups.
+        """
+        if dupfixed_bytes and dupfixed_bytes < 0:
+            raise _error("dupfixed_bytes must be a positive integer.")
+        elif dupfixed_bytes and not dupfixed_bytes:
+            raise _error("dupdata is required for dupfixed_bytes.")
+
+        if dupfixed_bytes:
+            get_op = _lib.MDB_GET_MULTIPLE
+            next_op = _lib.MDB_NEXT_MULTIPLE
+        else:
+            get_op = _lib.MDB_GET_CURRENT
+            next_op = _lib.MDB_NEXT_DUP
+
+        for key in keys:
+            if self.set_key(key):
+                while self._valid:
+                    self._cursor_get(get_op)
+                    preload(self._val)
+                    k = self._to_py(self._key)
+                    v = self._to_py(self._val)
+
+                    if dupfixed_bytes:
+                        gen = (
+                            (k, v[i:i+dupfixed_bytes])
+                            for i in range(0, len(v), dupfixed_bytes))
+                        for k, v in gen:
+                            yield k, v
+                    else:
+                        yield k, v
+
+                    if dupdata:
+                        self._cursor_get(next_op)
+
     def set_range(self, key):
         """Seek to the first key greater than or equal to `key`, returning
         ``True`` on success, or ``False`` to indicate key was past end of
