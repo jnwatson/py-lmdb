@@ -1,3 +1,12 @@
+2020-08-28 v1.0.0
+* Start of new semantic versioning scheme.  This would be a minor version
+  bump from the 0.99 release if it were semantically versioned.
+
+* Allow environment copy to take a passed-in transaction.  This is the
+  first released feature that requires a (very small) patch to the
+  underlying C library.  By default, the patch will be applied unless
+  this module is built with LMDB_PURE environment variable set.
+
 2020-08-13 v0.99
 * Fix lmdb.tool encoding issues.
 
