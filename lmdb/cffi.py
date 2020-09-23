@@ -2093,20 +2093,22 @@ class Cursor(object):
                 while self._valid:
                     self._cursor_get(get_op)
                     preload(self._val)
-                    k = self._to_py(self._key)
-                    v = self._to_py(self._val)
+                    key = self._to_py(self._key)
+                    val = self._to_py(self._val)
 
                     if dupfixed_bytes:
                         gen = (
-                            (k, v[i:i+dupfixed_bytes])
-                            for i in range(0, len(v), dupfixed_bytes))
+                            (key, val[i:i+dupfixed_bytes])
+                            for i in range(0, len(val), dupfixed_bytes))
                         for k, v in gen:
                             yield k, v
                     else:
-                        yield k, v
+                        yield key, val
 
                     if dupdata:
                         self._cursor_get(next_op)
+                    else:
+                        break
 
     def set_range(self, key):
         """Seek to the first key greater than or equal to `key`, returning

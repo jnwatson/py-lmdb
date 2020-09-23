@@ -2106,16 +2106,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         int dupfixed_bytes;
     } arg = {Py_None, 0, 0};
 
-    int as_buffer;
-    PyObject *iter;
-    PyObject *item;
-    PyObject *tup;
-    PyObject *key;
-    PyObject *val;
+    int i, as_buffer;
+    PyObject *iter, *item, *tup, *key, *val;
     PyObject *ret = PyList_New(0);
-    MDB_cursor_op get_op;
-    MDB_cursor_op next_op;
-    int i;
+    MDB_cursor_op get_op, next_op;
     bool done;
 
     static const struct argspec argspec[] = {
