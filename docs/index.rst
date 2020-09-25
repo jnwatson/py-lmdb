@@ -156,7 +156,9 @@ Space usage can be monitored using :py:meth:`Environment.stat`:
              'psize': 4096L}
 
 This database contains 3,761,848 records and no values were spilled
-(``overflow_pages``).
+(``overflow_pages``).  `Environment.stat` only return information for the
+default database.  If named databases are used, you must add the results
+from `Transaction.stat` on each named database.
 
 By default record keys are limited to 511 bytes in length, however this can be
 adjusted by rebuilding the library. The compile-time key length can be queried

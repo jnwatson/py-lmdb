@@ -964,7 +964,7 @@ class Environment(object):
     def stat(self):
         """stat()
 
-        Return some nice environment statistics as a dict:
+        Return some environment statistics for the default database as a dict:
 
         +--------------------+---------------------------------------+
         | ``psize``          | Size of a database page in bytes.     |
