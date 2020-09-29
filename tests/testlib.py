@@ -137,6 +137,10 @@ KEYS2 = BL('a', 'b', 'baa', 'd', 'e', 'f', 'g', 'h')
 ITEMS2 = [(k, B('')) for k in KEYS2]
 REV_ITEMS2 = ITEMS2[::-1]
 VALUES2 = [B('') for k in KEYS2]
+VALUES2_MULTI = [(B('r'), B('s')) for k in KEYS2]
+ITEMS2_MULTI = [
+    (kv[0], v) for kv in list(zip(KEYS2, VALUES2_MULTI)) for v in kv[1]
+    ]
 
 def putData(t, db=None):
     for k, v in ITEMS:
@@ -149,5 +153,12 @@ def putBigData(t, db=None):
     for k, v in ITEMS2:
         if db:
             t.put(k, v, db=db)
+        else:
+            t.put(k, v)
+
+def putBigDataMulti(t, db=None):
+    for k, v in ITEMS2_MULTI:
+        if db:
+            t.put(k, v, db=db) #defaults to dupdata=True
         else:
             t.put(k, v)

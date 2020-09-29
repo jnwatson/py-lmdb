@@ -2095,6 +2095,152 @@ static PyObject *
 cursor_value(CursorObject *self);
 
 /**
+ * Cursor.getmulti() -> Iterable of (key, value)
+ */
+static PyObject *
+cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
+{
+    struct cursor_get {
+        PyObject *keys;
+        int dupdata;
+        int dupfixed_bytes;
+    } arg = {Py_None, 0, 0};
+
+    int i, as_buffer;
+    PyObject *iter, *item, *tup, *key, *val;
+    PyObject *ret = PyList_New(0);
+    MDB_cursor_op get_op, next_op;
+    bool done;
+
+    static const struct argspec argspec[] = {
+        {"keys", ARG_OBJ, OFFSET(cursor_get, keys)},
+        {"dupdata", ARG_BOOL, OFFSET(cursor_get, dupdata)},
+        {"dupfixed_bytes", ARG_INT, OFFSET(cursor_get, dupfixed_bytes)}  // ARG_SIZE?
+    };
+
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+        return NULL;
+    }
+
+    if(arg.dupfixed_bytes < 0) {
+        return type_error("dupfixed_bytes must be a positive integer.");
+    }else if (arg.dupfixed_bytes > 0 && !arg.dupdata) {
+        return type_error("dupdata is required for dupfixed_bytes.");
+    }
+
+    if(! ((iter = PyObject_GetIter(arg.keys)))) {
+        return NULL;
+    }
+
+    /* Choose ops for dupfixed vs standard  */
+    if(arg.dupfixed_bytes) {
+        get_op = MDB_GET_MULTIPLE;
+        next_op = MDB_NEXT_MULTIPLE;
+    } else {
+        get_op = MDB_GET_CURRENT;
+        next_op = MDB_NEXT_DUP;
+    }
+
+    as_buffer = self->trans->flags & TRANS_BUFFERS;
+
+    while((item = PyIter_Next(iter))) {
+        MDB_val mkey;
+
+        // validate item?
+
+        if(val_from_buffer(&mkey, item)) {
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL;
+        } /* val_from_buffer sets exception */
+
+        self->key = mkey;
+        if(_cursor_get_c(self, MDB_SET_KEY)) { // MDB_SET?
+            Py_DECREF(item);
+            Py_DECREF(iter);
+            return NULL;
+        }
+
+        done = false;
+        while (!done) {
+            //TODO valid cursor check?
+
+            if(! self->positioned) {
+                done = true;
+            }
+            // TODO check for mutation and refresh key?
+            else if(_cursor_get_c(self, get_op)) {
+                Py_DECREF(item);
+                Py_DECREF(iter);
+                return NULL;
+            } else {
+                key = obj_from_val(&self->key, as_buffer);
+                PRELOAD_UNLOCKED(0, self->val.mv_data, self->val.mv_size);
+
+                if(!arg.dupfixed_bytes) {
+                    /* Not dupfixed, MDB_GET_CURRENT returns single item */
+                    val = obj_from_val(&self->val, as_buffer);
+                    tup = PyTuple_New(2);
+
+                    if (tup && key && val) {
+                        PyTuple_SET_ITEM(tup, 0, key);
+                        PyTuple_SET_ITEM(tup, 1, val);
+                        PyList_Append(ret, tup);
+                        Py_DECREF(tup);
+                    } else {
+                        Py_DECREF(key);
+                        Py_DECREF(val);
+                        Py_DECREF(tup);
+                    }
+                } else {
+                    /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
+                    int len = (int) self->val.mv_size/arg.dupfixed_bytes; // size_t?
+                    for(i=0; i<len; i++){
+                        // TODO Handle as_buffer?
+                        val = PyBytes_FromStringAndSize(
+                            (char *) self->val.mv_data+(i*arg.dupfixed_bytes),
+                            (Py_ssize_t) arg.dupfixed_bytes);
+                        tup = PyTuple_New(2);
+
+                        if (tup && key && val) {
+                            Py_INCREF(key); // Hold key in loop
+                            PyTuple_SET_ITEM(tup, 0, key);
+                            PyTuple_SET_ITEM(tup, 1, val);
+                            PyList_Append(ret, tup);
+                            Py_DECREF(tup);
+                        } else {
+                            Py_DECREF(val);
+                            Py_DECREF(tup);
+                        }
+                    }
+                    Py_DECREF(key); // Release key
+                }
+
+                if(arg.dupdata){
+                    if(_cursor_get_c(self, next_op)) {
+                        Py_DECREF(item);
+                        Py_DECREF(iter);
+                        return NULL;
+                    }
+                }
+                else {
+                    done = true;
+                }
+            }
+        }
+        Py_DECREF(item);
+    }
+
+    Py_DECREF(iter);
+    if(PyErr_Occurred()) {
+        return NULL;
+    }
+
+    return ret;
+}
+
+/**
  * Cursor.get() -> result
  */
 static PyObject *
@@ -2829,6 +2975,7 @@ static struct PyMethodDef cursor_methods[] = {
     {"first", (PyCFunction)cursor_first, METH_NOARGS},
     {"first_dup", (PyCFunction)cursor_first_dup, METH_NOARGS},
     {"get", (PyCFunction)cursor_get, METH_VARARGS|METH_KEYWORDS},
+    {"getmulti", (PyCFunction)cursor_get_multi, METH_VARARGS|METH_KEYWORDS},
     {"item", (PyCFunction)cursor_item, METH_NOARGS},
     {"iternext", (PyCFunction)cursor_iternext, METH_VARARGS|METH_KEYWORDS},
     {"iternext_dup", (PyCFunction)cursor_iternext_dup, METH_VARARGS|METH_KEYWORDS},
