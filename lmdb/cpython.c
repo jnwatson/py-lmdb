@@ -2196,13 +2196,16 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
                     int len = (int) self->val.mv_size/arg.dupfixed_bytes; // size_t?
-                    for(i=0; i<len; i++){
-                        // TODO Handle as_buffer?
-                        val = PyBytes_FromStringAndSize(
-                            (char *) self->val.mv_data+(i*arg.dupfixed_bytes),
-                            (Py_ssize_t) arg.dupfixed_bytes);
+                    for(i=0; i<len; i++) {
+                        char *val_data = (char *) self->val.mv_data + (i * arg.dupfixed_bytes);
+                        if(as_buffer) {
+                            val = PyMemoryView_FromMemory(
+                                val_data, (size_t) arg.dupfixed_bytes, PyBUF_READ);
+                        } else {
+                            val = PyBytes_FromStringAndSize(
+                                val_data, (size_t) arg.dupfixed_bytes);
+                        }
                         tup = PyTuple_New(2);
-
                         if (tup && key && val) {
                             Py_INCREF(key); // Hold key in loop
                             PyTuple_SET_ITEM(tup, 0, key);
