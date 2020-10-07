@@ -21,7 +21,7 @@ python:
   - 3.8
   - 3.9-dev
   - pypy
-  # - pypy3
+  - pypy3
   # - nightly
 
 env:
