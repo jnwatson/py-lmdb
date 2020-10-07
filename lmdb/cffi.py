@@ -1493,8 +1493,8 @@ class Transaction(object):
     def put(self, key, value, dupdata=True, overwrite=True, append=False,
             db=None):
         """Store a record, returning ``True`` if it was written, or ``False``
-        to indicate the key was already present and `overwrite=False`. On
-        success, the cursor is positioned on the new record.
+        to indicate the key was already present and `overwrite=False`.
+        On success, the cursor is positioned on the new record.
 
         Equivalent to `mdb_put()
         <http://symas.com/mdb/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
@@ -1506,19 +1506,19 @@ class Transaction(object):
                 Bytestring value to store.
 
             `dupdata`:
-                If ``True`` and database was opened with `dupsort=True`, add
-                pair as a duplicate if the given key already exists. Otherwise
-                overwrite any existing matching key.
+                If ``False`` and database was opened with `dupsort=True`, will return
+                ``False`` if the key already has that value.  In other words, this only
+                affects the return value.
 
             `overwrite`:
                 If ``False``, do not overwrite any existing matching key.  If
                 False and writing to a dupsort=True database, this will not add a value
-                to the key and this function will return False.
+                to the key and this function will return ``False``.
 
             `append`:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
-                than the highest existing key will cause corruption.
+                than the highest existing key will fail and return ``False``.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
@@ -2198,9 +2198,9 @@ class Cursor(object):
                 Bytestring value to store.
 
             `dupdata`:
-                If ``True`` and database was opened with `dupsort=True`, add
-                pair as a duplicate if the given key already exists. Otherwise
-                overwrite any existing matching key.
+                If ``False`` and database was opened with `dupsort=True`, will return
+                ``False`` if the key already has that value.  In other words, this only
+                affects the return value.
 
             `overwrite`:
                 If ``False``, do not overwrite the value for the key if it
@@ -2212,7 +2212,7 @@ class Cursor(object):
             `append`:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
-                than the highest existing key will cause corruption.
+                than the highest existing key will fail and return ``False``.
         """
         flags = 0
         if not dupdata:
