@@ -245,7 +245,7 @@ class PreloadTest(CursorTestBase):
         self.txn = self.env.begin(write=True)
         self.c = self.txn.cursor()
 
-    @unittest.skipIf(sys.platform != 'linux', "test only works on Linux")
+    @unittest.skipIf(not sys.platform.startswith('linux'), "test only works on Linux")
     def test_preload(self):
         """
         Test that reading just the key doesn't prefault the value contents, but
@@ -264,13 +264,13 @@ class PreloadTest(CursorTestBase):
         self.path, self.env = testlib.temp_env(path=self.path, writemap=True)
         self.txn = self.env.begin(write=True, buffers=True)
         self.c = self.txn.cursor()
-        minflts_before = resource.getrusage(resource.RUSAGE_THREAD)[6]
+        minflts_before = resource.getrusage(resource.RUSAGE_SELF)[6]
         self.c.set_key(B('a'))
-        assert self.c.key() == B('a')
-        minflts_after_key = resource.getrusage(resource.RUSAGE_THREAD)[6]
+        assert bytes(self.c.key()) == B('a')
+        minflts_after_key = resource.getrusage(resource.RUSAGE_SELF)[6]
 
         self.c.value()
-        minflts_after_value = resource.getrusage(resource.RUSAGE_THREAD)[6]
+        minflts_after_value = resource.getrusage(resource.RUSAGE_SELF)[6]
 
         epsilon = 20
 
