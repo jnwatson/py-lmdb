@@ -266,7 +266,7 @@ class PreloadTest(CursorTestBase):
         self.c = self.txn.cursor()
         minflts_before = resource.getrusage(resource.RUSAGE_SELF)[6]
         self.c.set_key(B('a'))
-        assert self.c.key() == B('a')
+        assert bytes(self.c.key()) == B('a')
         minflts_after_key = resource.getrusage(resource.RUSAGE_SELF)[6]
 
         self.c.value()
