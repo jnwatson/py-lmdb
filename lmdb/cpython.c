@@ -1650,9 +1650,12 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_INTEGERKEY;
     }
     if(arg.integerdup) {
+        flags |= MDB_DUPSORT;
+        flags |= MDB_DUPFIXED;
         flags |= MDB_INTEGERDUP;
     }
     if(arg.dupfixed) {
+        flags |= MDB_DUPSORT;
         flags |= MDB_DUPFIXED;
     }
 
