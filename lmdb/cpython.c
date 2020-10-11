@@ -2211,14 +2211,15 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                         char *val_data = (char *) self->val.mv_data + (i * arg.dupfixed_bytes);
                         if (key_bytes) {
                             /* Add to array buffer */
+                            char *k, *v;
                             if (buffer_pos >= buffer_size) { // Grow buffer
                                 buffer_size = buffer_size * 2;
                                 buffer = realloc(buffer, buffer_size * item_size);
                             }
-                            char *k = buffer + (buffer_pos * item_size);
-                            char *v = k + arg.key_bytes;
-                            memcpy(k, self->key.mv_data, arg.key_bytes);
-                            memcpy(v, val_data, arg.dupfixed_bytes);
+                            k = buffer + (buffer_pos * item_size);
+                            v = k + arg.key_bytes;
+                            memcpy(k, (char *) self->key.mv_data, key_bytes);
+                            memcpy(v, val_data, val_bytes);
 
                             buffer_pos++;
                         } else {
@@ -2267,9 +2268,12 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     if (key_bytes){
+        int rc;
+        Py_buffer pybuf;
         size_t newsize = buffer_pos * item_size;
         buffer = realloc(buffer, newsize);
-        return PyByteArray_FromStringAndSize(buffer, (Py_ssize_t)newsize);
+        rc = PyBuffer_FillInfo(&pybuf, NULL, buffer, newsize, 0, PyBUF_SIMPLE);
+        return PyMemoryView_FromBuffer(&pybuf);
     } else {
         return pylist;
     }

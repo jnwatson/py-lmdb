@@ -2,7 +2,7 @@ from __future__ import absolute_import
 from __future__ import with_statement
 import unittest
 
-import testlib
+import testlib, struct
 from testlib import KEYSFIXED, ITEMS_MULTI_FIXEDKEY
 from testlib import putBigDataMultiFixed
 
@@ -66,17 +66,17 @@ class GetMultiTestDupsortDupfixedKeyfixed(GetMultiTestBase):
 
     def testGetMulti(self):
         key_bytes, val_bytes = 1, 1
-        arr = self.c.getmulti(
+        arr = bytearray(self.c.getmulti(
             KEYSFIXED, dupdata=True,
             dupfixed_bytes=val_bytes, key_bytes=key_bytes
-        )
+        ))
         asserts = []
         for i, kv in enumerate(ITEMS_MULTI_FIXEDKEY):
             key, val = kv
             asserts.extend((
-                int(arr[i*2]).to_bytes(length=key_bytes, byteorder='little') == key,
-                int(arr[i*2+1]).to_bytes(length=val_bytes, byteorder='little') == val)
-            )
+                struct.pack('b', arr[i*2]) == key,
+                struct.pack('b', arr[i*2+1]) == val
+            ))
         self.assertEqual(all(asserts), True)
 
 

@@ -2077,13 +2077,14 @@ class Cursor(object):
                 optimization reducing the number of database lookups.
 
             `key_bytes`:
-                If database was opened with `dupsort=True` and `dupfixed=True`,
-                and database key size is also fixed, accepts the key size, in
-                bytes, resulting in this function returning a structured array
-                as a bytearray. The bytearray can be passed to NumPy as a
-                buffer to instantiate the structured array:
+                If `dupfixed_bytes` is set and database key size is fixed,
+                accepts the key size, in bytes, resulting in this function
+                returning a memoryview of the results as a structured array
+                of bytes. The structured array can be instantiated by passing
+                the memoryview buffer to NumPy:
 
-                ::
+                .. code-block:: python
+
                     key_bytes, val_bytes = 4, 8
                     dtype = np.dtype([(f'S{key_bytes}', f'S{val_bytes}}')])
                     arr = np.frombuffer(
@@ -2121,7 +2122,7 @@ class Cursor(object):
                             for i in range(0, len(val), dupfixed_bytes))
                         if key_bytes:
                             for k, v in gen:
-                                a += k + v
+                                a.extend(k + v)
                         else:
                             for k, v in gen:
                                 l.append((k, v))
@@ -2134,7 +2135,7 @@ class Cursor(object):
                         break
 
         if key_bytes:
-            return a
+            return memoryview(a)
         else:
             return l
 
