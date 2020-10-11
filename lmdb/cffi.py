@@ -2060,7 +2060,7 @@ class Cursor(object):
             return self.value()
         return default
 
-    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None):
+    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, key_bytes=None):
         """Returns an iterable of `(key, value)` 2-tuples containing results
         for each key in the iterable `keys`.
 
@@ -2075,11 +2075,28 @@ class Cursor(object):
                 If database was opened with `dupsort=True` and `dupfixed=True`,
                 accepts the size of each value, in bytes, and applies an
                 optimization reducing the number of database lookups.
+
+            `key_bytes`:
+                If database was opened with `dupsort=True` and `dupfixed=True`,
+                and database key size is also fixed, accepts the key size, in
+                bytes, resulting in this function returning a structured array
+                as a bytearray. The bytearray can be passed to NumPy as a
+                buffer to instantiate the structured array:
+
+                ::
+                    key_bytes, val_bytes = 4, 8
+                    dtype = np.dtype([(f'S{key_bytes}', f'S{val_bytes}}')])
+                    arr = np.frombuffer(
+                        cur.getmulti(keys, dupdata=True, dupfixed_bytes=val_bytes, key_bytes=key_bytes)
+                    )
+
         """
         if dupfixed_bytes and dupfixed_bytes < 0:
             raise _error("dupfixed_bytes must be a positive integer.")
-        elif dupfixed_bytes and not dupfixed_bytes:
-            raise _error("dupdata is required for dupfixed_bytes.")
+        elif (dupfixed_bytes or key_bytes) and not dupdata:
+            raise _error("dupdata is required for dupfixed_bytes/key_bytes.")
+        elif key_bytes and not dupfixed_bytes:
+            raise _error("dupfixed_bytes is required for key_bytes.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
@@ -2088,6 +2105,8 @@ class Cursor(object):
             get_op = _lib.MDB_GET_CURRENT
             next_op = _lib.MDB_NEXT_DUP
 
+        a = bytearray()
+        l = list()
         for key in keys:
             if self.set_key(key):
                 while self._valid:
@@ -2100,15 +2119,24 @@ class Cursor(object):
                         gen = (
                             (key, val[i:i+dupfixed_bytes])
                             for i in range(0, len(val), dupfixed_bytes))
-                        for k, v in gen:
-                            yield k, v
+                        if key_bytes:
+                            for k, v in gen:
+                                a += k + v
+                        else:
+                            for k, v in gen:
+                                l.append((k, v))
                     else:
-                        yield key, val
+                        l.append((key, val))
 
                     if dupdata:
                         self._cursor_get(next_op)
                     else:
                         break
+
+        if key_bytes:
+            return a
+        else:
+            return l
 
     def set_range(self, key):
         """Seek to the first key greater than or equal to `key`, returning

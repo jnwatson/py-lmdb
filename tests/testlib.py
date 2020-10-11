@@ -137,28 +137,29 @@ KEYS2 = BL('a', 'b', 'baa', 'd', 'e', 'f', 'g', 'h')
 ITEMS2 = [(k, B('')) for k in KEYS2]
 REV_ITEMS2 = ITEMS2[::-1]
 VALUES2 = [B('') for k in KEYS2]
-VALUES2_MULTI = [(B('r'), B('s')) for k in KEYS2]
-ITEMS2_MULTI = [
-    (kv[0], v) for kv in list(zip(KEYS2, VALUES2_MULTI)) for v in kv[1]
+
+# ITEMS2_MULTI = [
+#     (kv[0], v) for kv in list(zip(KEYS2, VALUES2_MULTI)) for v in kv[1]
+#     ]
+KEYSFIXED = BL('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+VALUES_MULTI = [(B('r'), B('s')) for k in KEYSFIXED]
+ITEMS_MULTI_FIXEDKEY = [
+    (kv[0], v) for kv in list(zip(KEYSFIXED, VALUES_MULTI)) for v in kv[1]
     ]
 
-def putData(t, db=None):
-    for k, v in ITEMS:
+def _put_items(items, t, db=None):
+    for k, v in items:
         if db:
             t.put(k, v, db=db)
         else:
             t.put(k, v)
+
+
+def putData(t, db=None):
+    _put_items(ITEMS, t, db=db)
 
 def putBigData(t, db=None):
-    for k, v in ITEMS2:
-        if db:
-            t.put(k, v, db=db)
-        else:
-            t.put(k, v)
+    _put_items(ITEMS2, t, db=db)
 
-def putBigDataMulti(t, db=None):
-    for k, v in ITEMS2_MULTI:
-        if db:
-            t.put(k, v, db=db) #defaults to dupdata=True
-        else:
-            t.put(k, v)
+def putBigDataMultiFixed(t, db=None):
+    _put_items(ITEMS_MULTI_FIXEDKEY, t, db=db)

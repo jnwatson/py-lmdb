@@ -2103,20 +2103,26 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     struct cursor_get {
         PyObject *keys;
         int dupdata;
-        int dupfixed_bytes;
+        size_t dupfixed_bytes;
+        size_t key_bytes;
     } arg = {Py_None, 0, 0};
 
     int i, as_buffer;
     PyObject *iter, *item, *tup, *key, *val;
-    PyObject *ret = PyList_New(0);
+    PyObject *pylist = PyList_New(0);
     MDB_cursor_op get_op, next_op;
     bool done;
 
     static const struct argspec argspec[] = {
         {"keys", ARG_OBJ, OFFSET(cursor_get, keys)},
         {"dupdata", ARG_BOOL, OFFSET(cursor_get, dupdata)},
-        {"dupfixed_bytes", ARG_INT, OFFSET(cursor_get, dupfixed_bytes)}  // ARG_SIZE?
+        {"dupfixed_bytes", ARG_SIZE, OFFSET(cursor_get, dupfixed_bytes)},
+        {"key_bytes", ARG_SIZE, OFFSET(cursor_get, key_bytes)}
     };
+
+    size_t buffer_pos = 0, buffer_size = 8;
+    size_t key_bytes, val_bytes, item_size;
+    char *buffer;
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
@@ -2125,15 +2131,17 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
 
     if(arg.dupfixed_bytes < 0) {
         return type_error("dupfixed_bytes must be a positive integer.");
-    }else if (arg.dupfixed_bytes > 0 && !arg.dupdata) {
-        return type_error("dupdata is required for dupfixed_bytes.");
+    }else if ((arg.dupfixed_bytes > 0 || arg.key_bytes > 0) && !arg.dupdata) {
+        return type_error("dupdata is required for dupfixed_bytes/key_bytes.");
+    }else if (arg.key_bytes > 0 && !arg.dupfixed_bytes){
+        return type_error("dupfixed_bytes is required for key_bytes.");
     }
 
     if(! ((iter = PyObject_GetIter(arg.keys)))) {
         return NULL;
     }
 
-    /* Choose ops for dupfixed vs standard  */
+    /* Choose ops */
     if(arg.dupfixed_bytes) {
         get_op = MDB_GET_MULTIPLE;
         next_op = MDB_NEXT_MULTIPLE;
@@ -2143,11 +2151,15 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     as_buffer = self->trans->flags & TRANS_BUFFERS;
+    key_bytes = arg.key_bytes;
+    val_bytes = arg.dupfixed_bytes;
+    if (key_bytes) { /* Init structured array buffer */
+        item_size = key_bytes + val_bytes;
+        buffer = malloc(buffer_size * item_size);
+    }
 
     while((item = PyIter_Next(iter))) {
         MDB_val mkey;
-
-        // validate item?
 
         if(val_from_buffer(&mkey, item)) {
             Py_DECREF(item);
@@ -2156,7 +2168,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         } /* val_from_buffer sets exception */
 
         self->key = mkey;
-        if(_cursor_get_c(self, MDB_SET_KEY)) { // MDB_SET?
+        if(_cursor_get_c(self, MDB_SET_KEY)) {
             Py_DECREF(item);
             Py_DECREF(iter);
             return NULL;
@@ -2164,12 +2176,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
 
         done = false;
         while (!done) {
-            //TODO valid cursor check?
 
             if(! self->positioned) {
                 done = true;
             }
-            // TODO check for mutation and refresh key?
             else if(_cursor_get_c(self, get_op)) {
                 Py_DECREF(item);
                 Py_DECREF(iter);
@@ -2186,7 +2196,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                     if (tup && key && val) {
                         PyTuple_SET_ITEM(tup, 0, key);
                         PyTuple_SET_ITEM(tup, 1, val);
-                        PyList_Append(ret, tup);
+                        PyList_Append(pylist, tup);
                         Py_DECREF(tup);
                     } else {
                         Py_DECREF(key);
@@ -2195,26 +2205,42 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                     }
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
-                    int len = (int) self->val.mv_size/arg.dupfixed_bytes; // size_t?
-                    for(i=0; i<len; i++) {
+                    int items = (int) self->val.mv_size/arg.dupfixed_bytes; // size_t?
+
+                    for(i=0; i<items; i++) {
                         char *val_data = (char *) self->val.mv_data + (i * arg.dupfixed_bytes);
-                        if(as_buffer) {
-                            val = PyMemoryView_FromMemory(
-                                val_data, (size_t) arg.dupfixed_bytes, PyBUF_READ);
+                        if (key_bytes) {
+                            /* Add to array buffer */
+                            if (buffer_pos >= buffer_size) { // Grow buffer
+                                buffer_size = buffer_size * 2;
+                                buffer = realloc(buffer, buffer_size * item_size);
+                            }
+                            char *k = buffer + (buffer_pos * item_size);
+                            char *v = k + arg.key_bytes;
+                            memcpy(k, self->key.mv_data, arg.key_bytes);
+                            memcpy(v, val_data, arg.dupfixed_bytes);
+
+                            buffer_pos++;
                         } else {
-                            val = PyBytes_FromStringAndSize(
-                                val_data, (size_t) arg.dupfixed_bytes);
-                        }
-                        tup = PyTuple_New(2);
-                        if (tup && key && val) {
-                            Py_INCREF(key); // Hold key in loop
-                            PyTuple_SET_ITEM(tup, 0, key);
-                            PyTuple_SET_ITEM(tup, 1, val);
-                            PyList_Append(ret, tup);
-                            Py_DECREF(tup);
-                        } else {
-                            Py_DECREF(val);
-                            Py_DECREF(tup);
+                            /* Add to list of tuples */
+                            if(as_buffer) {
+                                val = PyMemoryView_FromMemory(
+                                    val_data, (size_t) arg.dupfixed_bytes, PyBUF_READ);
+                            } else {
+                                val = PyBytes_FromStringAndSize(
+                                    val_data, (size_t) arg.dupfixed_bytes);
+                            }
+                            tup = PyTuple_New(2);
+                            if (tup && key && val) {
+                                Py_INCREF(key); // Hold key in loop
+                                PyTuple_SET_ITEM(tup, 0, key);
+                                PyTuple_SET_ITEM(tup, 1, val);
+                                PyList_Append(pylist, tup);
+                                Py_DECREF(tup);
+                            } else {
+                                Py_DECREF(val);
+                                Py_DECREF(tup);
+                            }
                         }
                     }
                     Py_DECREF(key); // Release key
@@ -2240,7 +2266,13 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    return ret;
+    if (key_bytes){
+        size_t newsize = buffer_pos * item_size;
+        buffer = realloc(buffer, newsize);
+        return PyByteArray_FromStringAndSize(buffer, (Py_ssize_t)newsize);
+    } else {
+        return pylist;
+    }
 }
 
 /**
