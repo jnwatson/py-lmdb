@@ -2,9 +2,9 @@ from __future__ import absolute_import
 from __future__ import with_statement
 import unittest
 
-import testlib
-from testlib import KEYS2, ITEMS2_MULTI
-from testlib import putBigDataMulti
+import testlib, struct
+from testlib import KEYSFIXED, ITEMS_MULTI_FIXEDKEY
+from testlib import putBigDataMultiFixed
 
 class GetMultiTestBase(unittest.TestCase):
 
@@ -20,7 +20,7 @@ class GetMultiTestBase(unittest.TestCase):
             dupsort=dupsort,
             dupfixed=dupfixed
             )
-        putBigDataMulti(self.txn, db=self.db)
+        putBigDataMultiFixed(self.txn, db=self.db)
         self.c = self.txn.cursor(db=self.db)
 
     def matchList(self, ls_a, ls_b):
@@ -30,13 +30,13 @@ class GetMultiTestBase(unittest.TestCase):
 
 class GetMultiTestNoDupsortNoDupfixed(GetMultiTestBase):
 
-    ITEMS2_MULTI_NODUP = ITEMS2_MULTI[1::2]
+    ITEMS2_MULTI_NODUP = ITEMS_MULTI_FIXEDKEY[1::2]
 
     def setUp(self, dupsort=False, dupfixed=False):
         super(GetMultiTestNoDupsortNoDupfixed, self).setUp(dupsort=dupsort, dupfixed=dupfixed)
 
     def testGetMulti(self):
-        test_list = list(self.c.getmulti(KEYS2))
+        test_list = self.c.getmulti(KEYSFIXED)
         self.assertEqual(self.matchList(test_list, self.ITEMS2_MULTI_NODUP), True)
 
 
@@ -46,8 +46,8 @@ class GetMultiTestDupsortNoDupfixed(GetMultiTestBase):
         super(GetMultiTestDupsortNoDupfixed, self).setUp(dupsort=dupsort, dupfixed=dupfixed)
 
     def testGetMulti(self):
-        test_list = list(self.c.getmulti(KEYS2, dupdata=True))
-        self.assertEqual(self.matchList(test_list, ITEMS2_MULTI), True)
+        test_list = self.c.getmulti(KEYSFIXED, dupdata=True)
+        self.assertEqual(self.matchList(test_list, ITEMS_MULTI_FIXEDKEY), True)
 
 
 class GetMultiTestDupsortDupfixed(GetMultiTestBase):
@@ -56,8 +56,28 @@ class GetMultiTestDupsortDupfixed(GetMultiTestBase):
         super(GetMultiTestDupsortDupfixed, self).setUp(dupsort=dupsort, dupfixed=dupfixed)
 
     def testGetMulti(self):
-        test_list = list(self.c.getmulti(KEYS2, dupdata=True, dupfixed_bytes=1))
-        self.assertEqual(self.matchList(test_list, ITEMS2_MULTI), True)
+        test_list = self.c.getmulti(KEYSFIXED, dupdata=True, dupfixed_bytes=1)
+        self.assertEqual(self.matchList(test_list, ITEMS_MULTI_FIXEDKEY), True)
+
+class GetMultiTestDupsortDupfixedKeyfixed(GetMultiTestBase):
+
+    def setUp(self, dupsort=True, dupfixed=True):
+        super(GetMultiTestDupsortDupfixedKeyfixed, self).setUp(dupsort=dupsort, dupfixed=dupfixed)
+
+    def testGetMulti(self):
+        val_bytes = 1
+        arr = bytearray(self.c.getmulti(
+            KEYSFIXED, dupdata=True,
+            dupfixed_bytes=val_bytes, keyfixed=True
+        ))
+        asserts = []
+        for i, kv in enumerate(ITEMS_MULTI_FIXEDKEY):
+            key, val = kv
+            asserts.extend((
+                struct.pack('b', arr[i*2]) == key,
+                struct.pack('b', arr[i*2+1]) == val
+            ))
+        self.assertEqual(all(asserts), True)
 
 
 if __name__ == '__main__':
