@@ -138,9 +138,6 @@ ITEMS2 = [(k, B('')) for k in KEYS2]
 REV_ITEMS2 = ITEMS2[::-1]
 VALUES2 = [B('') for k in KEYS2]
 
-# ITEMS2_MULTI = [
-#     (kv[0], v) for kv in list(zip(KEYS2, VALUES2_MULTI)) for v in kv[1]
-#     ]
 KEYSFIXED = BL('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
 VALUES_MULTI = [(B('r'), B('s')) for k in KEYSFIXED]
 ITEMS_MULTI_FIXEDKEY = [

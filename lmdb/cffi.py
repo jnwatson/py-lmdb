@@ -2060,7 +2060,7 @@ class Cursor(object):
             return self.value()
         return default
 
-    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, key_bytes=None):
+    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, keyfixed=False):
         """Returns an iterable of `(key, value)` 2-tuples containing results
         for each key in the iterable `keys`.
 
@@ -2076,27 +2076,27 @@ class Cursor(object):
                 accepts the size of each value, in bytes, and applies an
                 optimization reducing the number of database lookups.
 
-            `key_bytes`:
+            `keyfixed`:
                 If `dupfixed_bytes` is set and database key size is fixed,
-                accepts the key size, in bytes, resulting in this function
-                returning a memoryview of the results as a structured array
-                of bytes. The structured array can be instantiated by passing
-                the memoryview buffer to NumPy:
+                setting keyfixed=True will result in this function returning
+                a memoryview to the results as a structured array of bytes.
+                The structured array can be instantiated by passing the
+                memoryview buffer to NumPy:
 
                 .. code-block:: python
 
                     key_bytes, val_bytes = 4, 8
                     dtype = np.dtype([(f'S{key_bytes}', f'S{val_bytes}}')])
                     arr = np.frombuffer(
-                        cur.getmulti(keys, dupdata=True, dupfixed_bytes=val_bytes, key_bytes=key_bytes)
+                        cur.getmulti(keys, dupdata=True, dupfixed_bytes=val_bytes, keyfixed=True)
                     )
 
         """
         if dupfixed_bytes and dupfixed_bytes < 0:
             raise _error("dupfixed_bytes must be a positive integer.")
-        elif (dupfixed_bytes or key_bytes) and not dupdata:
+        elif (dupfixed_bytes or keyfixed) and not dupdata:
             raise _error("dupdata is required for dupfixed_bytes/key_bytes.")
-        elif key_bytes and not dupfixed_bytes:
+        elif keyfixed and not dupfixed_bytes:
             raise _error("dupfixed_bytes is required for key_bytes.")
 
         if dupfixed_bytes:
@@ -2120,7 +2120,7 @@ class Cursor(object):
                         gen = (
                             (key, val[i:i+dupfixed_bytes])
                             for i in range(0, len(val), dupfixed_bytes))
-                        if key_bytes:
+                        if keyfixed:
                             for k, v in gen:
                                 a.extend(k + v)
                         else:
@@ -2134,7 +2134,7 @@ class Cursor(object):
                     else:
                         break
 
-        if key_bytes:
+        if keyfixed:
             return memoryview(a)
         else:
             return l

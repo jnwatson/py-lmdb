@@ -2104,25 +2104,25 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         PyObject *keys;
         int dupdata;
         size_t dupfixed_bytes;
-        size_t key_bytes;
-    } arg = {Py_None, 0, 0};
+        int keyfixed;
+    } arg = {Py_None, 0, 0, 0};
 
     int i, as_buffer;
     PyObject *iter, *item, *tup, *key, *val;
-    PyObject *pylist = PyList_New(0);
+    PyObject *pylist = NULL;
     MDB_cursor_op get_op, next_op;
-    bool done;
+    bool done, first;
 
     static const struct argspec argspec[] = {
         {"keys", ARG_OBJ, OFFSET(cursor_get, keys)},
         {"dupdata", ARG_BOOL, OFFSET(cursor_get, dupdata)},
         {"dupfixed_bytes", ARG_SIZE, OFFSET(cursor_get, dupfixed_bytes)},
-        {"key_bytes", ARG_SIZE, OFFSET(cursor_get, key_bytes)}
+        {"keyfixed", ARG_BOOL, OFFSET(cursor_get, keyfixed)}
     };
 
     size_t buffer_pos = 0, buffer_size = 8;
-    size_t key_bytes, val_bytes, item_size;
-    char *buffer;
+    size_t key_size, val_size, item_size;
+    char *buffer = NULL;
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
@@ -2131,10 +2131,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
 
     if(arg.dupfixed_bytes < 0) {
         return type_error("dupfixed_bytes must be a positive integer.");
-    }else if ((arg.dupfixed_bytes > 0 || arg.key_bytes > 0) && !arg.dupdata) {
-        return type_error("dupdata is required for dupfixed_bytes/key_bytes.");
-    }else if (arg.key_bytes > 0 && !arg.dupfixed_bytes){
-        return type_error("dupfixed_bytes is required for key_bytes.");
+    }else if ((arg.dupfixed_bytes > 0 || arg.keyfixed) && !arg.dupdata) {
+        return type_error("dupdata is required for dupfixed_bytes/keyfixed.");
+    }else if (arg.keyfixed && !arg.dupfixed_bytes){
+        return type_error("dupfixed_bytes is required for keyfixed.");
     }
 
     if(! ((iter = PyObject_GetIter(arg.keys)))) {
@@ -2151,27 +2151,21 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     as_buffer = self->trans->flags & TRANS_BUFFERS;
-    key_bytes = arg.key_bytes;
-    val_bytes = arg.dupfixed_bytes;
-    if (key_bytes) { /* Init structured array buffer */
-        item_size = key_bytes + val_bytes;
-        buffer = malloc(buffer_size * item_size);
+    val_size = arg.dupfixed_bytes;
+    if (!arg.keyfixed){ /* Init list */
+        pylist = PyList_New(0);
     }
-
+    first = true;
     while((item = PyIter_Next(iter))) {
         MDB_val mkey;
 
         if(val_from_buffer(&mkey, item)) {
-            Py_DECREF(item);
-            Py_DECREF(iter);
-            return NULL;
+            goto failiter;
         } /* val_from_buffer sets exception */
 
         self->key = mkey;
         if(_cursor_get_c(self, MDB_SET_KEY)) {
-            Py_DECREF(item);
-            Py_DECREF(iter);
-            return NULL;
+            goto failiter;
         }
 
         done = false;
@@ -2181,9 +2175,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                 done = true;
             }
             else if(_cursor_get_c(self, get_op)) {
-                Py_DECREF(item);
-                Py_DECREF(iter);
-                return NULL;
+                goto failiter;
             } else {
                 key = obj_from_val(&self->key, as_buffer);
                 PRELOAD_UNLOCKED(0, self->val.mv_data, self->val.mv_size);
@@ -2205,11 +2197,19 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                     }
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
-                    int items = (int) self->val.mv_size/arg.dupfixed_bytes; // size_t?
+                    int items = (int) self->val.mv_size/val_size;
+                    if (first) {
+                        key_size = (size_t) self->key.mv_size;
+                        item_size = key_size + val_size;
+                        if (arg.keyfixed) { /* Init structured array buffer */
+                            buffer = malloc(buffer_size * item_size);
+                        }
+                        first = false;
+                    }
 
                     for(i=0; i<items; i++) {
-                        char *val_data = (char *) self->val.mv_data + (i * arg.dupfixed_bytes);
-                        if (key_bytes) {
+                        char *val_data = (char *) self->val.mv_data + (i * val_size);
+                        if (arg.keyfixed) {
                             /* Add to array buffer */
                             char *k, *v;
                             if (buffer_pos >= buffer_size) { // Grow buffer
@@ -2217,9 +2217,9 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                                 buffer = realloc(buffer, buffer_size * item_size);
                             }
                             k = buffer + (buffer_pos * item_size);
-                            v = k + arg.key_bytes;
-                            memcpy(k, (char *) self->key.mv_data, key_bytes);
-                            memcpy(v, val_data, val_bytes);
+                            v = k + key_size;
+                            memcpy(k, (char *) self->key.mv_data, key_size);
+                            memcpy(v, val_data, val_size);
 
                             buffer_pos++;
                         } else {
@@ -2249,9 +2249,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
 
                 if(arg.dupdata){
                     if(_cursor_get_c(self, next_op)) {
-                        Py_DECREF(item);
-                        Py_DECREF(iter);
-                        return NULL;
+                        goto failiter;
                     }
                 }
                 else {
@@ -2264,10 +2262,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
 
     Py_DECREF(iter);
     if(PyErr_Occurred()) {
-        return NULL;
+        goto fail;
     }
 
-    if (key_bytes){
+    if (arg.keyfixed){
         int rc;
         Py_buffer pybuf;
         size_t newsize = buffer_pos * item_size;
@@ -2277,6 +2275,15 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     } else {
         return pylist;
     }
+
+failiter:
+    Py_DECREF(item);
+    Py_DECREF(iter);
+fail:
+    if (buffer) {
+        free(buffer);
+    };
+    return NULL;
 }
 
 /**

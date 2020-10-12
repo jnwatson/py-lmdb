@@ -65,10 +65,10 @@ class GetMultiTestDupsortDupfixedKeyfixed(GetMultiTestBase):
         super(GetMultiTestDupsortDupfixedKeyfixed, self).setUp(dupsort=dupsort, dupfixed=dupfixed)
 
     def testGetMulti(self):
-        key_bytes, val_bytes = 1, 1
+        val_bytes = 1
         arr = bytearray(self.c.getmulti(
             KEYSFIXED, dupdata=True,
-            dupfixed_bytes=val_bytes, key_bytes=key_bytes
+            dupfixed_bytes=val_bytes, keyfixed=True
         ))
         asserts = []
         for i, kv in enumerate(ITEMS_MULTI_FIXEDKEY):
