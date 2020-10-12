@@ -1167,15 +1167,16 @@ class Environment(object):
                 single database.
 
             `integerdup`:
-                If ``True`` and `dupsort` is also ``True``, values in the
+                If ``True``, values in the
                 database are C unsigned or ``size_t`` integers encode din
-                native byte order.
+                native byte order.  Implies `dupsort` and `dupfixed` are
+                ``True``.
 
             `dupfixed`:
-                If ``True`` and `dupsort` is also ``True``, values for each key
+                If ``True``, values for each key
                 in database are of fixed size, allowing each additional
                 duplicate value for a key to be stored without a header
-                indicating its size.
+                indicating its size.  Implies `dupsort` is ``True``.
         """
         if isinstance(key, UnicodeType):
             raise TypeError('key must be bytes')
@@ -1183,6 +1184,12 @@ class Environment(object):
         db = self._dbs.get(key)
         if db:
             return db
+
+        if integerdup:
+            dupfixed = True
+
+        if dupfixed:
+            dupsort = True
 
         if txn:
             db = _Database(self, txn, key, reverse_key, dupsort, create,
