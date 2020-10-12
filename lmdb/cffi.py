@@ -1181,6 +1181,10 @@ class Environment(object):
         if isinstance(key, UnicodeType):
             raise TypeError('key must be bytes')
 
+        if key is None and (reverse_key or dupsort or integerkey or integerdup
+                            or dupfixed):
+            raise ValueError('May not set flags on the main database')
+
         db = self._dbs.get(key)
         if db:
             return db

@@ -1636,6 +1636,12 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+    if (!arg.key && (arg.reverse_key || arg.dupsort || arg.integerkey ||
+                     arg.integerdup || arg.dupfixed)) {
+        return PyErr_Format(PyExc_ValueError,
+                            "May not set flags on the main database");
+    }
+
     flags = 0;
     if(arg.reverse_key) {
         flags |= MDB_REVERSEKEY;

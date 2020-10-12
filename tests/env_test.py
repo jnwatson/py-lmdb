@@ -630,6 +630,7 @@ class BeginTest(unittest.TestCase):
     def test_bind_db(self):
         _, env = testlib.temp_env()
         main = env.open_db(None)
+        self.assertRaises(ValueError, lambda: env.open_db(None, dupsort=True))
         sub = env.open_db(B('db1'))
 
         txn = env.begin(write=True, db=sub)
