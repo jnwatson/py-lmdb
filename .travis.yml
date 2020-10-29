@@ -1,6 +1,8 @@
 ---
 language: python
-
+arch:
+  - amd64
+  - ppc64le
 matrix:
   exclude:
     - python: pypy
@@ -11,7 +13,31 @@ matrix:
       env: LMDB_FORCE_CPYTHON=1
     - python: pypy3
       env: LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
-
+ #poweron support exclude
+    - python: pypy
+      env: LMDB_FORCE_CPYTHON=1
+      arch: ppc64le
+    - python: pypy
+      env: LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
+      arch: ppc64le
+    - python: pypy3
+      env: LMDB_FORCE_CPYTHON=1
+      arch: ppc64le
+    - python: pypy3
+      env: LMDB_FORCE_CPYTHON=1 LMDB_PURE=1
+      arch: ppc64le
+    - python: pypy
+      env: LMDB_FORCE_CFFI=1
+      arch: ppc64le
+    - python: pypy
+      env: LMDB_FORCE_CFFI=1 LMDB_PURE=1
+      arch: ppc64le
+    - python: pypy3
+      env: LMDB_FORCE_CFFI=1
+      arch: ppc64le
+    - python: pypy3
+      env: LMDB_FORCE_CFFI=1 LMDB_PURE=1
+      arch: ppc64le
 python:
   - 2.7
   - 3.6
