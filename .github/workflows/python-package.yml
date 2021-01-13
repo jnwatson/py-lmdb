@@ -9,12 +9,14 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        # os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [ubuntu-latest]
         # python-version: [3.7, 3.8, 3.9]
         python-version: [3.7]
+        cffi: ['no', 'yes']
 
     steps:
     - uses: actions/checkout@v2
@@ -24,9 +26,11 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
+        if [[ ${{ matrix.cffi }} == no ]] export LMDB_FORCE_CPYTHON=1; else export LMDB_FORCE_CFFI=1; fi
+        echo "Envs are cpython= $LMDB_FORCE_CPYTHON cffi= $LMDB_FORCE_CFFI "
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements.txt
         python setup.py develop
     #- name: Lint with flake8
     #  run: |
