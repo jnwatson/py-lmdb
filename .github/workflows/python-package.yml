@@ -12,8 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # os: [macos-latest, windows-latest, ubuntu-latest]
-        os: [ubuntu-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         # python-version: [3.7, 3.8, 3.9]
         python-version: [3.7]
         impl: ['cpython', 'cffi']
@@ -41,5 +40,6 @@ jobs:
     #    flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
     - name: Test with pytest
       run: |
+        if [[ ${{ matrix.impl }} == cpython ]] ; then export LMDB_FORCE_CPYTHON=1; else export LMDB_FORCE_CFFI=1; fi
         echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
         pytest
