@@ -12,8 +12,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        # os: [windows-latest]
+        # os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [windows-latest]
         # python-version: [3.7, 3.8, 3.9]
         python-version: [3.7]
         impl: ['cpython', 'cffi']
@@ -39,7 +39,7 @@ jobs:
       run: |
         echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
+        python -m pip install flake8 pytest wheel patch-ng
         python setup.py develop
     #- name: Lint with flake8
     #  run: |
