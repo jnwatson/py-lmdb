@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         # os: [macos-latest, windows-latest, ubuntu-latest]
-        os: [windows-latest]
+        os: [ubuntu-latest, windows-latest]
         # python-version: [3.7, 3.8, 3.9]
         python-version: [3.7]
         impl: ['cpython', 'cffi']
@@ -37,9 +37,11 @@ jobs:
         if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
     - name: Install dependencies
       run: |
-        echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+        echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+        echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest wheel patch-ng
+        python -m pip install wheel
+        python -m pip install flake8 pytest patch-ng
         python setup.py develop
     #- name: Lint with flake8
     #  run: |
