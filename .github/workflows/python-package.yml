@@ -34,6 +34,12 @@ jobs:
       run: |
         if [[ ${{ matrix.impl }} == cpython ]] ; then echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV; else echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV; fi
         if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
+        
+    - name: "Install Visual C++ for Python 2.7"
+      if: runner.os == 'Windows' and matrix.python-version == '2.7'
+      run: |
+        choco install vcpython27 -f -y
+        
     - name: Install dependencies
       run: |
         echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
