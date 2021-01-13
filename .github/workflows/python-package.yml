@@ -17,6 +17,7 @@ jobs:
         # python-version: [3.7, 3.8, 3.9]
         python-version: [3.7]
         impl: ['cpython', 'cffi']
+        purity: ['pure', 'with-pylmdb-mods']
 
     steps:
     - uses: actions/checkout@v2
@@ -27,10 +28,10 @@ jobs:
     - name: Install dependencies
       run: |
         if [[ ${{ matrix.impl }} == cpython ]] ; then export LMDB_FORCE_CPYTHON=1; else export LMDB_FORCE_CFFI=1; fi
-        echo "Envs are cpython= $LMDB_FORCE_CPYTHON cffi= $LMDB_FORCE_CFFI "
+        if [[ ${{ matrix.purity }} == pure ]] ; then export LMDB_PURE=1; fi
+        echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
-        pip install -r requirements.txt
         python setup.py develop
     #- name: Lint with flake8
     #  run: |
