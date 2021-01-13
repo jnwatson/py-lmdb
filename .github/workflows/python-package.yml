@@ -26,7 +26,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        if [[ ${{ matrix.impl }} == cpython ]] ; export LMDB_FORCE_CPYTHON=1; else export LMDB_FORCE_CFFI=1; fi
+        if [[ ${{ matrix.impl }} == cpython ]] ; then export LMDB_FORCE_CPYTHON=1; else export LMDB_FORCE_CFFI=1; fi
         echo "Envs are cpython= $LMDB_FORCE_CPYTHON cffi= $LMDB_FORCE_CFFI "
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
