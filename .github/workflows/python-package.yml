@@ -28,8 +28,8 @@ jobs:
     - name: Set env vars Windows
       if: runner.os == 'Windows'
       run: |
-        if ( ${{ matrix.impl }} -eq 'cpython' ) { echo "LMDB_FORCE_CPYTHON=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append } else { echo "LMDB_FORCE_CFFI=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
-        if ( ${{ matrix.purity }} -eq 'pure' ) { echo "LMDB_PURE=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
+        if ( '${{ matrix.impl }}' -eq 'cpython' ) { echo "LMDB_FORCE_CPYTHON=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append } else { echo "LMDB_FORCE_CFFI=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
+        if ( '${{ matrix.purity }}' -eq 'pure' ) { echo "LMDB_PURE=1" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
     - name: Set env vars *nix
       if: runner.os != 'Windows'
       run: |
