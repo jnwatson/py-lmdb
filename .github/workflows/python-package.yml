@@ -1,0 +1,64 @@
+name: Build, run, and test py-lmdb
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest]
+        python-version: [2.7, 3.5, 3.7, 3.9, 'pypy-2.7', 'pypy-3.6']
+        impl: ['cpython', 'cffi']
+        purity: ['pure', 'with-pylmdb-mods']
+        exclude:
+          - python-version: pypy-2.7
+            impl: cpython
+          - python-version: pypy-3.6
+            impl: cpython
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set env vars Windows
+      if: runner.os == 'Windows'
+      run: |
+        if ( '${{ matrix.impl }}' -eq 'cpython' ) { echo "LMDB_FORCE_CPYTHON=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append } else { echo "LMDB_FORCE_CFFI=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append }
+        if ( '${{ matrix.purity }}' -eq 'pure' ) { echo "LMDB_PURE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append }
+    - name: Set env vars *nix
+      if: runner.os != 'Windows'
+      run: |
+        if [[ ${{ matrix.impl }} == cpython ]] ; then echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV; else echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV; fi
+        if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
+        
+    - name: "Install Visual C++ for Python 2.7"
+      if: runner.os == 'Windows' && matrix.python-version == '2.7'
+      run: |
+        choco install vcpython27 -f -y
+        
+    - name: Install dependencies
+      run: |
+        echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+        echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
+        python -m pip install --upgrade pip
+        python -m pip install wheel
+        python -m pip install flake8 pytest patch-ng
+        python setup.py develop
+    #- name: Lint with flake8
+    #  run: |
+    #    # stop the build if there are Python syntax errors or undefined names
+    #    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    #    # exit-zero treats all errors as warnings.
+    #    flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+    - name: Test with pytest
+      run: |
+        echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+        pytest
