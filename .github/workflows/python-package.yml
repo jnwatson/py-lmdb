@@ -14,15 +14,13 @@ jobs:
     strategy:
       matrix:
         # os: [ubuntu-latest, macos-latest, windows-latest]
-        # python-version: >-
-        #   [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 'pypy-2.7', 'pypy-3.6']
+        # python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 'pypy-2.7', 'pypy-3.6']
         # impl: ['cpython', 'cffi']
         # purity: ['pure', 'with-pylmdb-mods']
 
         # Nic tmp
         os: [ubuntu-latest]
-        python-version: >-
-          [3.9]
+        python-version: [3.9]
         impl: ['cpython']
         purity: ['with-pylmdb-mods']
 
@@ -60,8 +58,14 @@ jobs:
       - name: Set env vars *nix
         if: runner.os != 'Windows'
         run: |
-          if [[ ${{ matrix.impl }} == cpython ]] ; then echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV; else echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV; fi
-          if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
+          if [[ ${{ matrix.impl }} == cpython ]] ; then
+            echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV;
+          else
+            echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV;
+          fi
+          if [[ ${{ matrix.purity }} == pure ]] ; then
+            echo "LMDB_PURE=1" >> $GITHUB_ENV;
+          fi
 
       - name: "Install Visual C++ for Python 2.7"
         if: runner.os == 'Windows' && matrix.python-version == '2.7'
