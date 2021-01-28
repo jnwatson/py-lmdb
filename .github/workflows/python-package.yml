@@ -171,7 +171,8 @@ jobs:
     steps:
       - name: Download wheel
         uses: actions/upload-artifact@v2
-        path: dists/artifact.zip
+        with:
+          path: dists/artifact.zip
 
       - name: Unzip artifacts
         run: cd dist; unzip artifact.zip; cd ..; ls dist
