@@ -139,11 +139,17 @@ jobs:
     strategy:
       # We publish a subset of the targets we test
       matrix:
-        os: [macos-latest, windows-latest]
-        python-version: >-
-          [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
-        impl: [cpython, cffi]
-        purity: [with-pylmdb-mods]
+        # os: [macos-latest, windows-latest]
+        # python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
+        # impl: [cpython, cffi]
+        # purity: [with-pylmdb-mods]
+
+        # Nic tmp
+        os: [ubuntu-latest]
+        python-version: [3.9]
+        impl: ['cpython']
+        purity: ['with-pylmdb-mods']
+
         exclude:
           - python-version: pypy-2.7
             impl: cpython
