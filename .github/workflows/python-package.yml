@@ -96,7 +96,8 @@ jobs:
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE"
-          pytest
+          # Nic tmp
+          # pytest
       - name: Save wheel
         uses: actions/upload-artifact@v2
         with:
@@ -170,6 +171,9 @@ jobs:
     steps:
       - name: Download wheel
         uses: actions/upload-artifact@v2
+
+      - name: Unzip artifacts
+        run: cd dist; unzip ../artifact.zip; cd ..; ls dist
 
       - name: Publish distribution 📦 to Test PyPI
         uses: pypa/gh-action-pypi-publish@master
