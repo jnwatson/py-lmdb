@@ -14,15 +14,15 @@ jobs:
     strategy:
       matrix:
         # os: [ubuntu-latest, macos-latest, windows-latest]
-        # python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 'pypy-2.7', 'pypy-3.6']
-        # impl: ['cpython', 'cffi']
-        # purity: ['pure', 'with-pylmdb-mods']
+        # python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
+        # impl: [cpython, cffi]
+        # purity: [pure, with-pylmdb-mods]
 
         # Nic tmp
         os: [ubuntu-latest]
         python-version: [3.9]
-        impl: ['cpython']
-        purity: ['with-pylmdb-mods']
+        impl: [cpython]
+        purity: [with-pylmdb-mods]
 
         exclude:
           - python-version: pypy-2.7
@@ -67,7 +67,7 @@ jobs:
             echo "LMDB_PURE=1" >> $GITHUB_ENV;
           fi
 
-      - name: "Install Visual C++ for Python 2.7"
+      - name: Install Visual C++ for Python 2.7
         if: runner.os == 'Windows' && matrix.python-version == '2.7'
         run: |
           choco install vcpython27 -f -y
@@ -109,7 +109,6 @@ jobs:
         if: env.ONE_TARGET
         uses: actions/upload-artifact@v2
         with:
-          name: src.tar.gz
           path: dist/lmdb*.tar.gz
       - name: Build manylinux wheel
         if: env.ONE_TARGET
@@ -129,8 +128,7 @@ jobs:
         if: env.ONE_TARGET
         uses: actions/upload-artifact@v2
         with:
-          name: many.linux.tgz
-          path: dist/lmdb*.tar.gz
+          path: dist/lmdb*manylinux*.whl
 
   publish:
     needs: build
