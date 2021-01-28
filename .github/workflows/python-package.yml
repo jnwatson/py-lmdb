@@ -19,7 +19,7 @@ jobs:
         # purity: [pure, with-pylmdb-mods]
 
         # Nic tmp
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: [3.9]
         impl: [cpython]
         purity: [with-pylmdb-mods]
@@ -171,9 +171,10 @@ jobs:
     steps:
       - name: Download wheel
         uses: actions/upload-artifact@v2
+        path: dists/artifact.zip
 
       - name: Unzip artifacts
-        run: cd dist; unzip ../artifact.zip; cd ..; ls dist
+        run: cd dist; unzip artifact.zip; cd ..; ls dist
 
       - name: Publish distribution 📦 to Test PyPI
         uses: pypa/gh-action-pypi-publish@master
