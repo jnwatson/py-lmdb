@@ -1,10 +1,11 @@
+---
 name: Build, run, and test py-lmdb
 
-on:
+'on':
   push:
-    branches: [ master ]
+    branches: [master make-package]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   build:
@@ -12,53 +13,164 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest]
-        python-version: [2.7, 3.5, 3.7, 3.9, 'pypy-2.7', 'pypy-3.6']
-        impl: ['cpython', 'cffi']
-        purity: ['pure', 'with-pylmdb-mods']
+        # os: [ubuntu-latest, macos-latest, windows-latest]
+        # python-version: >-
+        #   [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 'pypy-2.7', 'pypy-3.6']
+        # impl: ['cpython', 'cffi']
+        # purity: ['pure', 'with-pylmdb-mods']
+
+        # Nic tmp
+        os: [ubuntu-latest]
+        python-version: >-
+          [3.9]
+        impl: ['cpython']
+        purity: ['with-pylmdb-mods']
+
         exclude:
           - python-version: pypy-2.7
             impl: cpython
           - python-version: pypy-3.6
             impl: cpython
 
+    env:
+      ONE_TARGET: >-
+        matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
+          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
+
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Set env vars Windows
-      if: runner.os == 'Windows'
-      run: |
-        if ( '${{ matrix.impl }}' -eq 'cpython' ) { echo "LMDB_FORCE_CPYTHON=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append } else { echo "LMDB_FORCE_CFFI=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append }
-        if ( '${{ matrix.purity }}' -eq 'pure' ) { echo "LMDB_PURE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append }
-    - name: Set env vars *nix
-      if: runner.os != 'Windows'
-      run: |
-        if [[ ${{ matrix.impl }} == cpython ]] ; then echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV; else echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV; fi
-        if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
-        
-    - name: "Install Visual C++ for Python 2.7"
-      if: runner.os == 'Windows' && matrix.python-version == '2.7'
-      run: |
-        choco install vcpython27 -f -y
-        
-    - name: Install dependencies
-      run: |
-        echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
-        echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
-        python -m pip install --upgrade pip
-        python -m pip install wheel
-        python -m pip install flake8 pytest patch-ng
-        python setup.py develop
-    #- name: Lint with flake8
-    #  run: |
-    #    # stop the build if there are Python syntax errors or undefined names
-    #    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-    #    # exit-zero treats all errors as warnings.
-    #    flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-    - name: Test with pytest
-      run: |
-        echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
-        pytest
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set env vars Windows
+        if: runner.os == 'Windows'
+        run: >-
+          if ( '${{ matrix.impl }}' -eq 'cpython' ) {
+            echo "LMDB_FORCE_CPYTHON=1" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            echo "LMDB_FORCE_CFFI=1" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          if ( '${{ matrix.purity }}' -eq 'pure' ) {
+            echo "LMDB_PURE=1" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+      - name: Set env vars *nix
+        if: runner.os != 'Windows'
+        run: |
+          if [[ ${{ matrix.impl }} == cpython ]] ; then echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV; else echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV; fi
+          if [[ ${{ matrix.purity }} == pure ]] ; then echo "LMDB_PURE=1" >> $GITHUB_ENV; fi
+
+      - name: "Install Visual C++ for Python 2.7"
+        if: runner.os == 'Windows' && matrix.python-version == '2.7'
+        run: |
+          choco install vcpython27 -f -y
+
+      - name: Install dependencies
+        run: |
+          echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
+            cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+          echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
+            cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
+          python -m pip install --upgrade pip
+          python -m pip install wheel
+          python -m pip install flake8 pytest patch-ng
+          python setup.py develop sdist bdist_wheel
+          ls dist
+      # name: Lint with flake8
+      # run: |
+      #   # stop the build if there are Python syntax errors or undefined names
+      #   flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+      #   # exit-zero treats all errors as warnings.
+      #   flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+      - name: Test with pytest
+        # Limit the test cycle a little
+        if: matrix.python-version != '3.4' && matrix.python-version != '3.6' &&
+            matrix.python-version != '3.8'
+        run: |
+          echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
+            pure=$LMDB_PURE"
+          pytest
+      - name: Save wheel
+        uses: actions/upload-artifact@v2
+        with:
+          name: "${{ matrix.os }}-${{ matrix.python-version }}-\
+            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          path: dist/lmdb-*.whl
+      - name: Save source
+        # We only need a single target to upload the source
+        # (all targets have the same source)
+        if: env.ONE_TARGET
+        uses: actions/upload-artifact@v2
+        with:
+          name: src.tar.gz
+          path: dist/lmdb*.tar.gz
+      - name: Build manylinux wheel
+        if: env.ONE_TARGET
+        uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2010_x86_64
+        with:
+          python-versions: >-
+              cp27-cp27m cp35-cp35m cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+          build-requirements: 'patch-ng'
+
+      - name: What do we have
+        if: env.ONE_TARGET
+        run: ls dist
+
+      - name: Save manylinux wheel
+        # We only need a single target to upload the source
+        # (all targets have the same source)
+        if: env.ONE_TARGET
+        uses: actions/upload-artifact@v2
+        with:
+          name: many.linux.tgz
+          path: dist/lmdb*.tar.gz
+
+  publish:
+    needs: build
+    # N.B. the host running twine to upload is distinct from the target image
+    runs-on: ubuntu-latest
+    strategy:
+      # We publish a subset of the targets we test
+      matrix:
+        os: [macos-latest, windows-latest]
+        python-version: >-
+          [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
+        impl: [cpython, cffi]
+        purity: [with-pylmdb-mods]
+        exclude:
+          - python-version: pypy-2.7
+            impl: cpython
+          - python-version: pypy-3.6
+            impl: cpython
+          - python-version: 2.7
+            impl: cffi
+          - python-version: 3.4
+            impl: cffi
+          - python-version: 3.5
+            impl: cffi
+          - python-version: 3.6
+            impl: cffi
+          - python-version: 3.7
+            impl: cffi
+          - python-version: 3.8
+            impl: cffi
+          - python-version: 3.9
+            impl: cffi
+    steps:
+      - name: Download wheel
+        uses: actions/upload-artifact@v2
+
+      - name: Publish distribution 📦 to Test PyPI
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/
+
+      - name: Publish distribution 📦 to PyPI
+        if: startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
