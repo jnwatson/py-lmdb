@@ -188,8 +188,6 @@ jobs:
       - name: Download manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
-        with:
-          name: artifact.zip
 
       - name: Unzip manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
