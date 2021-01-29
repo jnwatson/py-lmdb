@@ -120,9 +120,6 @@ jobs:
           build-requirements: 'patch-ng'
 
       - name: What do we have
-        if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
-          matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         run: ls dist
 
       - name: Save manylinux wheel
@@ -148,38 +145,64 @@ jobs:
         # purity: [with-pylmdb-mods]
 
         # Nic tmp
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: [3.9]
-        impl: ['cpython']
-        purity: ['with-pylmdb-mods']
+        impl: [cpython]
+        purity: [with-pylmdb-mods]
 
         exclude:
-          - python-version: pypy-2.7
+          - python-version: pp27
             impl: cpython
-          - python-version: pypy-3.6
+          - python-version: pp36
             impl: cpython
-          - python-version: 2.7
+          - python-version: cp27-27m
             impl: cffi
-          - python-version: 3.4
+          - python-version: cp34-34m
             impl: cffi
-          - python-version: 3.5
+          - python-version: cp35-35m
             impl: cffi
-          - python-version: 3.6
+          - python-version: cp36-36m
             impl: cffi
-          - python-version: 3.7
+          - python-version: cp37-37m
             impl: cffi
-          - python-version: 3.8
+          - python-version: cp38-38
             impl: cffi
-          - python-version: 3.9
+          - python-version: cp39-39
             impl: cffi
-    steps:
-      - name: Download wheel
-        uses: actions/upload-artifact@v2
-        with:
-          path: dists/artifact.zip
 
-      - name: Unzip artifacts
-        run: cd dist; unzip artifact.zip; cd ..; ls dist
+    env:
+      VER2WHL = >-
+        {
+          "pypy-2.7": "pp27",
+          "pypy-3.6": "pp36",
+          "2.7": "cp27-27m",
+          "3.4": "cp34-34m",
+          "3.5": "cp35-35m",
+          "3.6": "cp36-36m",
+          "3.7": "cp37-37m",
+          "3.8": "cp38-38",
+          "3.9": "cp39-39"
+        }
+
+    steps:
+      - name: Download manylinux artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/download-artifact@v2
+        with:
+          name: artifact.zip
+
+      - name: Unzip manylinux artifacts
+        if: matrix.os == 'ubuntu-latest'
+        run: cd dist; unzip ../artifact.zip; cd ..; ls dist
+
+      - name: Download non-Ubuntu wheel
+        if: matrix.os != 'ubuntu-latest'
+        uses: actions/download-artifact@v2
+        with:
+          name: "${{ matrix.os }}-${{ matrix.python-version }}-\
+            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          path:
+
 
       - name: Publish distribution 📦 to Test PyPI
         uses: pypa/gh-action-pypi-publish@master
