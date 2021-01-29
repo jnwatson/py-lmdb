@@ -30,11 +30,6 @@ jobs:
           - python-version: pypy-3.6
             impl: cpython
 
-    env:
-      ONE_TARGET: >-
-        matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
-          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
-
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
@@ -74,8 +69,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          echo 'ONE_TARGET1=' $ONE_TARGET
-          echo 'ONE_TARGET2=' ${{ env.ONE_TARGET }}
           echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
@@ -109,12 +102,17 @@ jobs:
       - name: Save source
         # We only need a single target to upload the source
         # (all targets have the same source)
-        if: env.ONE_TARGET == 1
+        if: >-
+          matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
+          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
+
         uses: actions/upload-artifact@v2
         with:
           path: dist/lmdb*.tar.gz
       - name: Build manylinux wheel
-        if: env.ONE_TARGET
+        if: >-
+          matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
+          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
         uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2010_x86_64
         with:
           python-versions: >-
@@ -122,13 +120,17 @@ jobs:
           build-requirements: 'patch-ng'
 
       - name: What do we have
-        if: env.ONE_TARGET == 1
+        if: >-
+          matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
+          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
         run: ls dist
 
       - name: Save manylinux wheel
         # We only need a single target to upload the source
         # (all targets have the same source)
-        if: env.ONE_TARGET == 1
+        if: >-
+          matrix.python-version == 3.9 && matrix.os == ubuntu-latest &&
+          matrix.purity == with-pylmdb-mods && matrix.impl == cpython
         uses: actions/upload-artifact@v2
         with:
           path: dist/lmdb*manylinux*.whl
