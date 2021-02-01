@@ -195,8 +195,12 @@ jobs:
 
       - name: Unzip manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
+        run: unzip manylinux.zip
+
+      - name: Unzip manylinux artifacts
+        if: matrix.os == 'ubuntu-latest'
         run: >-
-          mkdir -p dist; unzip manylinux.zip; ls; ls dist
+          ls; ls dist
 
       - name: Download non-Ubuntu wheel
         if: matrix.os != 'ubuntu-latest'
