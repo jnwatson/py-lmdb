@@ -131,6 +131,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: dist/lmdb*manylinux*.whl
+          name: manylinux.zip
 
   publish:
     needs: build
@@ -194,7 +195,8 @@ jobs:
 
       - name: Unzip manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
-        run: mkdir -p dist; cd dist; unzip ../artifact; cd ..; ls dist
+        run: >-
+          mkdir -p dist; cd dist; unzip ../manylinux.zip; ls
 
       - name: Download non-Ubuntu wheel
         if: matrix.os != 'ubuntu-latest'
