@@ -228,7 +228,7 @@ jobs:
 
       - name: Hmm
         run: >-
-          dir
+          find .
 
       - name: Get version
         if: matrix.os == 'windows-latest'
