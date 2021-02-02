@@ -19,7 +19,7 @@ jobs:
         # purity: [pure, with-pylmdb-mods]
 
         # Nic tmp
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
         python-version: [3.9]
         impl: [cpython]
         purity: [with-pylmdb-mods]
@@ -204,10 +204,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: unzip manylinux.zip
 
-      - name: Hmm
-        run: >-
-          dir; ls; ls dist
-
       - name: Download non-Ubuntu wheel
         if: matrix.os != 'ubuntu-latest'
         uses: actions/download-artifact@v2
@@ -221,6 +217,10 @@ jobs:
         with:
           name: vers.txt
           path: vers.txt
+
+      - name: Hmm
+        run: >-
+          dir
 
       - name: Get version
         if: matrix.os == 'windows-latest'
