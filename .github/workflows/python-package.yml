@@ -219,7 +219,7 @@ jobs:
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path: dist
+          path: predist
 
       - name: Download version
         uses: actions/download-artifact@v2
@@ -233,9 +233,10 @@ jobs:
       - name: Get version
         if: matrix.os == 'windows-latest'
         run: |
+           mkdir dist
            destfile="lmdb-`cat vers.txt`-cp38-cp38-win32.whl"
            echo $destfile
-           mv windows-latest-3.9-cpython-with-pylmdb-mods.whl $destfile
+           mv predist/windows-latest-3.9-cpython-with-pylmdb-mods.whl dist/$destfile
 
       # - name: Publish distribution 📦 to Test PyPI
       #   uses: pypa/gh-action-pypi-publish@master
