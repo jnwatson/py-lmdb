@@ -77,6 +77,7 @@ jobs:
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
+          python -c 'import lmdb; print(lmdb.__version__)' > vers.txt
           ls dist
       # name: Lint with flake8
       # run: |
@@ -93,12 +94,20 @@ jobs:
             pure=$LMDB_PURE"
           # Nic tmp
           # pytest
+
       - name: Save wheel
         uses: actions/upload-artifact@v2
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
+
+      - name: Save version
+        uses: actions/upload-artifact@v2
+        with:
+          path: vers.txt
+          name: vers.txt
+
       - name: Save source
         # We only need a single target to upload the source
         # (all targets have the same source)
@@ -146,7 +155,8 @@ jobs:
         # purity: [with-pylmdb-mods]
 
         # Nic tmp
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
+          # os: [ubuntu-latest, windows-latest]
         python-version: ['3.9']
         impl: [cpython]
         purity: [with-pylmdb-mods]
@@ -190,17 +200,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
 
-      - name: See what we have
-        run: ls
-
       - name: Unzip manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
         run: unzip manylinux.zip
 
-      - name: Unzip manylinux artifacts
-        if: matrix.os == 'ubuntu-latest'
+      - name: Hmm
         run: >-
-          ls; ls dist
+          dir; ls; ls dist
 
       - name: Download non-Ubuntu wheel
         if: matrix.os != 'ubuntu-latest'
@@ -208,17 +214,31 @@ jobs:
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path:
+          path: dist
 
-
-      - name: Publish distribution 📦 to Test PyPI
-        uses: pypa/gh-action-pypi-publish@master
+      - name: Download version
+        uses: actions/download-artifact@v2
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository_url: https://test.pypi.org/legacy/
+          name: vers.txt
+          path: vers.txt
 
-      - name: Publish distribution 📦 to PyPI
-        if: startsWith(github.ref, 'refs/tags')
-        uses: pypa/gh-action-pypi-publish@master
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Get version
+        if: matrix.os == 'windows-latest'
+        run: >-
+           $vers = Get-Content .\file.txt -Raw ;
+           echo $vers.Trim() ;
+           echo "$($vers.Trim())" ;
+           echo "lmdb-$($vers.Trim())-cp38-cp38-win32.whl" ;
+           mv windows-latest-3.9-cpython-with-pylmdb-mods.whl "dist/lmdb-$($vers.Trim())-cp38-cp38-win32.whl"
+
+      # - name: Publish distribution 📦 to Test PyPI
+      #   uses: pypa/gh-action-pypi-publish@master
+      #   with:
+      #     password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      #     repository_url: https://test.pypi.org/legacy/
+
+      # - name: Publish distribution 📦 to PyPI
+      #   if: startsWith(github.ref, 'refs/tags')
+      #   uses: pypa/gh-action-pypi-publish@master
+      #   with:
+      #     password: ${{ secrets.PYPI_API_TOKEN }}
