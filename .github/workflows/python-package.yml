@@ -77,7 +77,6 @@ jobs:
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
-          python -c 'import lmdb; print(lmdb.__version__)' > vers.txt
           ls dist
       # name: Lint with flake8
       # run: |
@@ -102,7 +101,17 @@ jobs:
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
+      - name: Get version
+        if: >-
+          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
+        run: |
+          python -c 'import lmdb; print(lmdb.__version__, end="")' > vers.txt
+
       - name: Save version
+        if: >-
+          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
           path: vers.txt
@@ -225,11 +234,9 @@ jobs:
       - name: Get version
         if: matrix.os == 'windows-latest'
         run: >-
-           $vers = Get-Content .\file.txt -Raw ;
-           echo $vers.Trim() ;
-           echo "$($vers.Trim())" ;
-           echo "lmdb-$($vers.Trim())-cp38-cp38-win32.whl" ;
-           mv windows-latest-3.9-cpython-with-pylmdb-mods.whl "dist/lmdb-$($vers.Trim())-cp38-cp38-win32.whl"
+           destfile="lmdb-`cat vers.txt`-cp38-cp38-win32.whl"
+           echo $destfile
+           mv windows-latest-3.9-cpython-with-pylmdb-mods.whl $destfile
 
       # - name: Publish distribution 📦 to Test PyPI
       #   uses: pypa/gh-action-pypi-publish@master
