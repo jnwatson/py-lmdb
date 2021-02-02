@@ -225,7 +225,6 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: vers.txt
-          path: vers.txt
 
       - name: Hmm
         run: >-
@@ -233,7 +232,7 @@ jobs:
 
       - name: Get version
         if: matrix.os == 'windows-latest'
-        run: >-
+        run: |
            destfile="lmdb-`cat vers.txt`-cp38-cp38-win32.whl"
            echo $destfile
            mv windows-latest-3.9-cpython-with-pylmdb-mods.whl $destfile
