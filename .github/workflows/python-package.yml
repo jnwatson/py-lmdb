@@ -19,7 +19,7 @@ jobs:
         # purity: [pure, with-pylmdb-mods]
 
         # Nic tmp
-        os: [windows-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: [3.9]
         impl: [cpython]
         purity: [with-pylmdb-mods]
