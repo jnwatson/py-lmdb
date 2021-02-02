@@ -235,8 +235,8 @@ jobs:
         run: |
            mkdir dist
            echo ${{env.VER2WHL}}
-           echo ${{env.VER2WHL [matrix.python-version] }}
-           pyver=${{fromJson(env.VER2WHL [matrix.python-version])}}
+           echo ${{env.VER2WHL [matrix['python-version']] }}
+           pyver=${{fromJson(env.VER2WHL [matrix['python-version']])}}
            echo $pyver
 
            destfile="lmdb-`cat vers.txt`-$pyver-win32.whl"
