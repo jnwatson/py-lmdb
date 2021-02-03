@@ -191,14 +191,14 @@ jobs:
             impl: cffi
 
     steps:
-      - name: Download manylinux artifacts
+      - name: Download source
         if: matrix.os == 'ubuntu-latest' and python-version == '3.9'
         uses: actions/download-artifact@v2
         with:
           name: source
           path: dist
 
-      - name: Download source
+      - name: Download manylinux artifact
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
         with:
