@@ -19,7 +19,7 @@ jobs:
         # purity: [pure, with-pylmdb-mods]
 
         # Nic tmp
-        python-version: [3.9]
+        python-version: [2.7, 3.9]
         impl: [cpython]
         purity: [with-pylmdb-mods]
 
@@ -189,7 +189,7 @@ jobs:
             impl: cffi
 
         include:
-          # Ubuntu archive has all the versions together
+          # Ubuntu artifacts apply to all python versions
           - os: ubuntu-latest
             python-version: '3.9'
             impl: cpython
@@ -210,7 +210,7 @@ jobs:
           name: manylinux
           path: dist
 
-      - name: Download non-Ubuntu wheel
+      - name: Download non-Linux wheel
         if: matrix.os != 'ubuntu-latest'
         uses: actions/download-artifact@v2
         with:
