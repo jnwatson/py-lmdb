@@ -14,14 +14,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
-        # impl: [cpython, cffi]
-        # purity: [pure, with-pylmdb-mods]
+        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
+        impl: [cpython, cffi]
+        purity: [pure, with-pylmdb-mods]
 
-        # Nic tmp
-        python-version: [2.7, 3.9]
-        impl: [cpython]
-        purity: [with-pylmdb-mods]
 
         exclude:
           - python-version: pypy-2.7
@@ -90,8 +86,7 @@ jobs:
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE"
-          # Nic tmp
-          # pytest
+          pytest
 
       - name: Save wheel
         uses: actions/upload-artifact@v2
@@ -160,12 +155,8 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        # python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', pypy-2.7, pypy-3.6]
-        # impl: [cpython, cffi]
-        # purity: [with-pylmdb-mods]
-
-        python-version: ['2.7', '3.9']
-        impl: [cpython]
+        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', pypy-2.7, pypy-3.6]
+        impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
         exclude:
