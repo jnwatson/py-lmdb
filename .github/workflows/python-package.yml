@@ -70,7 +70,6 @@ jobs:
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
-          python -m pip install --upgrade pip
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
