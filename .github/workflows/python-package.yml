@@ -24,6 +24,8 @@ jobs:
             impl: cpython
           - python-version: pypy-3.6
             impl: cpython
+          - python-version: 3.4
+            os: macos-latest
 
     steps:
       - uses: actions/checkout@v2
