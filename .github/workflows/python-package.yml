@@ -235,8 +235,8 @@ jobs:
         run: |
            mkdir dist
            echo ${{ env.VER2WHL }}
-           echo ${{ fromJson(env.VER2WHL) ["3.9"] }}
-           echo ${{ fromJson(env.VER2WHL) [ matrix.python-version ] }}
+           echo ${{ fromJSON(env.VER2WHL)["3.9"] }}
+           echo ${{ fromJSON(env.VER2WHL) [ matrix.python-version ] }}
            bash --version
            echo $SHELL
            # echo ${{env.VER2WHL [matrix['python-version']] }}
