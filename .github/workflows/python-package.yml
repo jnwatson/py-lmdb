@@ -237,14 +237,8 @@ jobs:
            echo 1, ${{ format('{0}{1}', '{"foo": "bar"}', '["foo"]') }}
            echo 2, ${{ format('{0}["{1}"]', env.VER2WHL, matrix.python-version) }}
            echo 3, ${{ fromJSON(format('{0}["{1}"]', env.VER2WHL, matrix.python-version)) }}
-           # echo ${{ env.VER2WHL }}
-           # echo ${{ fromJSON(env.VER2WHL)["3.9"] }}
-           # echo ${{ fromJSON(env.VER2WHL) [ matrix.python-version ] }}
            bash --version
            echo $SHELL
-           # echo ${{env.VER2WHL [matrix['python-version']] }}
-           # pyver=${{fromJson(env.VER2WHL [matrix['python-version']])}}
-           # echo $pyver
            declare -A ver2whl
            ver2whl["pypy-2.7"]="pp27"
            ver2whl["pypy-3.6"]="pp36"
