@@ -24,8 +24,13 @@ jobs:
             impl: cpython
           - python-version: pypy-3.6
             impl: cpython
+          # Github actions doesn't have a 3.4/macos-latest distro
           - python-version: 3.4
             os: macos-latest
+          # patch-ng -> typing has trouble on python 3.4 (TODO: might be resolvable with explicit
+          # versions)
+          - python-version: 3.4
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@v2
@@ -179,6 +184,14 @@ jobs:
             impl: cffi
           - python-version: '3.9'
             impl: cffi
+
+          # Github actions doesn't have a 3.4/macos-latest distro
+          - python-version: 3.4
+            os: macos-latest
+          # patch-ng -> typing has trouble on python 3.4 (TODO: might be resolvable with explicit
+          # versions)
+          - python-version: 3.4
+            os: windows-latest
 
         include:
           # Ubuntu artifacts apply to all python versions
