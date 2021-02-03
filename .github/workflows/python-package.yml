@@ -220,7 +220,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
            mkdir dist
-           echo ${{ fromJSON('{"foo": "bar"}' '["foo"]' }}
+           echo ${{ format('{0}{1}', '{"foo": "bar"}', '["foo"]') }}
            bash --version
            echo $SHELL
            declare -A ver2whl
