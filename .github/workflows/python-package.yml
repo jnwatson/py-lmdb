@@ -192,7 +192,7 @@ jobs:
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-latest' and python-version == '3.9'
+        if: matrix.os == 'ubuntu-latest' && python-version == '3.9'
         uses: actions/download-artifact@v2
         with:
           name: source
