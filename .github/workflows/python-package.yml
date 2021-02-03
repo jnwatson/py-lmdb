@@ -190,20 +190,6 @@ jobs:
           - python-version: cp39-39
             impl: cffi
 
-    env:
-      VER2WHL: >-
-        {
-          "pypy-2.7": "pp27",
-          "pypy-3.6": "pp36",
-          "2.7": "cp27-27m",
-          "3.4": "cp34-34m",
-          "3.5": "cp35-35m",
-          "3.6": "cp36-36m",
-          "3.7": "cp37-37m",
-          "3.8": "cp38-38",
-          "3.9": "cp39-39"
-        }
-
     steps:
       - name: Download manylinux artifacts
         if: matrix.os == 'ubuntu-latest'
@@ -234,14 +220,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
            mkdir dist
-           echo ${{ env.VER2WHL }}
-           echo ${{ fromJSON(env.VER2WHL)["3.9"] }}
-           echo ${{ fromJSON(env.VER2WHL) [ matrix.python-version ] }}
            bash --version
            echo $SHELL
-           # echo ${{env.VER2WHL [matrix['python-version']] }}
-           # pyver=${{fromJson(env.VER2WHL [matrix['python-version']])}}
-           # echo $pyver
            declare -A ver2whl
            ver2whl["pypy-2.7"]="pp27"
            ver2whl["pypy-3.6"]="pp36"
@@ -252,6 +232,7 @@ jobs:
            ver2whl["3.7"]="cp37-37m"
            ver2whl["3.8"]="cp38-38"
            ver2whl["3.9"]="cp39-39"
+
            $pyver=${ver2whl[${{matrix.python-version}}]}
            echo $pyver
 
