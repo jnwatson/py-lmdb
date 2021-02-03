@@ -234,9 +234,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
            mkdir dist
-           echo ${{ format('{0}{1}', '{"foo": "bar"}', '["foo"]') }}
-           echo ${{ format('{0}["{1}"]', env.VER2WHL, matrix.python-version) }}
-           echo ${{ fromJSON(format('{0}["{1}"]', env.VER2WHL, matrix.python-version)) }}
+           echo 1, ${{ format('{0}{1}', '{"foo": "bar"}', '["foo"]') }}
+           echo 2, ${{ format('{0}["{1}"]', env.VER2WHL, matrix.python-version) }}
+           echo 3, ${{ fromJSON(format('{0}["{1}"]', env.VER2WHL, matrix.python-version)) }}
            # echo ${{ env.VER2WHL }}
            # echo ${{ fromJSON(env.VER2WHL)["3.9"] }}
            # echo ${{ fromJSON(env.VER2WHL) [ matrix.python-version ] }}
@@ -255,8 +255,6 @@ jobs:
            ver2whl["3.7"]="cp37-37m"
            ver2whl["3.8"]="cp38-38"
            ver2whl["3.9"]="cp39-39"
-           $pyver=${ver2whl[${{matrix.python-version}}]}
-           echo 'pyver is ', $pyver
 
            destfile="lmdb-`cat vers.txt`-$pyver-win32.whl"
            echo 'destfile is', $destfile
