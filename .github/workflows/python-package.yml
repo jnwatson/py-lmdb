@@ -127,6 +127,8 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: dist/lmdb*.tar.gz
+          name: source
+
       - name: Build manylinux wheel
         if: >-
           matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
@@ -149,7 +151,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: dist/lmdb*manylinux*.whl
-          name: manylinux.zip
+          name: manylinux
 
   publish:
     needs: build
@@ -163,41 +165,45 @@ jobs:
         # impl: [cpython, cffi]
         # purity: [with-pylmdb-mods]
 
-        # Nic tmp
-        os: [windows-latest]
-          # os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ['3.9']
         impl: [cpython]
         purity: [with-pylmdb-mods]
 
         exclude:
-          - python-version: pp27
+          - python-version: 'pypy-2.7'
             impl: cpython
-          - python-version: pp36
+          - python-version: 'pypy-3.6'
             impl: cpython
-          - python-version: cp27-27m
+          - python-version: '2.7'
             impl: cffi
-          - python-version: cp34-34m
+          - python-version: '3.4'
             impl: cffi
-          - python-version: cp35-35m
+          - python-version: '3.5'
             impl: cffi
-          - python-version: cp36-36m
+          - python-version: '3.6'
             impl: cffi
-          - python-version: cp37-37m
+          - python-version: '3.7'
             impl: cffi
-          - python-version: cp38-38
+          - python-version: '3.8'
             impl: cffi
-          - python-version: cp39-39
+          - python-version: '3.9'
             impl: cffi
 
     steps:
       - name: Download manylinux artifacts
+        if: matrix.os == 'ubuntu-latest' and python-version == '3.9'
+        uses: actions/download-artifact@v2
+        with:
+          name: source
+          path: dist
+
+      - name: Download source
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
-
-      - name: Unzip manylinux artifacts
-        if: matrix.os == 'ubuntu-latest'
-        run: unzip manylinux.zip
+        with:
+          name: manylinux
+          path: dist
 
       - name: Download non-Ubuntu wheel
         if: matrix.os != 'ubuntu-latest'
@@ -205,49 +211,20 @@ jobs:
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path: predist
+          path: dist
 
-      - name: Download lmdb version file
-        uses: actions/download-artifact@v2
-        with:
-          name: vers.txt
-
-      - name: Hmm
+      - name: Inventory
         run: >-
           find .
 
-      - name: Move wheel
-        if: matrix.os == 'windows-latest'
-        run: |
-           mkdir dist
-           bash --version
-           echo $SHELL
-           declare -A ver2whl
-           ver2whl["pypy-2.7"]="pp27"
-           ver2whl["pypy-3.6"]="pp36"
-           ver2whl["2.7"]="cp27-27m"
-           ver2whl["3.4"]="cp34-34m"
-           ver2whl["3.5"]="cp35-35m"
-           ver2whl["3.6"]="cp36-36m"
-           ver2whl["3.7"]="cp37-37m"
-           ver2whl["3.8"]="cp38-38"
-           ver2whl["3.9"]="cp39-39"
+      - name: Publish distribution 📦 to Test PyPI
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/
 
-           pyver=${ver2whl[${{ matrix.python-version }}]}
-           echo pyver, $pyver
-
-           destfile="lmdb-`cat vers.txt`-$pyver-win32.whl"
-           echo 'destfile is', $destfile
-           mv predist/windows-latest-3.9-cpython-with-pylmdb-mods.whl dist/$destfile
-
-      # - name: Publish distribution 📦 to Test PyPI
-      #   uses: pypa/gh-action-pypi-publish@master
-      #   with:
-      #     password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-      #     repository_url: https://test.pypi.org/legacy/
-
-      # - name: Publish distribution 📦 to PyPI
-      #   if: startsWith(github.ref, 'refs/tags')
-      #   uses: pypa/gh-action-pypi-publish@master
-      #   with:
-      #     password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish distribution 📦 to PyPI
+        if: startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
