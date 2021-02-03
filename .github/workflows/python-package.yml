@@ -165,7 +165,7 @@ jobs:
 
         # Nic tmp
         os: [windows-latest]
-          # os: [ubuntu-latest, windows-latest]
+        # os: [ubuntu-latest, windows-latest]
         python-version: ['3.9']
         impl: [cpython]
         purity: [with-pylmdb-mods]
@@ -220,6 +220,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
            mkdir dist
+           echo ${{ fromJSON('{"foo": "bar"}' '[foo'] }}
            bash --version
            echo $SHELL
            declare -A ver2whl
@@ -232,7 +233,6 @@ jobs:
            ver2whl["3.7"]="cp37-37m"
            ver2whl["3.8"]="cp38-38"
            ver2whl["3.9"]="cp39-39"
-
            $pyver=${ver2whl[${{matrix.python-version}}]}
            echo $pyver
 
