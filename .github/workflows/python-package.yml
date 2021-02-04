@@ -4,7 +4,6 @@ name: Build, run, and test py-lmdb
 'on':
   push:
     branches: [master, release]
-  push:
     tags:
       - 'py-lmdb_*'
   pull_request:
