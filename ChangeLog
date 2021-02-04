@@ -1,3 +1,15 @@
+2021-02-04 v1.1.0
+* Migrate CI pipeline from Travis and AppVeyor to Github Actions.  Now
+  includes comprehensive testing across 4 dimensions (OS, Python version,
+  cpython/CFFI, pure/with mods).  Also includes publishing to PyPI.
+
+* Prevent invalid flag combinations when creating a database.
+
+* Add a Cursor.getmulti method with optional buffer support.  Contributed by
+  Will Thompson <willsthompson@gmail.com>.
+
+* Upgrade underlying LMDB to 0.9.27.
+
 2020-08-28 v1.0.0
 * Start of new semantic versioning scheme.  This would be a minor version
   bump from the 0.99 release if it were semantically versioned.
