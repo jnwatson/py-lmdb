@@ -3,7 +3,7 @@ name: Build, run, and test py-lmdb
 
 'on':
   push:
-    branches: [master make-package]
+    branches: [master, release]
   pull_request:
     branches: [master]
 
