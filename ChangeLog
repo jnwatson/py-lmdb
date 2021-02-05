@@ -1,3 +1,8 @@
+2021-02-05 v1.1.1
+* Dowgrade underlying LMDB to 0.9.26.  0.9.27 has a minor defect that will
+  need to get resolved.
+
+
 2021-02-04 v1.1.0
 * Migrate CI pipeline from Travis and AppVeyor to Github Actions.  Now
   includes comprehensive testing across 4 dimensions (OS, Python version,
