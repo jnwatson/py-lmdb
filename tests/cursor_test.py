@@ -140,6 +140,25 @@ class CursorTest(CursorTestBase):
     def testPut(self):
         pass
 
+class CursorTest2(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def setUp(self):
+        self.path, self.env = testlib.temp_env()
+        self.db = self.env.open_db(b'foo', dupsort=True)
+        self.txn = self.env.begin(write=True, db=self.db)
+        self.c = self.txn.cursor()
+
+    def testIterWithDeletes(self):
+        ''' A problem identified in LMDB 0.9.27 '''
+        self.c.put(b'\x00\x01', b'hehe', dupdata=True)
+        self.c.put(b'\x00\x02', b'haha', dupdata=True)
+        self.c.set_key(b'\x00\x02')
+        it = self.c.iternext()
+        self.assertEqual((b'\x00\x02', b'haha'), next(it))
+        self.txn.delete(b'\x00\x01', b'hehe', db=self.db)
+        self.assertRaises(StopIteration, next, it)
 
 class PutmultiTest(CursorTestBase):
     def test_empty_seq(self):
