@@ -1,5 +1,5 @@
 diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
-index 361c93010..da6254819 100644
+index 1461ee564..23a20cb7b 100644
 --- a/libraries/liblmdb/lmdb.h
 +++ b/libraries/liblmdb/lmdb.h
 @@ -682,9 +682,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
@@ -32,10 +32,10 @@ index 361c93010..da6254819 100644
  	/** @brief Return statistics about the LMDB environment.
  	 *
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
-index b70a6a54d..0b382a721 100644
+index f09441052..ffb8f92bc 100644
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9334,12 +9334,12 @@ done:
+@@ -9328,12 +9328,12 @@ done:
  
  	/** Copy environment with compaction. */
  static int ESECT
@@ -50,7 +50,7 @@ index b70a6a54d..0b382a721 100644
  	pthread_t thr;
  	pgno_t root, new_root;
  	int rc = MDB_SUCCESS;
-@@ -9385,9 +9385,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
+@@ -9379,9 +9379,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
  	if (rc)
  		goto done;
  
@@ -65,7 +65,7 @@ index b70a6a54d..0b382a721 100644
  
  	mp = (MDB_page *)my.mc_wbuf[0];
  	memset(mp, 0, NUM_METAS * env->me_psize);
-@@ -9447,7 +9449,8 @@ finish:
+@@ -9441,7 +9443,8 @@ finish:
  		my.mc_error = rc;
  	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
  	rc = THREAD_FINISH(thr);
@@ -75,7 +75,7 @@ index b70a6a54d..0b382a721 100644
  
  done:
  #ifdef _WIN32
-@@ -9564,12 +9567,22 @@ leave:
+@@ -9558,12 +9561,22 @@ leave:
  }
  
  int ESECT
@@ -100,7 +100,7 @@ index b70a6a54d..0b382a721 100644
  }
  
  int ESECT
-@@ -9580,6 +9593,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
+@@ -9574,6 +9587,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
  
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
@@ -113,7 +113,7 @@ index b70a6a54d..0b382a721 100644
  {
  	int rc;
  	MDB_name fname;
-@@ -9591,7 +9610,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+@@ -9585,7 +9604,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
  		mdb_fname_destroy(fname);
  	}
  	if (rc == MDB_SUCCESS) {
