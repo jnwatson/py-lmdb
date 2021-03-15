@@ -7,7 +7,7 @@ name: Build, run, and test py-lmdb
     tags:
       - 'py-lmdb_*'
   pull_request:
-    branches: [master]
+    branches: [master, system-ci]
 
 jobs:
   build:
@@ -19,7 +19,6 @@ jobs:
         python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-
 
         exclude:
           - python-version: pypy-2.7
@@ -33,6 +32,12 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+
+        include:
+          - python-version: 3.9
+            os: ubuntu-latest
+            impl: cpython
+            purity: system
 
     steps:
       - uses: actions/checkout@v2
@@ -53,6 +58,9 @@ jobs:
           if ( '${{ matrix.purity }}' -eq 'pure' ) {
             echo "LMDB_PURE=1" |
               Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ( '${{ matrix.purity }}' -eq 'system' ){
+            echo "LMDB_FORCE_SYSTEM=1" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
       - name: Set env vars *nix
         if: runner.os != 'Windows'
@@ -64,6 +72,9 @@ jobs:
           fi
           if [[ ${{ matrix.purity }} == pure ]] ; then
             echo "LMDB_PURE=1" >> $GITHUB_ENV;
+          elif [[ ${{ matrix.purity }} == system]] ; then
+            echo "LMDB_FORCE_SYSTEM=1" >> $GITHUB_ENV;
+            apt-get install liblmdb-dev
           fi
 
       - name: Install Visual C++ for Python 2.7
@@ -74,9 +85,9 @@ jobs:
       - name: Install dependencies
         run: |
           echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
-            cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+            cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
-            cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
+            cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
@@ -87,13 +98,14 @@ jobs:
       #   flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
       #   # exit-zero treats all errors as warnings.
       #   flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+      #
       - name: Test with pytest
         # Limit the test cycle a little
         if: matrix.python-version != '3.4' && matrix.python-version != '3.6' &&
             matrix.python-version != '3.8'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
-            pure=$LMDB_PURE"
+            pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           pytest
 
       - name: Save wheel
