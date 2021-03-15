@@ -74,7 +74,7 @@ jobs:
             echo "LMDB_PURE=1" >> $GITHUB_ENV;
           elif [[ ${{ matrix.purity }} == system ]] ; then
             echo "LMDB_FORCE_SYSTEM=1" >> $GITHUB_ENV;
-            apt-get install liblmdb-dev;
+            sudo apt-get install liblmdb-dev;
           fi
 
       - name: Install Visual C++ for Python 2.7
