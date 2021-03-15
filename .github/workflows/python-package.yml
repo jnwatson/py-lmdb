@@ -117,14 +117,14 @@ jobs:
 
       - name: Get version
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         run: |
           python -c 'import lmdb; print(lmdb.__version__, end="")' > vers.txt
 
       - name: Save version
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -135,7 +135,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
         uses: actions/upload-artifact@v2
@@ -145,7 +145,7 @@ jobs:
 
       - name: Build manylinux wheel
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2010_x86_64
         with:
@@ -160,7 +160,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -216,21 +216,21 @@ jobs:
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
