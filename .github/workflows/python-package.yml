@@ -15,11 +15,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-18.04, macos-latest, windows-latest]
         python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-
 
         exclude:
           - python-version: pypy-2.7
@@ -33,6 +32,12 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+
+        include:
+          - python-version: 3.9
+            os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
+            impl: cpython
+            purity: system
 
     steps:
       - uses: actions/checkout@v2
@@ -53,6 +58,9 @@ jobs:
           if ( '${{ matrix.purity }}' -eq 'pure' ) {
             echo "LMDB_PURE=1" |
               Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ( '${{ matrix.purity }}' -eq 'system' ){
+            echo "LMDB_FORCE_SYSTEM=1" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
       - name: Set env vars *nix
         if: runner.os != 'Windows'
@@ -64,6 +72,9 @@ jobs:
           fi
           if [[ ${{ matrix.purity }} == pure ]] ; then
             echo "LMDB_PURE=1" >> $GITHUB_ENV;
+          elif [[ ${{ matrix.purity }} == system ]] ; then
+            echo "LMDB_FORCE_SYSTEM=1" >> $GITHUB_ENV;
+            sudo apt-get install liblmdb-dev;
           fi
 
       - name: Install Visual C++ for Python 2.7
@@ -74,9 +85,9 @@ jobs:
       - name: Install dependencies
         run: |
           echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
-            cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE"
+            cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
-            cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE"
+            cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
@@ -87,13 +98,14 @@ jobs:
       #   flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
       #   # exit-zero treats all errors as warnings.
       #   flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+      #
       - name: Test with pytest
         # Limit the test cycle a little
         if: matrix.python-version != '3.4' && matrix.python-version != '3.6' &&
             matrix.python-version != '3.8'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
-            pure=$LMDB_PURE"
+            pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           pytest
 
       - name: Save wheel
@@ -105,14 +117,14 @@ jobs:
 
       - name: Get version
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         run: |
           python -c 'import lmdb; print(lmdb.__version__, end="")' > vers.txt
 
       - name: Save version
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -123,7 +135,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
         uses: actions/upload-artifact@v2
@@ -133,12 +145,12 @@ jobs:
 
       - name: Build manylinux wheel
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2010_x86_64
+        uses: RalfG/python-wheels-manylinux-build@v0.3.3
         with:
           python-versions: >-
-              cp27-cp27m cp35-cp35m cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp35-cp35m cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -148,7 +160,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' &&
+          matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -158,7 +170,7 @@ jobs:
   publish:
     needs: build
     # N.B. the host running twine to upload is distinct from the target image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     strategy:
       # We publish a subset of the targets we test
       matrix:
@@ -197,28 +209,28 @@ jobs:
 
         include:
           # Ubuntu artifacts apply to all python versions
-          - os: ubuntu-latest
+          - os: ubuntu-18.04
             python-version: '3.9'
             impl: cpython
             purity: with-pylmdb-mods
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-latest'
+        if: runner.os != 'Linux'
         uses: actions/download-artifact@v2
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-\
