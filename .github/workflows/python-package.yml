@@ -35,7 +35,7 @@ jobs:
 
         include:
           - python-version: 3.9
-            os: ubuntu-18.04
+            os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
             impl: cpython
             purity: system
 
