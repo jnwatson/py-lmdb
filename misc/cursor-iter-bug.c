@@ -1,4 +1,4 @@
-// Demonstrates a bug introduced in 0.9.27
+// Demonstrates a bug introduced in upstream 0.9.27.  Fixed in 0.9.29
 // https://bugs.openldap.org/show_bug.cgi?id=9461
 // gcc -g -I ../lib -o cursor-iter-bug cursor-iter-bug.c -lpthread
 // In a dupsort DB, deleting a value before where a cursor is set causes the
