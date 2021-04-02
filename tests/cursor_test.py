@@ -190,7 +190,7 @@ class PutmultiTest(CursorTestBase):
 
     def test_bad_seq1(self):
         self.assertRaises(Exception,
-             lambda: self.c.putmulti(range(2)))
+                          lambda: self.c.putmulti(range(2)))
 
     def test_dupsort(self):
         _, env = testlib.temp_env()
@@ -200,13 +200,22 @@ class PutmultiTest(CursorTestBase):
             tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
             assert (3, 3) == c.putmulti(tups)
 
-    def test_dupsort_append(self):
+    def test_dupsort_putmulti_append(self):
         _, env = testlib.temp_env()
         db1 = env.open_db(B('db1'), dupsort=True)
         txn = env.begin(write=True, db=db1)
         with txn.cursor() as c:
             tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
             assert (3, 3) == c.putmulti(tups, append=True)
+
+    def test_dupsort_put_append(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True)
+        txn = env.begin(write=True, db=db1)
+        with txn.cursor() as c:
+            assert c.put(B('a'), B('value1'), append=True)
+            assert c.put(B('b'), B('value1'), append=True)
+            assert c.put(B('b'), B('value2'), append=True)
 
 class ReplaceTest(CursorTestBase):
     def test_replace(self):

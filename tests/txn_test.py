@@ -520,12 +520,23 @@ class ReplaceTest(unittest.TestCase):
         _, env = testlib.temp_env()
         db = env.open_db(B('db1'), dupsort=True)
         txn = env.begin(write=True, db=db)
-        assert None == txn.replace(B('a'), B('x'))
+        assert None is txn.replace(B('a'), B('x'))
         assert B('x') == txn.replace(B('a'), B('y'))
         assert B('y') == txn.replace(B('a'), B('z'))
         cur = txn.cursor()
         assert cur.set_key(B('a'))
         assert [B('z')] == list(cur.iternext_dup())
+
+    def test_dupsort_del_none(self):
+        _, env = testlib.temp_env()
+        db = env.open_db(B('db1'), dupsort=True)
+        with env.begin(write=True, db=db) as txn:
+            assert txn.put(B('a'), B('a'))
+            assert txn.put(B('a'), B('b'))
+            cur = txn.cursor()
+            assert cur.set_key(B('a'))
+            assert [B('a'), B('b')] == list(cur.iternext_dup())
+            assert txn.delete(B('a'), None)
 
     def test_dupdata_no_dupsort(self):
         _, env = testlib.temp_env()

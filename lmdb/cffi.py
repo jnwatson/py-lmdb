@@ -42,13 +42,13 @@ if is_win32:
 try:
     import __builtin__
 except ImportError:
-    import builtins as __builtin__
+    import builtins as __builtin__  # type: ignore
 
 import lmdb
 try:
     from lmdb import _config
 except ImportError:
-    _config = None
+    _config = None  # type: ignore
 
 
 __all__ = [
@@ -362,7 +362,7 @@ if not lmdb._reading_docs():
         'libraries': []
     }
 
-    _have_patched_lmdb = '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']
+    _have_patched_lmdb = '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']  # type: ignore
 
     if _have_patched_lmdb:
         _CFFI_CDEF += _CFFI_CDEF_PATCHED
@@ -370,13 +370,13 @@ if not lmdb._reading_docs():
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
     _lib = _ffi.verify(_CFFI_VERIFY,
-        modulename='lmdb_cffi',
-        ext_package='lmdb',
-        sources=_config_vars['extra_sources'],
-        extra_compile_args=_config_vars['extra_compile_args'],
-        include_dirs=_config_vars['extra_include_dirs'],
-        libraries=_config_vars['libraries'],
-        library_dirs=_config_vars['extra_library_dirs'])
+                       modulename='lmdb_cffi',
+                       ext_package='lmdb',
+                       sources=_config_vars['extra_sources'],
+                       extra_compile_args=_config_vars['extra_compile_args'],
+                       include_dirs=_config_vars['extra_include_dirs'],
+                       libraries=_config_vars['libraries'],
+                       library_dirs=_config_vars['extra_library_dirs'])
 
     @_ffi.callback("int(char *, void *)")
     def _msg_func(s, _):
@@ -535,8 +535,10 @@ class Some_LMDB_Resource_That_Was_Deleted_Or_Closed(object):
     """
     def __nonzero__(self):
         return 0
+
     def __bool__(self):
         return False
+
     def __repr__(self):
         return "<This used to be a LMDB resource but it was deleted or closed>"
 _invalid = Some_LMDB_Resource_That_Was_Deleted_Or_Closed()
@@ -595,7 +597,7 @@ class Environment(object):
     interpreter crash.
 
     Equivalent to `mdb_env_open()
-    <http://symas.com/mdb/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
+    <http://lmdb.tech/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
 
         `path`:
             Location of directory (if `subdir=True`) or file prefix to store
@@ -712,10 +714,10 @@ class Environment(object):
             so that no readers may be active at all when a writer begins.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
-            readonly=False, metasync=True, sync=True, map_async=False,
-            mode=O_0755, create=True, readahead=True, writemap=False,
-            meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-            lock=True):
+                 readonly=False, metasync=True, sync=True, map_async=False,
+                 mode=O_0755, create=True, readahead=True, writemap=False,
+                 meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
+                 lock=True):
         self._max_spare_txns = max_spare_txns
         self._spare_txns = []
 
@@ -809,7 +811,7 @@ class Environment(object):
             The new size in bytes.
 
         Equivalent to `mdb_env_set_mapsize()
-        <http://symas.com/mdb/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
+        <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
         """
         rc = _lib.mdb_env_set_mapsize(self._env, map_size)
         if rc:
@@ -820,7 +822,7 @@ class Environment(object):
         transactions. Repeat calls to :py:meth:`close` have no effect.
 
         Equivalent to `mdb_env_close()
-        <http://symas.com/mdb/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
             if self._deps:
@@ -846,7 +848,7 @@ class Environment(object):
         stored.
 
         Equivalent to `mdb_env_get_path()
-        <http://symas.com/mdb/doc/group__mdb.html#gac699fdd8c4f8013577cb933fb6a757fe>`_
+        <http://lmdb.tech/doc/group__mdb.html#gac699fdd8c4f8013577cb933fb6a757fe>`_
         """
         path = _ffi.new('char **')
         rc = _lib.mdb_env_get_path(self._env, path)
@@ -872,7 +874,7 @@ class Environment(object):
             this parameter may be set only if compact=True.
 
         Equivalent to `mdb_env_copy2() or mdb_env_copy3()
-        <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
         flags = _lib.MDB_CP_COMPACT if compact else 0
         if txn and not _have_patched_lmdb:
@@ -908,7 +910,7 @@ class Environment(object):
             is not available if the module was built with LMDB_PURE.
 
         Equivalent to `mdb_env_copyfd2() or mdb_env_copyfd3
-        <http://symas.com/mdb/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
         if txn and not _have_patched_lmdb:
             raise TypeError("Non-patched LMDB doesn't support transaction with env.copy")
@@ -933,7 +935,7 @@ class Environment(object):
         """Flush the data buffers to disk.
 
         Equivalent to `mdb_env_sync()
-        <http://symas.com/mdb/doc/group__mdb.html#ga85e61f05aa68b520cc6c3b981dba5037>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga85e61f05aa68b520cc6c3b981dba5037>`_
 
         Data is always written to disk when :py:meth:`Transaction.commit` is
         called, but the operating system may keep it buffered. MDB always
@@ -981,7 +983,7 @@ class Environment(object):
         +--------------------+---------------------------------------+
 
         Equivalent to `mdb_env_stat()
-        <http://symas.com/mdb/doc/group__mdb.html#gaf881dca452050efbd434cd16e4bae255>`_
+        <http://lmdb.tech/doc/group__mdb.html#gaf881dca452050efbd434cd16e4bae255>`_
         """
         st = _ffi.new('MDB_stat *')
         rc = _lib.mdb_env_stat(self._env, st)
@@ -1012,7 +1014,7 @@ class Environment(object):
         +--------------------+---------------------------------------------+
 
         Equivalent to `mdb_env_info()
-        <http://symas.com/mdb/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
         """
         info = _ffi.new('MDB_envinfo *')
         rc = _lib.mdb_env_info(self._env, info)
@@ -1044,7 +1046,7 @@ class Environment(object):
             'readahead': not (flags & _lib.MDB_NORDAHEAD),
             'writemap': bool(flags & _lib.MDB_WRITEMAP),
             'meminit': not (flags & _lib.MDB_NOMEMINIT),
-            'lock':  not (flags & _lib.MDB_NOLOCK),
+            'lock': not (flags & _lib.MDB_NOLOCK),
         }
 
     def max_key_size(self):
@@ -1094,7 +1096,7 @@ class Environment(object):
         same handle. As a special case, the main database is always open.
 
         Equivalent to `mdb_dbi_open()
-        <http://symas.com/mdb/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
+        <http://lmdb.tech/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
 
         Named databases are implemented by *storing a special descriptor in the
         main database*. All databases in an environment *share the same file*.
@@ -1291,7 +1293,7 @@ class Transaction(object):
                 txn.put('a', 'b')
 
     Equivalent to `mdb_txn_begin()
-    <http://symas.com/mdb/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
+    <http://lmdb.tech/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
 
         `env`:
             Environment the transaction should be on.
@@ -1424,7 +1426,7 @@ class Transaction(object):
         unavailable, and invalidates existing cursors.
 
         Equivalent to `mdb_drop()
-        <http://symas.com/mdb/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
+        <http://lmdb.tech/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
         """
         while db._deps:
             db._deps.pop()._invalidate()
@@ -1453,7 +1455,7 @@ class Transaction(object):
         """Commit the pending transaction.
 
         Equivalent to `mdb_txn_commit()
-        <http://symas.com/mdb/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga846fbd6f46105617ac9f4d76476f6597>`_
         """
         while self._deps:
             self._deps.pop()._invalidate()
@@ -1471,7 +1473,7 @@ class Transaction(object):
         been closed.
 
         Equivalent to `mdb_txn_abort()
-        <http://symas.com/mdb/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
         """
         if self._txn:
             while self._deps:
@@ -1489,7 +1491,7 @@ class Transaction(object):
         a `dupsort=True` database.
 
         Equivalent to `mdb_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
         """
         rc = _lib.pymdb_get(self._txn, (db or self._db)._dbi,
                             key, len(key), self._val)
@@ -1508,7 +1510,7 @@ class Transaction(object):
         On success, the cursor is positioned on the new record.
 
         Equivalent to `mdb_put()
-        <http://symas.com/mdb/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
 
             `key`:
                 Bytestring key to store.
@@ -1576,7 +1578,7 @@ class Transaction(object):
         """Delete a key from the database.
 
         Equivalent to `mdb_del()
-        <http://symas.com/mdb/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0>`_
 
             `key`:
                 The key to delete.
@@ -1588,6 +1590,9 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
+        if value is None:  # for bug-compatibility with cpython impl
+            value = EMPTY_BYTES
+
         rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
                             key, len(key), value, len(value))
         self._mutations += 1
@@ -1607,7 +1612,7 @@ class Cursor(object):
     Structure for navigating a database.
 
     Equivalent to `mdb_cursor_open()
-    <http://symas.com/mdb/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa>`_
+    <http://lmdb.tech/doc/group__mdb.html#ga9ff5d7bd42557fd5ee235dc1d62613aa>`_
 
         `db`:
             :py:class:`_Database` to navigate.
@@ -1905,9 +1910,9 @@ class Cursor(object):
         duplicates, the cursor is positioned on the first value ("duplicate").
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_FIRST
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_FIRST)
 
@@ -1918,9 +1923,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_FIRST_DUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_FIRST_DUP)
 
@@ -1932,9 +1937,9 @@ class Cursor(object):
         duplicates, the cursor is positioned on the last value ("duplicate").
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_LAST
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_LAST)
 
@@ -1945,9 +1950,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_LAST_DUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_LAST_DUP)
 
@@ -1960,9 +1965,9 @@ class Cursor(object):
         to the previous key.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_PREV
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_PREV)
 
@@ -1974,9 +1979,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_PREV_DUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_PREV_DUP)
 
@@ -1987,9 +1992,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_PREV_NODUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_PREV_NODUP)
 
@@ -2002,9 +2007,9 @@ class Cursor(object):
         first value of the next key.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_NEXT
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_NEXT)
 
@@ -2015,9 +2020,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_NEXT_DUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_NEXT_DUP)
 
@@ -2028,9 +2033,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_NEXT_NODUP
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get(_lib.MDB_NEXT_NODUP)
 
@@ -2043,9 +2048,9 @@ class Cursor(object):
         ("duplicate") for the key.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_SET_KEY
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES)
 
@@ -2057,9 +2062,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_GET_BOTH
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         return self._cursor_get_kv(_lib.MDB_GET_BOTH, key, value)
 
@@ -2118,7 +2123,7 @@ class Cursor(object):
             next_op = _lib.MDB_NEXT_DUP
 
         a = bytearray()
-        l = list()
+        lst = list()
         for key in keys:
             if self.set_key(key):
                 while self._valid:
@@ -2129,16 +2134,16 @@ class Cursor(object):
 
                     if dupfixed_bytes:
                         gen = (
-                            (key, val[i:i+dupfixed_bytes])
+                            (key, val[i:i + dupfixed_bytes])
                             for i in range(0, len(val), dupfixed_bytes))
                         if keyfixed:
                             for k, v in gen:
                                 a.extend(k + v)
                         else:
                             for k, v in gen:
-                                l.append((k, v))
+                                lst.append((k, v))
                     else:
-                        l.append((key, val))
+                        lst.append((key, val))
 
                     if dupdata:
                         self._cursor_get(next_op)
@@ -2148,7 +2153,7 @@ class Cursor(object):
         if keyfixed:
             return memoryview(a)
         else:
-            return l
+            return lst
 
     def set_range(self, key):
         """Seek to the first key greater than or equal to `key`, returning
@@ -2160,9 +2165,9 @@ class Cursor(object):
         ("duplicate") for the key.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_SET_RANGE
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         if not key:
             return self.first()
@@ -2176,9 +2181,9 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_get()
-        <http://symas.com/mdb/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
         with `MDB_GET_BOTH_RANGE
-        <http://symas.com/mdb/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1206b2af8b95e7f6b0ef6b28708c9127>`_
         """
         rc = self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
         # issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation,
@@ -2196,7 +2201,7 @@ class Cursor(object):
         meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_del()
-        <http://symas.com/mdb/doc/group__mdb.html#ga26a52d3efcfd72e5bf6bd6960bf75f95>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga26a52d3efcfd72e5bf6bd6960bf75f95>`_
         """
         v = self._valid
         if v:
@@ -2215,7 +2220,7 @@ class Cursor(object):
         Only meaningful for databases opened with `dupsort=True`.
 
         Equivalent to `mdb_cursor_count()
-        <http://symas.com/mdb/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
         """
         countp = _ffi.new('size_t *')
         rc = _lib.mdb_cursor_count(self._cur, countp)
@@ -2229,7 +2234,7 @@ class Cursor(object):
         success, the cursor is positioned on the key.
 
         Equivalent to `mdb_cursor_put()
-        <http://symas.com/mdb/doc/group__mdb.html#ga1f83ccb40011837ff37cc32be01ad91e>`_
+        <http://lmdb.tech/doc/group__mdb.html#ga1f83ccb40011837ff37cc32be01ad91e>`_
 
             `key`:
                 Bytestring key to store.
@@ -2260,7 +2265,10 @@ class Cursor(object):
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            flags |= _lib.MDB_APPEND
+            if self.txn._db._flags & _lib.MDB_DUPSORT:
+                flags |= _lib.MDB_APPENDDUP
+            else:
+                flags |= _lib.MDB_APPEND
 
         rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self.txn._mutations += 1
@@ -2325,7 +2333,7 @@ class Cursor(object):
                 else:
                     raise _error("mdb_cursor_put", rc)
         self._cursor_get(_lib.MDB_GET_CURRENT)
-        return added, added-skipped
+        return added, added - skipped
 
     def replace(self, key, val):
         """Store a record, returning its previous value if one existed. Returns

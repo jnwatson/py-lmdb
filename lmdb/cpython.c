@@ -2586,7 +2586,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= MDB_APPEND;
+        flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
