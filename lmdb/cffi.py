@@ -1591,6 +1591,9 @@ class Transaction(object):
 
         Returns True if at least one key was deleted.
         """
+        if value is None:  # for bug-compatibility with cpython impl
+            value = EMPTY_BYTES
+
         rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
                             key, len(key), value, len(value))
         self._mutations += 1
