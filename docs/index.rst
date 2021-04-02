@@ -9,7 +9,7 @@ lmdb
     :maxdepth: 2
 
 This is a universal Python binding for the `LMDB 'Lightning' Database
-<http://symas.com/mdb/>`_. Two variants are provided and automatically selected
+<http://lmdb.tech/>`_. Two variants are provided and automatically selected
 during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
 that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.7,
 and a C extension that supports CPython >=2.7 and >=3.4. Both variants
@@ -105,7 +105,7 @@ Getting Help
 
 Before getting in contact, please ensure you have thoroughly reviewed this
 documentation, and if applicable, the associated
-`official Doxygen documentation <http://symas.com/mdb/doc/>`_.
+`official Doxygen documentation <http://lmdb.tech/doc/>`_.
 
 If you have found a bug, please report it on the `GitHub issue tracker
 <https://github.com/dw/py-lmdb/issues>`_, or mail it to the list below if

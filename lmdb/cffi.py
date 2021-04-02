@@ -812,6 +812,17 @@ class Environment(object):
 
         Equivalent to `mdb_env_set_mapsize()
         <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
+
+        @warning
+        There's a data race in the underlying library that may cause
+        catastrophic loss of data if you use this method.
+
+        You are safe if one of the following are true:
+            * Only one process accessing a particular LMDB file ever calls
+              this method.
+
+            * You use locking external to this library to ensure that only one
+              process accessing the current LMDB file can be inside this function.
         """
         rc = _lib.mdb_env_set_mapsize(self._env, map_size)
         if rc:
