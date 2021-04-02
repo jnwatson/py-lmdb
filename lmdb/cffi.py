@@ -1578,7 +1578,6 @@ class Transaction(object):
         """Delete a key from the database.
 
         Equivalent to `mdb_del()
-        http://www.lmdb.tech/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0
         <http://lmdb.tech/doc/group__mdb.html#gab8182f9360ea69ac0afd4a4eaab1ddb0>`_
 
             `key`:
