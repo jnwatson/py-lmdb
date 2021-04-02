@@ -2266,7 +2266,10 @@ class Cursor(object):
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            flags |= _lib.MDB_APPEND
+            if self.txn._db._flags & _lib.MDB_DUPSORT:
+                flags |= _lib.MDB_APPENDDUP
+            else:
+                flags |= _lib.MDB_APPEND
 
         rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self.txn._mutations += 1
