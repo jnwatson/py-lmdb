@@ -1,5 +1,5 @@
 #
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2021 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -32,9 +32,11 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import sys
 import itertools
 import random
 import unittest
+import multiprocessing
 
 import lmdb
 import testlib
@@ -277,6 +279,41 @@ class BadCursorTest(unittest.TestCase):
         db = env.open_db(b'db', dupsort=True, txn=txn1)
         txn2 = env.begin(write=False)
         self.assertRaises(lmdb.InvalidParameterError, txn2.cursor, db=db)
+
+if sys.version_info[:2] >= (3, 4):
+    class MapResizeTest(unittest.TestCase):
+        def tearDown(self):
+            testlib.cleanup()
+
+        @staticmethod
+        def do_resize(path):
+            '''
+            Increase map size and fill up database, making sure that the root page is no longer
+            accessible in the main process.
+            '''
+            data = [i.to_bytes(4, 'little') for i in range(400)]
+            with lmdb.open(path, max_dbs=10, create=False, map_size=32000) as env:
+                env.open_db(b'foo')
+                env.set_mapsize(64000)
+                with env.begin(write=True) as txn:
+                    for datum in data:
+                        txn.put(datum, b'0')
+
+        def test_opendb_resize(self):
+            '''
+            Test that we correctly handle a MDB_MAP_RESIZED in env.open_db.
+
+            Would seg fault in cffi implementation
+            '''
+            mpctx = multiprocessing.get_context('spawn')
+            path, env = testlib.temp_env(max_dbs=10, map_size=32000)
+            env.close()
+            env = lmdb.open(path, max_dbs=10, map_size=32000, readonly=True)
+            proc = mpctx.Process(target=self.do_resize, args=(path,))
+            proc.start()
+            proc.join(5)
+            assert proc.exitcode is not None
+            self.assertRaises(lmdb.MapResizedError, env.open_db, b'foo')
 
 if __name__ == '__main__':
     unittest.main()

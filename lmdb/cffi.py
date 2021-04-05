@@ -813,7 +813,7 @@ class Environment(object):
         Equivalent to `mdb_env_set_mapsize()
         <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
 
-        @warning
+        Warning:
         There's a data race in the underlying library that may cause
         catastrophic loss of data if you use this method.
 
@@ -1379,7 +1379,11 @@ class Transaction(object):
                 env._max_spare_txns += 1
                 rc = _lib.mdb_txn_renew(self._txn)
                 if rc:
+                    while self._deps:
+                        self._deps.pop()._invalidate()
                     _lib.mdb_txn_abort(self._txn)
+                    self._txn = _invalid
+                    self._invalidate()
                     raise _error("mdb_txn_renew", rc)
             except IndexError:
                 txnpp = _ffi.new('MDB_txn **')
