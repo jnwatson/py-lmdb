@@ -319,12 +319,12 @@ class CursorReadOnlyTest(unittest.TestCase):
         Tests whether you can open a cursor on a sub-db at all in a read-only environment.
         '''
         path, env = testlib.temp_env(max_dbs=10)
-        db = env.open_db(b'foo')
+        env.open_db(b'foo')
         env.close()
         with lmdb.open(path, max_dbs=10, readonly=True) as env:
-            db = env.open_db(b'foo')
-            with env.begin(db=db) as txn:
-                with txn.cursor():
+            db2 = env.open_db(b'foo')
+            with env.begin(db=db2) as txn:
+                with txn.cursor(db=db2):
                     pass
 
 if __name__ == '__main__':
