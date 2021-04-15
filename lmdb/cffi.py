@@ -728,6 +728,7 @@ class Environment(object):
             raise _error("mdb_env_create", rc)
         self._env = envpp[0]
         self._deps = set()
+        self._creating_db_in_readonly = False
 
         self.set_mapsize(map_size)
 
@@ -1212,9 +1213,13 @@ class Environment(object):
             db = _Database(self, txn, key, reverse_key, dupsort, create,
                            integerkey, integerdup, dupfixed)
         else:
-            with self.begin(write=not self.readonly) as txn:
-                db = _Database(self, txn, key, reverse_key, dupsort, create,
-                               integerkey, integerdup, dupfixed)
+            try:
+                self._creating_db_in_readonly = True
+                with self.begin(write=not self.readonly) as txn:
+                    db = _Database(self, txn, key, reverse_key, dupsort, create,
+                                   integerkey, integerdup, dupfixed)
+            finally:
+                self._creating_db_in_readonly = False
         self._dbs[key] = db
         return db
 
@@ -1375,6 +1380,8 @@ class Transaction(object):
             self._write = True
         else:
             try:  # Exception catch in order to avoid racy 'if txns:' test
+                if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
+                    raise IndexError
                 self._txn = env._spare_txns.pop()
                 env._max_spare_txns += 1
                 rc = _lib.mdb_txn_renew(self._txn)
@@ -1465,6 +1472,8 @@ class Transaction(object):
             self._txn = _invalid
             self._invalidate()
             return True
+
+        return False
 
     def commit(self):
         """Commit the pending transaction.

@@ -1,5 +1,5 @@
 #
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2021 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -26,6 +26,8 @@ from __future__ import absolute_import
 from __future__ import with_statement
 import sys
 import unittest
+
+import lmdb
 
 import testlib
 from testlib import B
@@ -307,6 +309,23 @@ class PreloadTest(CursorTestBase):
 
         # Getting the value does prefault the data, even if we only get it by pointer
         assert minflts_after_value - minflts_after_key > 1000
+
+class CursorReadOnlyTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_cursor_readonly(self):
+        '''
+        Tests whether you can open a cursor on a sub-db at all in a read-only environment.
+        '''
+        path, env = testlib.temp_env(max_dbs=10)
+        env.open_db(b'foo')
+        env.close()
+        with lmdb.open(path, max_dbs=10, readonly=True) as env:
+            db2 = env.open_db(b'foo')
+            with env.begin(db=db2) as txn:
+                with txn.cursor(db=db2):
+                    pass
 
 if __name__ == '__main__':
     unittest.main()
