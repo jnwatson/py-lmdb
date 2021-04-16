@@ -1,3 +1,24 @@
+2021-04-15 v1.2.0
+* Update bundled LMDB to 0.9.29.
+
+* Add non-bundled testing to CI.
+
+* Remove wheel generation for 2.7 because the manylinux images no longer
+  support it.
+
+* Allow passing None as a value to transaction.del in CFFI implementation
+  for parity with cpython implementation.
+
+* Fix Cursor.put behavior on a dupsort DB with append=True.
+
+* Add warning to docs about use of Environment.set_mapsize.  This is currently
+an unresolved issue with upstream LMDB.
+
+* CFFI implementation:  fix a seg fault when open_db returns map full.
+
+* CFFI implementation:  fix a bug in open_db in a read-only environment.
+
+
 2021-02-05 v1.1.1
 * Dowgrade underlying LMDB to 0.9.26.  0.9.27 has a minor defect that will
   need to get resolved.
@@ -15,6 +36,7 @@
 
 * Upgrade underlying LMDB to 0.9.27.
 
+
 2020-08-28 v1.0.0
 * Start of new semantic versioning scheme.  This would be a minor version
   bump from the 0.99 release if it were semantically versioned.
@@ -23,6 +45,7 @@
   first released feature that requires a (very small) patch to the
   underlying C library.  By default, the patch will be applied unless
   this module is built with LMDB_PURE environment variable set.
+
 
 2020-08-13 v0.99
 * Fix lmdb.tool encoding issues.
