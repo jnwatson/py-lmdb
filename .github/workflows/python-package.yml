@@ -88,8 +88,6 @@ jobs:
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
-          # Sleep a random amount to avoid pypi DoS protection
-          python -c 'import time; import random; time.sleep(random.randrange(10.0))'
           python -m pip install wheel
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
