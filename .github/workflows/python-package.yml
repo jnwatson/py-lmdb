@@ -32,6 +32,11 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+          # Github Actions has trouble installing cffi 2/3 of the time with this combination
+          - python-version: 3.5
+            os: macos-latest
+            impl: cffi
+            purity: pure
 
         include:
           - python-version: 3.9
