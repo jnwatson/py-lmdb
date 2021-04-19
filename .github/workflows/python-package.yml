@@ -36,7 +36,6 @@ jobs:
           - python-version: 3.5
             os: macos-latest
             impl: cffi
-            purity: pure
 
         include:
           - python-version: 3.9
