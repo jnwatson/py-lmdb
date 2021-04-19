@@ -1,3 +1,6 @@
+2021-04-19 v1.2.1
+* Resolve CI bug where non-Linux wheels were not being published to PyPI.
+
 2021-04-15 v1.2.0
 * Update bundled LMDB to 0.9.29.
 
