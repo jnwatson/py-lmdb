@@ -32,10 +32,6 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
-          # Github Actions has trouble installing cffi 2/3 of the time with this combination
-          - python-version: 3.5
-            os: macos-latest
-            impl: cffi
 
         include:
           - python-version: 3.9
@@ -93,6 +89,8 @@ jobs:
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
           python -m pip install wheel
+          # Install this separately since sometimes Github Actions can't find it
+          python -m pip install cffi
           python -m pip install flake8 pytest patch-ng
           python setup.py develop sdist bdist_wheel
           ls dist
