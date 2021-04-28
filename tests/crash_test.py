@@ -280,8 +280,11 @@ class BadCursorTest(unittest.TestCase):
         txn2 = env.begin(write=False)
         self.assertRaises(lmdb.InvalidParameterError, txn2.cursor, db=db)
 
+MINDBSIZE = 64 * 1024 * 2  # certain ppcle Linux distros have a 64K page size
+
 if sys.version_info[:2] >= (3, 4):
     class MapResizeTest(unittest.TestCase):
+
         def tearDown(self):
             testlib.cleanup()
 
@@ -291,13 +294,26 @@ if sys.version_info[:2] >= (3, 4):
             Increase map size and fill up database, making sure that the root page is no longer
             accessible in the main process.
             '''
-            data = [i.to_bytes(4, 'little') for i in range(400)]
-            with lmdb.open(path, max_dbs=10, create=False, map_size=32000) as env:
+            with lmdb.open(path, max_dbs=10, create=False, map_size=MINDBSIZE) as env:
                 env.open_db(b'foo')
-                env.set_mapsize(64000)
-                with env.begin(write=True) as txn:
-                    for datum in data:
-                        txn.put(datum, b'0')
+                env.set_mapsize(MINDBSIZE * 2)
+                count = 0
+                try:
+                    # Figure out how many keyvals we can enter before we run out of space
+                    with env.begin(write=True) as txn:
+                        while True:
+                            datum = count.to_bytes(4, 'little')
+                            txn.put(datum, b'0')
+                            count += 1
+
+                except lmdb.MapFullError:
+                    # Now put (and commit) just short of that
+                    with env.begin(write=True) as txn:
+                        for i in range(count - 100):
+                            datum = i.to_bytes(4, 'little')
+                            txn.put(datum, b'0')
+                else:
+                    assert 0
 
         def test_opendb_resize(self):
             '''
@@ -306,9 +322,9 @@ if sys.version_info[:2] >= (3, 4):
             Would seg fault in cffi implementation
             '''
             mpctx = multiprocessing.get_context('spawn')
-            path, env = testlib.temp_env(max_dbs=10, map_size=32000)
+            path, env = testlib.temp_env(max_dbs=10, map_size=MINDBSIZE)
             env.close()
-            env = lmdb.open(path, max_dbs=10, map_size=32000, readonly=True)
+            env = lmdb.open(path, max_dbs=10, map_size=MINDBSIZE, readonly=True)
             proc = mpctx.Process(target=self.do_resize, args=(path,))
             proc.start()
             proc.join(5)
