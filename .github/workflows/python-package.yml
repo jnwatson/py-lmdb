@@ -32,6 +32,9 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+          # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
+          - python-version: 2.7
+            os: windows-latest
 
         include:
           - python-version: 3.9
@@ -76,11 +79,6 @@ jobs:
             echo "LMDB_FORCE_SYSTEM=1" >> $GITHUB_ENV;
             sudo apt-get install liblmdb-dev;
           fi
-
-      - name: Install Visual C++ for Python 2.7
-        if: runner.os == 'Windows' && matrix.python-version == '2.7'
-        run: |
-          choco install vcpython27 -f -y
 
       - name: Install dependencies
         run: |
