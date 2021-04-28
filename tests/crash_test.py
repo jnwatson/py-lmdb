@@ -310,7 +310,6 @@ if sys.version_info[:2] >= (3, 4):
                     # Now put (and commit) just short of that
                     with env.begin(write=True) as txn:
                         for i in range(count - 100):
-                            # print(i, flush=True)
                             datum = i.to_bytes(4, 'little')
                             txn.put(datum, b'0')
                 else:
