@@ -272,7 +272,7 @@ def cmd_dump(opts, args):
 def restore_cursor_from_fp(txn, fp, db):
     read = fp.read
     read1 = functools.partial(read, 1)
-    read_until = lambda sep: ''.join(iter(read1, sep))  # NOQA: E731
+    read_until = lambda sep: b''.join(iter(read1, sep))  # NOQA: E731
 
     rec_nr = 0
 
