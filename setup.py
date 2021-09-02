@@ -198,7 +198,7 @@ setup(
     long_description_content_type="text/plain",
     author='David Wilson',
     maintainer='Nic Watson',
-    license='OpenLDAP BSD',
+    license='OLDAP-2.8',
     url='http://github.com/jnwatson/py-lmdb/',
     packages=['lmdb'],
 
