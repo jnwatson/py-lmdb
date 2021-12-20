@@ -153,7 +153,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.3.3
         with:
           python-versions: >-
-              cp35-cp35m cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
           build-requirements: 'patch-ng'
 
       - name: What do we have
