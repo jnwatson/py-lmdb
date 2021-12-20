@@ -150,7 +150,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.3.3
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp35-cp35m cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -163,81 +163,6 @@ jobs:
           matrix.python-version == '3.9' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
-        with:
-          path: dist/lmdb*manylinux*.whl
-          name: manylinux
-
-  test_build_aarch64:
-    name: "${{ matrix.PYTHON }} aarch64 ${{ matrix.impl }} ${{ matrix.purity }}"
-    runs-on: ubuntu-latest
-    strategy:
-       matrix:
-        impl: [cpython, cffi]
-        purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39"]
-    steps:
-      - uses: actions/checkout@v2
-      - run: |
-          docker run --rm --privileged hypriot/qemu-register
-      - uses: docker://quay.io/pypa/manylinux2014_aarch64
-        with:
-          args: |
-              bash -c "set -xe;
-              mkdir -p /github/home/.cache/pip;
-              chown -R $(whoami) /github/home/.cache;
-              python --version;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
-              yum install -y libffi-devel;
-              .venv/bin/pip install -U pip wheel cffi six;
-              if \[ ${{ matrix.impl }} == cpython \] ; then
-                echo LMDB_FORCE_CPYTHON=1
-              else
-                echo LMDB_FORCE_CFFI=1
-              fi
-              if \[ ${{ matrix.purity }} == pure \] ; then
-                echo LMDB_PURE=1
-              elif \[ ${{ matrix.purity }} == system \] ; then
-                echo LMDB_FORCE_SYSTEM=1
-              fi
-              echo \"Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
-                cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
-              echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
-                cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
-              .venv/bin/pip install flake8 pytest patch-ng;
-              /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
-              ls dist;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
-              if \[ ${{ matrix.PYTHON }} != cp36-cp36 \] && \[ ${{ matrix.PYTHON }} != cp38-cp38 \] ; then
-                echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
-                /opt/python/${{ matrix.PYTHON }}/bin/python -m pytest;
-              fi;
-              if \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
-                /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
-              fi;"
-      - uses: actions/upload-artifact@v2
-        with:
-          name: "${{ runner.os }}-${{ matrix.PYTHON }}-\
-            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path: dist/lmdb-*.whl
-          
-      - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
-        with:
-          path: vers.txt
-          name: vers.txt     
-      - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
-        with:
-          path: dist/lmdb*.tar.gz
-          name: source        
-      - uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2014_aarch64
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
-        with:
-          python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
-          build-requirements: 'patch-ng'
-      - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: dist/lmdb*manylinux*.whl
           name: manylinux
