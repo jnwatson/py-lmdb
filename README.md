@@ -15,8 +15,3 @@ Python 2.7 is now end-of-life.  If you are still using Python 2.7, you should st
 
 That said, this project will continue to support running on Python 2.7 until Github Actions remove support for it.
 
-# Sponsored by The Vertex Project
-
-My current employer, [The Vertex Project](https://vertex.link/) is generously sponsoring my time to maintain py-lmdb.
-If you're a developer and you like open source and systems programming in Python, check us out.  If you're an 
-intelligence analyst, check out Vertex's Intelligence Analysis Platform, [Synapse](https://github.com/vertexproject/synapse).
