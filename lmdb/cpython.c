@@ -204,11 +204,8 @@ struct EnvObject {
     DbObject *main_db;
     /**  1 if env opened read-only; transactions must always be read-only. */
     int readonly;
-
-    /** Max free txns to keep on free_txn list. */
-    int max_spare_txns;
-    /** Spare read-only transaction list head. */
-    struct TransObject *spare_txns;
+    /** Spare read-only transaction . */
+    struct MDB_txn *spare_txn;
 };
 
 /** TransObject.flags bitfield values. */
@@ -240,8 +237,6 @@ struct TransObject {
     /** Number of mutations occurred since start of transaction. Required to
      * know when cursor key/value must be refreshed. */
     int mutations;
-    /** Next free read-only txn, or NULL. */
-    struct TransObject *spare_next;
 };
 
 /** lmdb.Cursor */
@@ -827,9 +822,11 @@ db_owner_check(DbObject *db, EnvObject *env)
 /* -------------------------------------------------------- */
 
 static PyObject *
-make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buffers)
+make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
+           int buffers)
 {
     MDB_txn *parent_txn;
+    MDB_txn *txn;
     TransObject *self;
     int flags;
     int rc;
@@ -857,40 +854,36 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
         parent_txn = parent->txn;
     }
 
-    if((!write) && env->spare_txns) {
-        self = env->spare_txns;
-        DEBUG("found freelist txn; self=%p self->txn=%p", self, self->txn)
-        env->spare_txns = self->spare_next;
+    if(write && env->readonly) {
+        const char *msg =
+            "Cannot start write transaction with read-only environment.";
+        return err_set(msg, EACCES);
+    }
 
-        UNLOCKED(rc, mdb_txn_renew(self->txn));
+    if((!write) && env->spare_txn) {
+        txn = env->spare_txn;
+        DEBUG("using cached txn", txn)
+        env->spare_txn = NULL;
+        UNLOCKED(rc, mdb_txn_renew(txn));
         if(rc) {
-            mdb_txn_abort(self->txn);
-            PyObject_Del(self);
-            return err_set("mdb_txn_begin", rc);
+            mdb_txn_abort(txn);
+            return err_set("mdb_txn_renew", rc);
         }
-
-        env->max_spare_txns++;
-        self->flags &= ~TRANS_SPARE;
-
-    } else {
-        MDB_txn *txn;
-        if(write && env->readonly) {
-            const char *msg = "Cannot start write transaction with read-only env";
-            return err_set(msg, EACCES);
-        }
-
+    }
+    else {
         flags = write ? 0 : MDB_RDONLY;
         UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &txn));
         if(rc) {
             return err_set("mdb_txn_begin", rc);
         }
-
-        if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
-            mdb_txn_abort(txn);
-            return NULL;
-        }
-        self->txn = txn;
     }
+
+    if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
+        mdb_txn_abort(txn);
+        return NULL;
+    }
+    self->txn = txn;
+
 
     OBJECT_INIT(self)
     LINK_CHILD(env, self)
@@ -904,7 +897,6 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write, int buf
 #endif
 
     self->mutations = 0;
-    self->spare_next = NULL;
     self->flags = 0;
     if(! write) {
         self->flags |= TRANS_RDONLY;
@@ -1121,22 +1113,25 @@ static PyTypeObject PyDatabase_Type = {
 static void
 trans_dealloc(TransObject *self);
 
+static void
+txn_abort(MDB_txn *txn);
+
 static int
 env_clear(EnvObject *self)
 {
-    MDEBUG("killing env..")
+    MDB_txn * txn;
+
+    MDEBUG("env_clear")
 
     INVALIDATE(self)
     self->valid = 0;
     Py_CLEAR(self->main_db);
 
-    /* Force trans_dealloc() to free by setting avail size to 0 */
-    self->max_spare_txns = 0;
-    while(self->spare_txns) {
-        TransObject *cur = self->spare_txns;
-        MDEBUG("killing spare txn %p", self->spare_txns)
-        self->spare_txns = cur->spare_next;
-        trans_dealloc(cur);
+    txn = self->spare_txn;
+    if(txn) {
+        MDEBUG("killing spare txn %p", txn);
+        txn_abort(txn);
+        self->spare_txn = NULL;
     }
 
     if(self->env) {
@@ -1242,8 +1237,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->weaklist = NULL;
     self->main_db = NULL;
     self->env = NULL;
-    self->max_spare_txns = arg.max_spare_txns;
-    self->spare_txns = NULL;
+    self->spare_txn = NULL;
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -2130,7 +2124,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     };
 
     size_t buffer_pos = 0, buffer_size = 8;
-    size_t key_size, val_size, item_size;
+    size_t key_size, val_size, item_size = 0;
     char *buffer = NULL;
 
     static PyObject *cache = NULL;
@@ -2280,6 +2274,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         size_t newsize = buffer_pos * item_size;
         buffer = realloc(buffer, newsize);
         rc = PyBuffer_FillInfo(&pybuf, NULL, buffer, newsize, 0, PyBUF_SIMPLE);
+        // FIXME:  check rc
         return PyMemoryView_FromBuffer(&pybuf);
     } else {
         return pylist;
@@ -2291,7 +2286,7 @@ failiter:
 fail:
     if (buffer) {
         free(buffer);
-    };
+    }
     return NULL;
 }
 
@@ -3203,19 +3198,27 @@ static PyTypeObject PyIterator_Type = {
 /* Transactions */
 /* ------------ */
 
+static void
+txn_abort(MDB_txn *self)
+{
+    Py_BEGIN_ALLOW_THREADS
+    MDEBUG("aborting")
+    mdb_txn_abort(self);
+    Py_END_ALLOW_THREADS
+}
+
+
 static int
 trans_clear(TransObject *self)
 {
+    MDEBUG("clearing trans")
     INVALIDATE(self)
 #ifdef HAVE_MEMSINK
     ms_notify((PyObject *) self, &self->sink_head);
 #endif
 
     if(self->txn) {
-        Py_BEGIN_ALLOW_THREADS
-        MDEBUG("aborting")
-        mdb_txn_abort(self->txn);
-        Py_END_ALLOW_THREADS
+        txn_abort(self->txn);
         self->txn = NULL;
     }
     MDEBUG("db is/was %p", self->db)
@@ -3234,28 +3237,18 @@ trans_clear(TransObject *self)
 static void
 trans_dealloc(TransObject *self)
 {
+    MDB_txn * txn = self->txn;
     if(self->weaklist != NULL) {
         MDEBUG("Clearing weaklist..")
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
-    if(self->env && self->txn &&
-       (self->env->max_spare_txns > 0) && (self->flags & TRANS_RDONLY)) {
+    if(txn && self->env && !self->env->spare_txn &&
+      (self->flags & TRANS_RDONLY)) {
         MDEBUG("caching trans")
-        if(! (self->flags & TRANS_SPARE)) {
-            MDEBUG("resetting")
-            mdb_txn_reset(self->txn);
-            self->flags |= TRANS_SPARE;
-        }
-        self->spare_next = self->env->spare_txns;
-        self->env->spare_txns = self;
-        self->env->max_spare_txns--;
-        Py_INCREF(self);
-
-        Py_CLEAR(self->db);
-        UNLINK_CHILD(self->env, self)
-        Py_CLEAR(self->env);
-        return;
+        mdb_txn_reset(txn);
+        self->env->spare_txn = txn;
+        self->txn = NULL;
     }
 
     MDEBUG("deleting trans")
