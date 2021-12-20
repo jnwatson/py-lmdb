@@ -826,6 +826,7 @@ class SpareTxnTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @unittest.skip('Temporarily removed this functionality')
     def test_none(self):
         _, env = testlib.temp_env(max_spare_txns=0)
         assert 0 == reader_count(env)
