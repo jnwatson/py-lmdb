@@ -35,6 +35,9 @@ jobs:
           # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
           - python-version: 2.7
             os: windows-latest
+          # Doesn't seem to exist on github MacOS
+          - python-version: pypy-3.6
+            os: macos-latest
 
         include:
           - python-version: 3.9
@@ -208,6 +211,9 @@ jobs:
           # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
           - python-version: '2.7'
             os: windows-latest
+          # Doesn't seem to exist on github MacOS
+          - python-version: pypy-3.6
+            os: macos-latest
 
         include:
           # Ubuntu artifacts apply to all python versions
