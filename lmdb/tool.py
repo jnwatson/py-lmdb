@@ -272,33 +272,33 @@ def cmd_dump(opts, args):
 def restore_cursor_from_fp(txn, fp, db):
     read = fp.read
     read1 = functools.partial(read, 1)
-    read_until = lambda sep: ''.join(iter(read1, sep))  # NOQA: E731
+    read_until = lambda sep: b''.join(iter(read1, sep))  # NOQA: E731
 
     rec_nr = 0
 
     while True:
         rec_nr += 1
         plus = read(1)
-        if plus == '\n':
+        if plus == b'\n':
             break
-        elif plus != '+':
+        elif plus != b'+':
             die('bad or missing plus, line/record #%d', rec_nr)
 
         try:
-            klen = int(read_until(','), 10)
-            dlen = int(read_until(':'), 10)
+            klen = int(read_until(b','), 10)
+            dlen = int(read_until(b':'), 10)
         except ValueError:
             die('bad or missing length, line/record #%d', rec_nr)
 
         key = read(klen)
-        if read(2) != '->':
+        if read(2) != b'->':
             die('bad or missing separator, line/record #%d', rec_nr)
 
         data = read(dlen)
         if (len(key) + len(data)) != (klen + dlen):
             die('short key or data, line/record #%d', rec_nr)
 
-        if read(1) != '\n':
+        if read(1) != b'\n':
             die('bad line ending, line/record #%d', rec_nr)
 
         txn.put(key, data, db=db)
