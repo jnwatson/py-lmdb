@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-18.04, macos-latest, windows-latest]
-        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, pypy-2.7, pypy-3.6]
+        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -40,7 +40,7 @@ jobs:
             os: macos-latest
 
         include:
-          - python-version: 3.9
+          - python-version: '3.10'
             os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
             impl: cpython
             purity: system
@@ -120,14 +120,14 @@ jobs:
 
       - name: Get version
         if: >-
-          matrix.python-version == '3.9' && runner.os == 'Linux' &&
+          matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         run: |
           python -c 'import lmdb; print(lmdb.__version__, end="")' > vers.txt
 
       - name: Save version
         if: >-
-          matrix.python-version == '3.9' && runner.os == 'Linux' &&
+          matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -138,7 +138,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && runner.os == 'Linux' &&
+          matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
         uses: actions/upload-artifact@v2
@@ -148,12 +148,12 @@ jobs:
 
       - name: Build manylinux wheel
         if: >-
-          matrix.python-version == '3.9' && runner.os == 'Linux' &&
+          matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: RalfG/python-wheels-manylinux-build@v0.3.3
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -163,7 +163,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.9' && runner.os == 'Linux' &&
+          matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v2
         with:
@@ -177,7 +177,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39"]
+        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310"]
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -214,7 +214,7 @@ jobs:
                 echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
                 /opt/python/${{ matrix.PYTHON }}/bin/python -m pytest;
               fi;
-              if \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
+              if \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
                 /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
               fi;"
       - uses: actions/upload-artifact@v2
@@ -222,25 +222,25 @@ jobs:
           name: "${{ runner.os }}-${{ matrix.PYTHON }}-\
             ${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
-          
+
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: vers.txt
-          name: vers.txt     
+          name: vers.txt
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: dist/lmdb*.tar.gz
-          name: source        
+          name: source
       - uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2014_aarch64
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310
           build-requirements: 'patch-ng'
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: dist/lmdb*manylinux*.whl
           name: manylinux
@@ -253,7 +253,7 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', pypy-2.7, pypy-3.6]
+        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -276,6 +276,8 @@ jobs:
             impl: cffi
           - python-version: '3.9'
             impl: cffi
+          - python-version: '3.10'
+            impl: cffi
           # Github Actions doesn't have a 3.4/macos-latest distro
           - python-version: 3.4
             os: macos-latest
@@ -293,7 +295,7 @@ jobs:
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-18.04
-            python-version: '3.9'
+            python-version: '3.10'
             impl: cpython
             purity: with-pylmdb-mods
 
