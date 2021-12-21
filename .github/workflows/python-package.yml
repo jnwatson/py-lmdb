@@ -153,7 +153,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.3.3
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -177,7 +177,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39"]
+        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310"]
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -214,7 +214,7 @@ jobs:
                 echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
                 /opt/python/${{ matrix.PYTHON }}/bin/python -m pytest;
               fi;
-              if \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
+              if \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
                 /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
               fi;"
       - uses: actions/upload-artifact@v2
@@ -224,23 +224,23 @@ jobs:
           path: dist/lmdb-*.whl
 
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: vers.txt
           name: vers.txt
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: dist/lmdb*.tar.gz
           name: source
       - uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2014_aarch64
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310
           build-requirements: 'patch-ng'
       - uses: actions/upload-artifact@v2
-        if: \[ ${{ matrix.PYTHON }} == cp39-cp39 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
+        if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           path: dist/lmdb*manylinux*.whl
           name: manylinux
