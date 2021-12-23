@@ -1122,7 +1122,7 @@ class Environment(object):
         ::
 
             >>> env = lmdb.open('/tmp/test', max_dbs=2)
-            >>> with env.begin(write=True) as txn
+            >>> with env.begin(write=True) as txn:
             ...     txn.put('somename', 'somedata')
 
             >>> # Error: database cannot share name of existing key!
