@@ -16,14 +16,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-18.04, macos-latest, windows-latest]
-        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.6]
+        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
         exclude:
           - python-version: pypy-2.7
             impl: cpython
-          - python-version: pypy-3.6
+          - python-version: pypy-3.9
             impl: cpython
           # Github actions doesn't have a 3.4/macos-latest distro
           - python-version: 3.4
@@ -32,11 +32,14 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+          # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
+          - python-version: 3.5
+            os: windows-latest
           # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
           - python-version: 2.7
             os: windows-latest
           # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.6
+          - python-version: pypy-3.9
             os: macos-latest
 
         include:
@@ -253,14 +256,14 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.6]
+        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.9]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
         exclude:
           - python-version: 'pypy-2.7'
             impl: cpython
-          - python-version: 'pypy-3.6'
+          - python-version: 'pypy-3.9'
             impl: cpython
           - python-version: '2.7'
             impl: cffi
@@ -287,11 +290,14 @@ jobs:
           # versions)
           - python-version: 3.4
             os: windows-latest
+          # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
+          - python-version: 3.5
+            os: windows-latest
           # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
           - python-version: '2.7'
             os: windows-latest
           # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.6
+          - python-version: pypy-3.9
             os: macos-latest
 
         include:
