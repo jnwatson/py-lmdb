@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-18.04, macos-latest, windows-latest]
-        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', pypy-2.7, pypy-3.6]
+        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -177,7 +177,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310"]
+        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311"]
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -253,7 +253,7 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', pypy-2.7, pypy-3.6]
+        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.6]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -277,6 +277,8 @@ jobs:
           - python-version: '3.9'
             impl: cffi
           - python-version: '3.10'
+            impl: cffi
+          - python-version: '3.11'
             impl: cffi
           # Github Actions doesn't have a 3.4/macos-latest distro
           - python-version: 3.4
