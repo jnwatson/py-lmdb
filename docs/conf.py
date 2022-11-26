@@ -43,7 +43,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'lmdb'
-copyright = u'2013-2019 David Wilson, 2019-2020 Nic Watson'
+copyright = u'2013-2019 David Wilson, 2019-2022 Nic Watson'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
