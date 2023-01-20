@@ -1182,7 +1182,7 @@ class Environment(object):
 
             `integerdup`:
                 If ``True``, values in the
-                database are C unsigned or ``size_t`` integers encode din
+                database are C unsigned or ``size_t`` integers encoded in
                 native byte order.  Implies `dupsort` and `dupfixed` are
                 ``True``.
 
