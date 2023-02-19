@@ -1,5 +1,5 @@
 #
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2021 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -32,22 +32,17 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 
-import os
+import sys
+import itertools
 import random
 import unittest
+import multiprocessing
 
 import lmdb
 import testlib
 
 from testlib import B
 from testlib import O
-
-
-try:
-    next(iter([1]))
-except NameError: # Python2.5.
-    def next(it):
-        return it.next()
 
 
 class CrashTest(unittest.TestCase):
@@ -74,11 +69,6 @@ class CrashTest(unittest.TestCase):
     def testDoubleClose(self):
         self.env.close()
         self.env.close()
-
-    def testDbDoubleClose(self):
-        db = self.env.open_db(key=B('dave3'))
-        #db.close()
-        #db.close()
 
     def testTxnCloseActiveIter(self):
         with self.env.begin() as txn:
@@ -193,6 +183,153 @@ class MultiCursorDeleteTest(unittest.TestCase):
 
         assert deleted == len(keys), deleted
 
+
+class TxnFullTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_17bf75b12eb94d9903cd62329048b146d5313bad(self):
+        """
+        me_txn0 previously cached MDB_TXN_ERROR permanently. Fixed by
+        17bf75b12eb94d9903cd62329048b146d5313bad.
+        """
+        path, env = testlib.temp_env(map_size=4096 * 9, sync=False, max_spare_txns=0)
+        for i in itertools.count():
+            try:
+                with env.begin(write=True) as txn:
+                    txn.put(B(str(i)), B(str(i)))
+            except lmdb.MapFullError:
+                break
+
+        # Should not crash with MDB_BAD_TXN:
+        with env.begin(write=True) as txn:
+            txn.delete(B('1'))
+
+
+class EmptyIterTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_python3_iternext_segfault(self):
+        # https://github.com/dw/py-lmdb/issues/105
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        cur = txn.cursor()
+        ite = cur.iternext()
+        nex = getattr(ite, 'next', getattr(ite, '__next__', None))
+        assert nex is not None
+        self.assertRaises(StopIteration, nex)
+
+
+class MultiputTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_multiput_segfault(self):
+        # http://github.com/jnwatson/py-lmdb/issues/173
+        _, env = testlib.temp_env()
+        db = env.open_db(b'foo', dupsort=True)
+        txn = env.begin(db=db, write=True)
+        txn.put(b'a', b'\x00\x00\x00\x00\x00\x00\x00\x00')
+        txn.put(b'a', b'\x05')
+        txn.put(b'a', b'\t')
+        txn.put(b'a', b'\r')
+        txn.put(b'a', b'\x11')
+        txn.put(b'a', b'\x15')
+        txn.put(b'a', b'\x19')
+        txn.put(b'a', b'\x1d')
+        txn.put(b'a', b'!')
+        txn.put(b'a', b'%')
+        txn.put(b'a', b')')
+        txn.put(b'a', b'-')
+        txn.put(b'a', b'1')
+        txn.put(b'a', b'5')
+        txn.commit()
+
+class InvalidArgTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_duplicate_arg(self):
+        # https://github.com/jnwatson/py-lmdb/issues/203
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        c = txn.cursor()
+        self.assertRaises(TypeError, c.get, b'a', key=True)
+
+class BadCursorTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_cursor_open_failure(self):
+        '''
+        Test the error path for when mdb_cursor_open fails
+
+        Note:
+            this only would crash if cpython is built with Py_TRACE_REFS
+        '''
+        # https://github.com/jnwatson/py-lmdb/issues/216
+        path, env = testlib.temp_env()
+        db = env.open_db(b'db', dupsort=True)
+        env.close()
+        del env
+
+        env = lmdb.open(path, readonly=True, max_dbs=4)
+        txn1 = env.begin(write=False)
+        db = env.open_db(b'db', dupsort=True, txn=txn1)
+        txn2 = env.begin(write=False)
+        self.assertRaises(lmdb.InvalidParameterError, txn2.cursor, db=db)
+
+MINDBSIZE = 64 * 1024 * 2  # certain ppcle Linux distros have a 64K page size
+
+if sys.version_info[:2] >= (3, 4):
+    class MapResizeTest(unittest.TestCase):
+
+        def tearDown(self):
+            testlib.cleanup()
+
+        @staticmethod
+        def do_resize(path):
+            '''
+            Increase map size and fill up database, making sure that the root page is no longer
+            accessible in the main process.
+            '''
+            with lmdb.open(path, max_dbs=10, create=False, map_size=MINDBSIZE) as env:
+                env.open_db(b'foo')
+                env.set_mapsize(MINDBSIZE * 2)
+                count = 0
+                try:
+                    # Figure out how many keyvals we can enter before we run out of space
+                    with env.begin(write=True) as txn:
+                        while True:
+                            datum = count.to_bytes(4, 'little')
+                            txn.put(datum, b'0')
+                            count += 1
+
+                except lmdb.MapFullError:
+                    # Now put (and commit) just short of that
+                    with env.begin(write=True) as txn:
+                        for i in range(count - 100):
+                            datum = i.to_bytes(4, 'little')
+                            txn.put(datum, b'0')
+                else:
+                    assert 0
+
+        def test_opendb_resize(self):
+            '''
+            Test that we correctly handle a MDB_MAP_RESIZED in env.open_db.
+
+            Would seg fault in cffi implementation
+            '''
+            mpctx = multiprocessing.get_context('spawn')
+            path, env = testlib.temp_env(max_dbs=10, map_size=MINDBSIZE)
+            env.close()
+            env = lmdb.open(path, max_dbs=10, map_size=MINDBSIZE, readonly=True)
+            proc = mpctx.Process(target=self.do_resize, args=(path,))
+            proc.start()
+            proc.join(5)
+            assert proc.exitcode is not None
+            self.assertRaises(lmdb.MapResizedError, env.open_db, b'foo')
 
 if __name__ == '__main__':
     unittest.main()

@@ -22,13 +22,14 @@
 
 from __future__ import absolute_import
 import atexit
-import contextlib
+import gc
 import os
 import shutil
 import stat
 import sys
 import tempfile
 import traceback
+import unittest
 
 try:
     import __builtin__
@@ -36,7 +37,6 @@ except ImportError:
     import builtins as __builtin__
 
 import lmdb
-
 
 _cleanups = []
 
@@ -49,6 +49,10 @@ def cleanup():
             traceback.print_exc()
 
 atexit.register(cleanup)
+
+class LmdbTest(unittest.TestCase):
+    def tearDown(self):
+        cleanup()
 
 
 def temp_dir(create=True):
@@ -88,10 +92,19 @@ def path_mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
-# Handle moronic Python >=3.0 <3.3.
+def debug_collect():
+    if hasattr(gc, 'set_debug') and hasattr(gc, 'get_debug'):
+        old = gc.get_debug()
+        gc.set_debug(gc.DEBUG_LEAK)
+        gc.collect()
+        gc.set_debug(old)
+    else:
+        for x in range(10):
+            # PyPy doesn't collect objects with __del__ on first attempt.
+            gc.collect()
+
 UnicodeType = getattr(__builtin__, 'unicode', str)
 BytesType = getattr(__builtin__, 'bytes', str)
-
 
 try:
     INT_TYPES = (int, long)
@@ -104,11 +117,9 @@ try:
     B = lambda s: s
 except TypeError: # Python3.x, requires encoding parameter.
     B = lambda s: bytes(s, 'ascii')
-except NameError: # Python<=2.5.
-    B = lambda s: s
 
 # BL('s1', 's2') -> ['bytes1', 'bytes2']
-BL = lambda *args: map(B, args)
+BL = lambda *args: list(map(B, args))
 # TS('s1', 's2') -> ('bytes1', 'bytes2')
 BT = lambda *args: tuple(B(s) for s in args)
 # O(int) -> length-1 bytes
@@ -122,9 +133,30 @@ ITEMS = [(k, B('')) for k in KEYS]
 REV_ITEMS = ITEMS[::-1]
 VALUES = [B('') for k in KEYS]
 
-def putData(t, db=None):
-    for k, v in ITEMS:
+KEYS2 = BL('a', 'b', 'baa', 'd', 'e', 'f', 'g', 'h')
+ITEMS2 = [(k, B('')) for k in KEYS2]
+REV_ITEMS2 = ITEMS2[::-1]
+VALUES2 = [B('') for k in KEYS2]
+
+KEYSFIXED = BL('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+VALUES_MULTI = [(B('r'), B('s')) for k in KEYSFIXED]
+ITEMS_MULTI_FIXEDKEY = [
+    (kv[0], v) for kv in list(zip(KEYSFIXED, VALUES_MULTI)) for v in kv[1]
+    ]
+
+def _put_items(items, t, db=None):
+    for k, v in items:
         if db:
             t.put(k, v, db=db)
         else:
             t.put(k, v)
+
+
+def putData(t, db=None):
+    _put_items(ITEMS, t, db=db)
+
+def putBigData(t, db=None):
+    _put_items(ITEMS2, t, db=db)
+
+def putBigDataMultiFixed(t, db=None):
+    _put_items(ITEMS_MULTI_FIXEDKEY, t, db=db)

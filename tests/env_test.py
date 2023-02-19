@@ -23,21 +23,27 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 import os
-import signal
 import sys
 import unittest
+import weakref
 
 import testlib
 from testlib import B
-from testlib import BT
 from testlib import OCT
 from testlib import INT_TYPES
 from testlib import UnicodeType
 
 import lmdb
 
+# Whether we have the patch that allows env.copy* to take a txn
+have_txn_patch = lmdb.version(subpatch=True)[3]
 
 NO_READERS = UnicodeType('(no active readers)\n')
+
+try:
+    PAGE_SIZE = os.sysconf(os.sysconf_names['SC_PAGE_SIZE'])
+except (AttributeError, KeyError, OSError):
+    PAGE_SIZE = 4096
 
 
 class VersionTest(unittest.TestCase):
@@ -50,6 +56,11 @@ class VersionTest(unittest.TestCase):
         assert all(isinstance(i, INT_TYPES) for i in ver)
         assert all(i >= 0 for i in ver)
 
+    def test_version_subpatch(self):
+        ver = lmdb.version(subpatch=True)
+        assert len(ver) == 4
+        assert all(isinstance(i, INT_TYPES) for i in ver)
+        assert all(i >= 0 for i in ver)
 
 class OpenTest(unittest.TestCase):
     def tearDown(self):
@@ -71,6 +82,13 @@ class OpenTest(unittest.TestCase):
     def test_bad_size(self):
         self.assertRaises(OverflowError,
             lambda: testlib.temp_env(map_size=-123))
+
+    def test_tiny_size(self):
+        _, env = testlib.temp_env(map_size=10)
+        def txn():
+            with env.begin(write=True) as txn:
+                txn.put(B('a'), B('a'))
+        self.assertRaises(lmdb.MapFullError, txn)
 
     def test_subdir_false_junk(self):
         path = testlib.temp_file()
@@ -157,6 +175,10 @@ class OpenTest(unittest.TestCase):
             assert env.flags()['map_async'] == flag
 
     def test_mode_subdir_create(self):
+        if sys.platform == 'win32':
+            # Mode argument is ignored on Windows; see lmdb.h
+            return
+
         oldmask = os.umask(0)
         try:
             for mode in OCT('777'), OCT('755'), OCT('700'):
@@ -170,6 +192,10 @@ class OpenTest(unittest.TestCase):
             os.umask(oldmask)
 
     def test_mode_subdir_nocreate(self):
+        if sys.platform == 'win32':
+            # Mode argument is ignored on Windows; see lmdb.h
+            return
+
         oldmask = os.umask(0)
         try:
             for mode in OCT('777'), OCT('755'), OCT('700'):
@@ -211,6 +237,29 @@ class OpenTest(unittest.TestCase):
             dbs = [env.open_db(B('db%d' % i)) for i in range(val)]
             self.assertRaises(lmdb.DbsFullError,
                 lambda: env.open_db(B('toomany')))
+
+
+class SetMapSizeTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_invalid(self):
+        _, env = testlib.temp_env()
+        env.close()
+        self.assertRaises(Exception,
+            lambda: env.set_mapsize(999999))
+
+    def test_negative(self):
+        _, env = testlib.temp_env()
+        self.assertRaises(OverflowError,
+            lambda: env.set_mapsize(-2015))
+
+    def test_applied(self):
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        assert env.info()['map_size'] == PAGE_SIZE * 8
+
+        env.set_mapsize(PAGE_SIZE * 16)
+        assert env.info()['map_size'] == PAGE_SIZE * 16
 
 
 class CloseTest(unittest.TestCase):
@@ -375,7 +424,13 @@ class OtherMethodsTest(unittest.TestCase):
         txn.commit()
 
         dest_dir = testlib.temp_dir()
-        env.copy(dest_dir)
+
+        if have_txn_patch:
+            with env.begin() as txn:
+                self.assertRaises(Exception,
+                                  lambda: env.copy(dest_dir, txn=txn))
+
+        env.copy(dest_dir, compact=True)
         assert os.path.exists(dest_dir + '/data.mdb')
 
         cenv = lmdb.open(dest_dir)
@@ -400,11 +455,34 @@ class OtherMethodsTest(unittest.TestCase):
         ctxn = cenv.begin()
         assert ctxn.get(B('a')) == B('b')
 
+        # Test copy with transaction provided
+        dest_dir = testlib.temp_dir()
+        with env.begin(write=True) as txn:
+            copy_txn = env.begin()
+            txn.put(B('b'), B('b'))
+        assert ctxn.get(B('b')) is None
+
+        if have_txn_patch:
+
+            env.copy(dest_dir, compact=True, txn=copy_txn)
+            assert os.path.exists(dest_dir + '/data.mdb')
+
+            cenv = lmdb.open(dest_dir)
+            ctxn = cenv.begin()
+            assert ctxn.get(B('a')) == B('b')
+            # Verify that the write that occurred outside the txn isn't seen in the
+            # copy
+            assert ctxn.get(B('b')) is None
+
+        else:
+            self.assertRaises(Exception,
+                              lambda: env.copy(dest_dir, compact=True, txn=copy_txn))
+
         env.close()
         self.assertRaises(Exception,
             lambda: env.copy(testlib.temp_dir()))
 
-    def test_copyfd(self):
+    def test_copyfd_compact(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
         txn.put(B('a'), B('b'))
@@ -417,13 +495,38 @@ class OtherMethodsTest(unittest.TestCase):
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()
         assert dtxn.get(B('a')) == B('b')
+        fp.close()
+
+        # Test copy with transaction provided
+        dst_path = testlib.temp_file(create=False)
+        fp = open(dst_path, 'wb')
+        with env.begin(write=True) as txn:
+            copy_txn = env.begin()
+            txn.put(B('b'), B('b'))
+        assert dtxn.get(B('b')) is None
+
+        if have_txn_patch:
+
+            env.copyfd(fp.fileno(), compact=True, txn=copy_txn)
+
+            dstenv = lmdb.open(dst_path, subdir=False)
+            dtxn = dstenv.begin()
+            assert dtxn.get(B('a')) == B('b')
+            # Verify that the write that occurred outside the txn isn't seen in the
+            # copy
+            assert dtxn.get(B('b')) is None
+            dstenv.close()
+
+        else:
+            self.assertRaises(Exception,
+                lambda: env.copyfd(fp.fileno(), compact=True, txn=copy_txn))
 
         env.close()
         self.assertRaises(Exception,
             lambda: env.copyfd(fp.fileno()))
         fp.close()
 
-    def test_copyfd_compact(self):
+    def test_copyfd(self):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
         txn.put(B('a'), B('b'))
@@ -431,7 +534,12 @@ class OtherMethodsTest(unittest.TestCase):
 
         dst_path = testlib.temp_file(create=False)
         fp = open(dst_path, 'wb')
-        env.copyfd(fp.fileno(), compact=True)
+
+        if have_txn_patch:
+            with env.begin() as txn:
+                self.assertRaises(Exception,
+                                  lambda: env.copyfd(fp.fileno(), txn=txn))
+        env.copyfd(fp.fileno())
 
         dstenv = lmdb.open(dst_path, subdir=False)
         dtxn = dstenv.begin()
@@ -459,6 +567,10 @@ class OtherMethodsTest(unittest.TestCase):
         os._exit(0)
 
     def test_reader_check(self):
+        if sys.platform == 'win32':
+            # Stale writers are cleared automatically on Windows, see lmdb.h
+            return
+
         path, env = testlib.temp_env(max_spare_txns=0)
         rc = env.reader_check()
         assert rc == 0
@@ -518,6 +630,7 @@ class BeginTest(unittest.TestCase):
     def test_bind_db(self):
         _, env = testlib.temp_env()
         main = env.open_db(None)
+        self.assertRaises(ValueError, lambda: env.open_db(None, dupsort=True))
         sub = env.open_db(B('db1'))
 
         txn = env.begin(write=True, db=sub)
@@ -624,7 +737,13 @@ class OpenDbTest(unittest.TestCase):
         db1 = env.open_db(B('subdb1'), txn=txn)
         db2 = env.open_db(B('subdb2'), txn=txn)
         for db in db1, db2:
-            assert db.flags(txn) == {'reverse_key': False, 'dupsort': False}
+            assert db.flags(txn) == {
+                'dupfixed': False,
+                'dupsort': False,
+                'integerdup': False,
+                'integerkey': False,
+                'reverse_key': False,
+            }
         txn.commit()
 
     def test_reopen(self):
@@ -634,9 +753,13 @@ class OpenDbTest(unittest.TestCase):
         env = lmdb.open(path, max_dbs=10)
         db1 = env.open_db(B('subdb1'))
 
-    FLAG_SETS = [(flag, val)
-                 for flag in ('reverse_key', 'dupsort')
-                 for val in (True, False)]
+    FLAG_SETS = [
+        (flag, val)
+        for flag in (
+            'reverse_key', 'dupsort', 'integerkey', 'integerdup', 'dupfixed'
+        )
+        for val in (True, False)
+    ]
 
     def test_flags(self):
         path, env = testlib.temp_env()
@@ -646,6 +769,9 @@ class OpenDbTest(unittest.TestCase):
             key = B('%s-%s' % (flag, val))
             db = env.open_db(key, txn=txn, **{flag: val})
             assert db.flags(txn)[flag] == val
+            assert db.flags(None)[flag] == val
+            assert db.flags()[flag] == val
+            self.assertRaises(TypeError, lambda: db.flags(1, 2, 3))
 
         txn.commit()
         # Test flag persistence.
@@ -658,6 +784,41 @@ class OpenDbTest(unittest.TestCase):
             db = env.open_db(key, txn=txn)
             assert db.flags(txn)[flag] == val
 
+    def test_readonly_env_main(self):
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, readonly=True)
+        db = env.open_db(None)
+
+    def test_readonly_env_sub_noexist(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db(B('node_schedules'), create=False))
+
+    def test_readonly_env_sub_eperm(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        self.assertRaises(lmdb.ReadonlyError,
+            lambda: env.open_db(B('node_schedules'), create=True))
+
+    def test_readonly_env_sub(self):
+        # https://github.com/dw/py-lmdb/issues/109
+        path, env = testlib.temp_env()
+        assert env.open_db(B('node_schedules')) is not None
+        env.close()
+
+        env = lmdb.open(path, max_dbs=10, readonly=True)
+        db = env.open_db(B('node_schedules'), create=False)
+        assert db is not None
+
 
 reader_count = lambda env: env.readers().count('\n') - 1
 
@@ -665,6 +826,7 @@ class SpareTxnTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @unittest.skip('Temporarily removed this functionality')
     def test_none(self):
         _, env = testlib.temp_env(max_spare_txns=0)
         assert 0 == reader_count(env)
@@ -708,6 +870,41 @@ class SpareTxnTest(unittest.TestCase):
         t3.abort()
         del t3
         assert 1 == reader_count(env)  # 1 cached
+
+
+class LeakTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_open_unref_does_not_leak(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        ref = weakref.ref(env)
+        env = None
+        testlib.debug_collect()
+        assert ref() is None
+
+    def test_open_close_does_not_leak(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        env.close()
+        ref = weakref.ref(env)
+        env = None
+        testlib.debug_collect()
+        assert ref() is None
+
+    def test_weakref_callback_invoked_once(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        env.close()
+        count = [0]
+        def callback(ref):
+            count[0] += 1
+        ref = weakref.ref(env, callback)
+        env = None
+        testlib.debug_collect()
+        assert ref() is None
+        assert count[0] == 1
 
 
 if __name__ == '__main__':

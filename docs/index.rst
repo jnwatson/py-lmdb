@@ -9,15 +9,15 @@ lmdb
     :maxdepth: 2
 
 This is a universal Python binding for the `LMDB 'Lightning' Database
-<http://symas.com/mdb/>`_. Two variants are provided and automatically selected
-during install: a `CFFI <http://cffi.readthedocs.org/en/release-0.5/>`_ variant
-that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.6,
-and a C extension that supports CPython 2.5-2.7 and >=3.3. Both variants
+<http://lmdb.tech/>`_. Two variants are provided and automatically selected
+during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
+that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.7,
+and a C extension that supports CPython >=2.7 and >=3.4. Both variants
 provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
 
-* Ordered map interface (keys are always sorted)
+* Ordered map interface (keys are always lexicographically sorted).
 * Reader/writer transactions: readers don't block writers, writers don't block
   readers. Each environment supports one concurrent write transaction.
 * Read transactions are extremely cheap.
@@ -65,6 +65,11 @@ built statically by default. If your system distribution includes LMDB, set the
 ``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
 and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
+By default, the LMDB library is patched before building.  This patch (located
+at ``lib/py-lmdb/env-copy-txn.patch``) provides a minor feature:  the ability
+to copy/backup an environment under a particular transaction.   If you prefer
+to bypass the patch, set the environment variable ``LMDB_PURE``.
+
 The CFFI variant depends on CFFI, which in turn depends on ``libffi``, which
 may need to be installed from a package. On CPython, both variants additionally
 depend on the CPython development headers. On Debian/Ubuntu:
@@ -100,7 +105,7 @@ Getting Help
 
 Before getting in contact, please ensure you have thoroughly reviewed this
 documentation, and if applicable, the associated
-`official Doxygen documentation <http://symas.com/mdb/doc/>`_.
+`official Doxygen documentation <http://lmdb.tech/doc/>`_.
 
 If you have found a bug, please report it on the `GitHub issue tracker
 <https://github.com/dw/py-lmdb/issues>`_, or mail it to the list below if
@@ -151,7 +156,9 @@ Space usage can be monitored using :py:meth:`Environment.stat`:
              'psize': 4096L}
 
 This database contains 3,761,848 records and no values were spilled
-(``overflow_pages``).
+(``overflow_pages``).  `Environment.stat` only return information for the
+default database.  If named databases are used, you must add the results
+from `Transaction.stat` on each named database.
 
 By default record keys are limited to 511 bytes in length, however this can be
 adjusted by rebuilding the library. The compile-time key length can be queried
@@ -199,10 +206,8 @@ moment they are deployed in production. Always explicitly encode and decode any
 Unicode values before passing them to LMDB.
 
 This documentation uses :py:func:`bytes` in examples. In Python 3.x this is a
-distinct type, whereas in Python 2.6 and 2.7 it is simply an alias for
-:py:func:`str`. Since Python 2.5 does not have this alias, you should
-substitute :py:func:`str` for :py:func:`bytes` in any code examples below when
-running on Python 2.5.
+distinct type, whereas in Python 2.7 it is simply an alias for
+:py:func:`str`.
 
 
 Buffers
@@ -257,16 +262,16 @@ buffer's contents, copy it using :py:func:`bytes`:
     .. code-block:: python
 
         with env.begin(write=True, buffers=True) as txn:
-            buf = env.get('foo')           # only valid until the next write.
+            buf = txn.get('foo')           # only valid until the next write.
             buf_copy = bytes(buf)          # valid forever
-            env.delete('foo')              # this is a write!
-            env.put('foo2', 'bar2')        # this is also a write!
+            txn.delete('foo')              # this is a write!
+            txn.put('foo2', 'bar2')        # this is also a write!
 
             print('foo: %r' % (buf,))      # ERROR! invalidated by write
-            print('foo: %r' % (buf_copy,)  # OK
+            print('foo: %r' % (buf_copy,)) # OK
 
         print('foo: %r' % (buf,))          # ERROR! also invalidated by txn end
-        print('foo: %r' % (buf_copy,)      # still OK
+        print('foo: %r' % (buf_copy,))     # still OK
 
 
 ``writemap`` mode
@@ -281,8 +286,14 @@ overwrite the map, resulting in database corruption.
 .. caution::
 
     This option may cause filesystems that don't support sparse files, such as
-    OSX, to immediately preallocate `map_size=` bytes of underlying storage.
+    OSX, to immediately preallocate `map_size=` bytes of underlying storage
+    when the environment is opened or closed for the first time.
 
+.. caution::
+
+    A filesystem failure (such as running out of space), will crash the Python
+    process if this option is enabled.  (This is a general OS limitation, and
+    not limited to LMDB).
 
 Resource Management
 +++++++++++++++++++
@@ -342,12 +353,55 @@ freely migrate across threads and for a single thread to maintain multiple read
 transactions. This enables mostly care-free use of read transactions, for
 example when using `gevent <http://www.gevent.org/>`_.
 
+Most objects can be safely called by a single caller from a single thread, and
+usually it only makes sense to to have a single caller, except in the case of
+:py:class:`Environment`.
+
+Most :py:class:`Environment` methods are thread-safe, and may be called
+concurrently, except for :py:meth:`Environment.close`.  Running `close` at the
+same time as other database operations may crash the interpreter.
+
+A write :py:class:`Transaction` may only be used from the thread it was created
+on.
+
+A read-only :py:class:`Transaction` can move across threads, but it cannot be
+used concurrently from multiple threads.
+
+:py:class:`Cursor` is not thread-safe, but it does not make sense to use it on
+any thread except the thread that currently owns its associated
+:py:class:`Transaction`.
+
+Limitations running on 32-bit Processes
++++++++++++++++++++++++++++++++++++++++
+32-bit processes (for example 32-bit builds of Python on Windows) are severely
+limited in the amount of virtual memory that can be mapped in.  This is
+particularly true for any 32-bit process but is particularly true for
+Python running on Windows and long running processes.
+
+Virtual address space fragmentation is a significant issue for mapping files
+into memory, a requirement for lmdb, as lmdb requires a contiguous range of
+virtual addresses. See
+https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation
+for more information and a solution that potentially gives another 50% of
+virtual address space on Windows.
+
+Importantly, using a 32-bit instance of Python (even with the OS being 64-bits)
+means that the maximum size file that can be ever be mapped into memory is
+around 1.1 GiB, and that number decreases as the python process lives and
+allocates/deallocates memory.  That means the DB file you can open now might not
+be the DB file you can open in a hour, given the same process.
+
+On Windows, You can see the see the precise maximum mapping size by using the
+SysInternals tool VMMap, then selecting your Python process, then selecting the
+"free" row, then sorting by size.
+
+This is not a problem at all for 64-bit processes.
 
 Interface
 +++++++++
 
 .. py:function:: lmdb.open(path, **kwargs)
-   
+
    Shortcut for :py:class:`Environment` constructor.
 
 .. autofunction:: lmdb.version
@@ -359,6 +413,11 @@ Environment class
 .. autoclass:: lmdb.Environment
     :members:
 
+Database class
+##############
+
+.. autoclass:: lmdb._Database
+    :members:
 
 Transaction class
 #################
@@ -366,13 +425,11 @@ Transaction class
 .. autoclass:: lmdb.Transaction
     :members:
 
-
 Cursor class
 ############
 
 .. autoclass:: lmdb.Cursor
     :members:
-
 
 Exceptions
 ##########
@@ -394,6 +451,7 @@ Exceptions
 .. autoclass:: lmdb.PageFullError ()
 .. autoclass:: lmdb.MapResizedError ()
 .. autoclass:: lmdb.IncompatibleError ()
+.. autoclass:: lmdb.BadDbiError ()
 .. autoclass:: lmdb.BadRslotError ()
 .. autoclass:: lmdb.BadTxnError ()
 .. autoclass:: lmdb.BadValsizeError ()
@@ -423,7 +481,7 @@ These functions are useful for e.g. backup jobs.
         copyfd: Consistent high speed backup an environment to stdout.
             python -mlmdb copyfd -e source.lmdb > target.lmdb/data.mdb
 
-        drop: Delete one or more named databases.
+        drop: Delete one or more sub-databases.
             python -mlmdb drop db1
 
         dump: Dump one or more databases to disk in 'cdbmake' format.
@@ -470,14 +528,15 @@ These functions are useful for e.g. backup jobs.
       -S MAP_SIZE, --map_size=MAP_SIZE
                             Map size in megabytes (default: 10)
       -a, --all             Make "dump" dump all databases
-      -T TXN_SIZE, --txn_size=TXN_SIZE
-                            Writes per transaction (default: 1000)
       -E TARGET_ENV, --target_env=TARGET_ENV
                             Target environment file for "dumpfd"
       -x, --xxd             Print values in xxd format
       -M MAX_DBS, --max-dbs=MAX_DBS
                             Maximum open DBs (default: 128)
       --out-fd=OUT_FD       "copyfd" command target fd
+
+      Options for "copy" command:
+        --compact           Perform compaction while copying.
 
       Options for "edit" command:
         --set=SET           List of key=value pairs to set.
@@ -493,9 +552,9 @@ These functions are useful for e.g. backup jobs.
 
       Options for "watch" command:
         --csv               Generate CSV instead of terminal output.
-        --interval=INTERVAL Interval size (default: 1sec)
+        --interval=INTERVAL
+                            Interval size (default: 1sec)
         --window=WINDOW     Average window size (default: 10)
-
 
 
 Implementation Notes
@@ -545,6 +604,29 @@ Deviations from LMDB API
     There are no native equivalents to these calls, they just implement common
     operations in C to avoid a chunk of error prone, boilerplate Python from
     having to do the same.
+
+`mdb_set_compare()`, `mdb_set_dupsort()`:
+    Neither function is exposed for a variety of reasons. In particular,
+    neither can be supported safely, since exceptions cannot be propagated
+    through LMDB callbacks, and can lead to database corruption if used
+    incorrectly. Secondarily, since both functions are repeatedly invoked for
+    every single lookup in the LMDB read path, most of the performance benefit
+    of LMDB is lost by introducing Python interpreter callbacks to its hot path.
+
+    There are a variety of workarounds that could make both functions useful,
+    but not without either punishing binding users who do not require these
+    features (especially on CFFI), or needlessly complicating the binding for
+    what is essentially an edge case.
+
+    In all cases where `mdb_set_compare()` might be useful, use of a special
+    key encoding that encodes your custom order is usually desirable. See
+    `issue #79 <https://github.com/dw/py-lmdb/issues/79>`_ for example
+    approaches.
+
+    The answer is not so clear for `mdb_set_dupsort()`, since a custom encoding
+    there may necessitate wasted storage space, or complicating record decoding
+    in an application's hot path. Please file a ticket if you think you have a
+    use for `mdb_set_dupsort()`.
 
 
 Technology
@@ -608,21 +690,3 @@ License
 
 .. include:: ../LICENSE
     :literal:
-
-
-.. raw:: html
-
-    <script type="text/javascript">
-      var _paq = _paq || [];
-      _paq.push(["trackPageView"]);
-      _paq.push(["enableLinkTracking"]);
-
-      (function() {
-        var u=(("https:" == document.location.protocol) ? "https" : "http") + "://37.187.23.96/tr/";
-        _paq.push(["setTrackerUrl", u+"ep"]);
-        _paq.push(["setSiteId", "2"]);
-        var d=document, g=d.createElement("script"), s=d.getElementsByTagName("script")[0]; g.type="text/javascript";
-        g.defer=true; g.async=true; g.src=u+"js"; s.parentNode.insertBefore(g,s);
-      })();
-    </script>
-    <noscript><p><img src="http://37.187.23.96/tr/ep?idsite=2" style="border:0" alt="" /></p></noscript>

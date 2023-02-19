@@ -1,0 +1,21 @@
+# vim:syntax=gdb
+#
+# Print a backtrace if a program crashes. Run using:
+#       gdb -x misc/gdb.commands --args argv0 argv1 ..
+#
+
+set confirm off
+
+define hook-stop
+    init-if-undefined $_exitcode = 999
+    if $_exitcode == 999
+        echo Abnormal stop.\n
+        backtrace
+        quit 2
+    else
+        echo Normal exit.\n
+        quit $_exitcode
+    end
+end
+
+run

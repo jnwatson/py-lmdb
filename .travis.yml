@@ -1,8 +1,0 @@
-language: c
-install:
-setup:
-script:
-    - "sudo ./misc/runtests-travisci.sh"
-
-notifications:
-  email: false

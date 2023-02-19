@@ -22,17 +22,22 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import struct
 import unittest
+import weakref
 
 import testlib
 from testlib import B
-from testlib import BT
-from testlib import OCT
 from testlib import INT_TYPES
 from testlib import BytesType
-from testlib import UnicodeType
 
 import lmdb
+
+
+UINT_0001 = struct.pack('I', 1)
+UINT_0002 = struct.pack('I', 2)
+ULONG_0001 = struct.pack('L', 1)  # L != size_t
+ULONG_0002 = struct.pack('L', 2)  # L != size_t
 
 
 class InitTest(unittest.TestCase):
@@ -167,6 +172,34 @@ class ContextManagerTest(unittest.TestCase):
             assert txn.get(B('foo')) is None
 
 
+class IdTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_readonly_new(self):
+        _, env = testlib.temp_env()
+        with env.begin() as txn:
+            assert txn.id() == 0
+
+    def test_write_new(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            assert txn.id() == 1
+
+    def test_readonly_after_write(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(B('a'), B('a'))
+        with env.begin() as txn:
+            assert txn.id() == 1
+
+    def test_invalid_txn(self):
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        txn.abort()
+        self.assertRaises(Exception, lambda: txn.id())
+
+
 class StatTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
@@ -229,6 +262,29 @@ class DropTest(unittest.TestCase):
             lambda: txn.get(B('a'), db=db1))
         self.assertRaises(lmdb.InvalidParameterError,
             lambda: txn.drop(db1))
+
+    def test_double_delete(self):
+        _, env = testlib.temp_env()
+
+        db1 = env.open_db(B('db1'))
+        txn = env.begin(write=True, db=db1)
+        txn.put(B('a'), B('a'), db=db1)
+        txn.drop(db1)
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.get(B('a'), db=db1))
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.drop(db1))
+        txn.commit()
+
+        db1 = env.open_db(B('db1'))
+        txn = env.begin(write=True, db=db1)
+        txn.put(B('a'), B('a'), db=db1)
+        txn.drop(db1)
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.get(B('a'), db=db1))
+        self.assertRaises(lmdb.InvalidParameterError,
+            lambda: txn.drop(db1))
+        txn.commit()
 
 
 class CommitTest(unittest.TestCase):
@@ -363,6 +419,31 @@ class GetTest(unittest.TestCase):
         assert txn.put(B('a'), B('b'))
         assert txn.get(B('a')) == B('a')
 
+    def test_integerkey(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), integerkey=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(UINT_0001, B('a'))
+        assert txn.put(UINT_0002, B('b'))
+        assert txn.get(UINT_0001) == B('a')
+        assert txn.get(UINT_0002) == B('b')
+
+    def test_integerdup(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True, integerdup=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(UINT_0001, UINT_0002)
+        assert txn.put(UINT_0001, UINT_0001)
+        assert txn.get(UINT_0001) == UINT_0001
+
+    def test_dupfixed(self):
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True, dupfixed=True)
+        txn = env.begin(write=True, db=db1)
+        assert txn.put(B('a'), B('a'))
+        assert txn.put(B('a'), B('b'))
+        assert txn.get(B('a')) == B('a')
+
 
 class PutTest(unittest.TestCase):
     def tearDown(self):
@@ -439,12 +520,23 @@ class ReplaceTest(unittest.TestCase):
         _, env = testlib.temp_env()
         db = env.open_db(B('db1'), dupsort=True)
         txn = env.begin(write=True, db=db)
-        assert None == txn.replace(B('a'), B('x'))
+        assert None is txn.replace(B('a'), B('x'))
         assert B('x') == txn.replace(B('a'), B('y'))
         assert B('y') == txn.replace(B('a'), B('z'))
         cur = txn.cursor()
         assert cur.set_key(B('a'))
         assert [B('z')] == list(cur.iternext_dup())
+
+    def test_dupsort_del_none(self):
+        _, env = testlib.temp_env()
+        db = env.open_db(B('db1'), dupsort=True)
+        with env.begin(write=True, db=db) as txn:
+            assert txn.put(B('a'), B('a'))
+            assert txn.put(B('a'), B('b'))
+            cur = txn.cursor()
+            assert cur.set_key(B('a'))
+            assert [B('a'), B('b')] == list(cur.iternext_dup())
+            assert txn.delete(B('a'), None)
 
     def test_dupdata_no_dupsort(self):
         _, env = testlib.temp_env()
@@ -452,6 +544,25 @@ class ReplaceTest(unittest.TestCase):
         assert txn.put(B('a'), B('a'), dupdata=True)
         assert txn.put(B('a'), B('b'), dupdata=True)
         txn.get(B('a'))
+
+
+class LeakTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_open_close(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        with env.begin() as txn:
+            pass
+        env.close()
+        r1 = weakref.ref(env)
+        r2 = weakref.ref(txn)
+        env = None
+        txn = None
+        testlib.debug_collect()
+        assert r1() is None
+        assert r2() is None
 
 
 if __name__ == '__main__':

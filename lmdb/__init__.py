@@ -1,4 +1,4 @@
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2021 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -19,16 +19,20 @@
 # <http://www.openldap.org/>.
 
 """
-cffi wrapper for OpenLDAP's "Lightning" MDB database.
+Python wrapper for OpenLDAP's "Lightning" MDB database.
 
-Please see http://lmdb.readthedocs.org/
+Please see https://lmdb.readthedocs.io/
 """
 
 import os
 import sys
 
 def _reading_docs():
-    # Hack: disable speedups while testing or reading docstrings.
+    # Hack: disable speedups while testing or reading docstrings. Don't check
+    # for basename for embedded python - variable 'argv' does not exists there or is empty.
+    if not(hasattr(sys, 'argv')) or not sys.argv:
+        return False
+
     basename = os.path.basename(sys.argv[0])
     return any(x in basename for x in ('sphinx-build', 'pydoc'))
 
@@ -36,15 +40,14 @@ try:
     if _reading_docs() or os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
     from lmdb.cpython import *
+    from lmdb.cpython import open
+    from lmdb.cpython import __all__
 except ImportError:
+    if (not _reading_docs()) and os.getenv('LMDB_FORCE_CPYTHON') is not None:
+        raise
     from lmdb.cffi import *
+    from lmdb.cffi import open
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__version__ = '0.84'
-
-# Hack to support Python v2.5 'python -mlmdb'
-if __name__ == '__main__':
-    import lmdb.tool
-    import atexit
-    atexit.register(lmdb.tool.main)
+__version__ = '1.2.1'
