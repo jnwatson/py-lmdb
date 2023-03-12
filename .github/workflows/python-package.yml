@@ -153,7 +153,7 @@ jobs:
         if: >-
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: RalfG/python-wheels-manylinux-build@v0.3.3
+        uses: RalfG/python-wheels-manylinux-build@v0.7.1
         with:
           python-versions: >-
               cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311
@@ -236,7 +236,7 @@ jobs:
         with:
           path: dist/lmdb*.tar.gz
           name: source
-      - uses: RalfG/python-wheels-manylinux-build@v0.3.3-manylinux2014_aarch64
+      - uses: RalfG/python-wheels-manylinux-build@v0.7.1-manylinux2014_aarch64
         if: \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \]
         with:
           python-versions: >-
