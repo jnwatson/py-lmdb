@@ -1,3 +1,14 @@
+2022-12-06 v1.4.0
+* Add Python 3.11 support.
+
+2021-12-30 v1.3.0
+* Add aarch64 architecture builds.  Contributed by odidev.
+
+* Add Python 3.10 support.
+
+* Fix crash relating to caching of transactions.  The 'max_spare_txns'
+  parameter to Environment/open is currently ignored.
+
 2021-04-19 v1.2.1
 * Resolve CI bug where non-Linux wheels were not being published to PyPI.
 
