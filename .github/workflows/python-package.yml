@@ -15,8 +15,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
+        os: [ubuntu-20.04, macos-latest, windows-latest]
+        python-version: [2.7, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -25,13 +25,6 @@ jobs:
             impl: cpython
           - python-version: pypy-3.9
             impl: cpython
-          # Github actions doesn't have a 3.4/macos-latest distro
-          - python-version: 3.4
-            os: macos-latest
-          # patch-ng -> typing has trouble on python 3.4 (TODO: might be resolvable with explicit
-          # versions)
-          - python-version: 3.4
-            os: windows-latest
           # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
           - python-version: 3.5
             os: windows-latest
@@ -41,12 +34,6 @@ jobs:
           # Doesn't seem to exist on github MacOS
           - python-version: pypy-3.9
             os: macos-latest
-
-        # include:
-        #   - python-version: '3.10'
-        #     os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
-        #     impl: cpython
-        #     purity: system
 
     steps:
       - uses: actions/checkout@v2
@@ -107,8 +94,7 @@ jobs:
       #
       - name: Test with pytest
         # Limit the test cycle a little
-        if: matrix.python-version != '3.4' && matrix.python-version != '3.6' &&
-            matrix.python-version != '3.8'
+        if: matrix.python-version != '3.6' && matrix.python-version != '3.8'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
@@ -174,7 +160,7 @@ jobs:
 
   test_build_aarch64:
     name: "${{ matrix.PYTHON }} aarch64 ${{ matrix.impl }} ${{ matrix.purity }}"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
        matrix:
         impl: [cpython, cffi]
@@ -257,12 +243,12 @@ jobs:
   publish:
     needs: build
     # N.B. the host running twine to upload is distinct from the target image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.9]
+        python-version: ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.9]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -272,8 +258,6 @@ jobs:
           - python-version: 'pypy-3.9'
             impl: cpython
           - python-version: '2.7'
-            impl: cffi
-          - python-version: '3.4'
             impl: cffi
           - python-version: '3.5'
             impl: cffi
@@ -289,13 +273,6 @@ jobs:
             impl: cffi
           - python-version: '3.11'
             impl: cffi
-          # Github Actions doesn't have a 3.4/macos-latest distro
-          - python-version: 3.4
-            os: macos-latest
-          # patch-ng -> typing has trouble on python 3.4 (TODO: might be resolvable with explicit
-          # versions)
-          - python-version: 3.4
-            os: windows-latest
           # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
           - python-version: 3.5
             os: windows-latest
@@ -308,28 +285,28 @@ jobs:
 
         include:
           # Ubuntu artifacts apply to all python versions
-          - os: ubuntu-latest
+          - os: ubuntu-20.04
             python-version: '3.10'
             impl: cpython
             purity: with-pylmdb-mods
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-20.04'
         uses: actions/download-artifact@v2
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-20.04'
         uses: actions/download-artifact@v2
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-20.04'
         uses: actions/download-artifact@v2
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
