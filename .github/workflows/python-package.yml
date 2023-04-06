@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: [2.7, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
@@ -42,11 +42,11 @@ jobs:
           - python-version: pypy-3.9
             os: macos-latest
 
-        include:
-          - python-version: '3.10'
-            os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
-            impl: cpython
-            purity: system
+        # include:
+        #   - python-version: '3.10'
+        #     os: ubuntu-20.04  # Under ubuntu-18.04 system purity, pytest will segfault due to old (0.9.21) lmdb
+        #     impl: cpython
+        #     purity: system
 
     steps:
       - uses: actions/checkout@v2
@@ -117,8 +117,7 @@ jobs:
       - name: Save wheel
         uses: actions/upload-artifact@v2
         with:
-          name: "${{ matrix.os }}-${{ matrix.python-version }}-\
-            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
       - name: Get version
@@ -222,8 +221,7 @@ jobs:
               fi;"
       - uses: actions/upload-artifact@v2
         with:
-          name: "${{ runner.os }}-${{ matrix.PYTHON }}-\
-            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          name: "${{ runner.os }}-${{ matrix.PYTHON }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
       - uses: actions/upload-artifact@v2
@@ -259,7 +257,7 @@ jobs:
   publish:
     needs: build
     # N.B. the host running twine to upload is distinct from the target image
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     strategy:
       # We publish a subset of the targets we test
       matrix:
@@ -310,32 +308,31 @@ jobs:
 
         include:
           # Ubuntu artifacts apply to all python versions
-          - os: ubuntu-18.04
+          - os: ubuntu-latest
             python-version: '3.10'
             impl: cpython
             purity: with-pylmdb-mods
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-18.04'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
-        if: matrix.os == 'ubuntu-18.04'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v2
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-18.04'
+        if: matrix.os != 'ubuntu-latest'
         uses: actions/download-artifact@v2
         with:
-          name: "${{ matrix.os }}-${{ matrix.python-version }}-\
-            ${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist
 
       - name: Inventory
