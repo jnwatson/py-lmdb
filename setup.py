@@ -88,10 +88,7 @@ else:
 
 if patch_lmdb_source:
     if sys.platform.startswith('win'):
-        try:
-            import patch_ng as patch
-        except ImportError:
-            raise Exception('Building py-lmdb from source on Windows requires the "patch-ng" python module.')
+        import misc.patch as patch
 
     # Clean out any previously patched files
     dest = 'build' + os.sep + 'lib'
