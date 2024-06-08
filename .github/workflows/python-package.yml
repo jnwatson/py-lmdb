@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: [2.7, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
+        python-version: [2.7, 3.7, 3.8, 3.9, '3.10', '3.11', '3.12', , pypy-2.7, pypy-3.10]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Set env vars Windows
@@ -94,7 +94,7 @@ jobs:
       #
       - name: Test with pytest
         # Limit the test cycle a little
-        if: matrix.python-version != '3.6' && matrix.python-version != '3.8'
+        if: matrix.python-version != '3.7' && matrix.python-version != '3.8'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
@@ -141,7 +141,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.7.1
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -212,29 +212,29 @@ jobs:
 
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: vers.txt
           name: vers.txt
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*.tar.gz
           name: source
       - uses: RalfG/python-wheels-manylinux-build@v0.7.1-manylinux2014_aarch64
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
           build-requirements: 'patch-ng'
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*manylinux*.whl
@@ -248,7 +248,7 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.9]
+        python-version: ['2.7', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12', pypy-2.7, pypy-3.10]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -258,10 +258,6 @@ jobs:
           - python-version: 'pypy-3.9'
             impl: cpython
           - python-version: '2.7'
-            impl: cffi
-          - python-version: '3.5'
-            impl: cffi
-          - python-version: '3.6'
             impl: cffi
           - python-version: '3.7'
             impl: cffi
