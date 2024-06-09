@@ -23,8 +23,8 @@ jobs:
         exclude:
           - python-version: pypy-3.9
             impl: cpython
-          # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.9
+          # macos latest is now arm64 and 3.7 doesn't have arm64 build
+          - python-version: 3.7
             os: macos-latest
 
     steps:
@@ -157,7 +157,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311"]
+        PYTHON: ["cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311"]
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -247,7 +247,7 @@ jobs:
         exclude:
           - python-version: 'pypy-2.7'
             impl: cpython
-          - python-version: 'pypy-3.9'
+          - python-version: 'pypy-3.10'
             impl: cpython
           - python-version: '3.7'
             impl: cffi
@@ -259,12 +259,6 @@ jobs:
             impl: cffi
           - python-version: '3.11'
             impl: cffi
-          # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
-          - python-version: 3.5
-            os: windows-latest
-          # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.9
-            os: macos-latest
 
         include:
           # Ubuntu artifacts apply to all python versions
