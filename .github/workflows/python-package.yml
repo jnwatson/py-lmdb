@@ -71,7 +71,7 @@ jobs:
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
-          python -m pip install wheel
+          python -m pip install setuptools wheel
           # Install this separately since sometimes Github Actions can't find it
           python -m pip install cffi
           python -m pip install flake8 pytest patch-ng
@@ -171,7 +171,7 @@ jobs:
               python --version;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
               yum install -y libffi-devel;
-              .venv/bin/pip install -U pip wheel cffi six;
+              .venv/bin/pip install -U pip setuptools wheel cffi six;
               if \[ ${{ matrix.impl }} == cpython \] ; then
                 echo LMDB_FORCE_CPYTHON=1
               else
@@ -186,7 +186,7 @@ jobs:
                 cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
               echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
                 cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
-              .venv/bin/pip install flake8 pytest patch-ng;
+              .venv/bin/pip install setuptools flake8 pytest patch-ng;
               /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
               ls dist;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
