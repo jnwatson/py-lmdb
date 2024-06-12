@@ -1131,8 +1131,12 @@ env_clear(EnvObject *self)
 
     txn = self->spare_txn;
     if(txn) {
-        MDEBUG("killing spare txn %p", txn);
-        txn_abort(txn);
+        if (self->pid != getpid()) {
+            MDEBUG("In forked process, not killing spare txn %p", txn);
+        } else {
+            MDEBUG("killing spare txn %p", txn);
+            txn_abort(txn);
+        }
         self->spare_txn = NULL;
     }
 
