@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2020 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2024 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -114,7 +114,7 @@ if patch_lmdb_source:
         if not rv:
             raise Exception('Applying patch failed')
     else:
-        rv = os.system('/usr/bin/patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
+        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
         if rv:
             raise Exception('Applying patch failed')
 
@@ -217,6 +217,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Database",
         "Topic :: Database :: Database Engines/Servers",
     ],
