@@ -21,7 +21,8 @@ jobs:
         purity: [pure, with-pylmdb-mods]
 
         exclude:
-          - python-version: pypy-3.9
+          # Pypy doesn't work with cpython
+          - python-version: pypy-3.10
             impl: cpython
           # macos latest is now arm64 and 3.7 doesn't have arm64 build
           - python-version: 3.7
@@ -247,17 +248,6 @@ jobs:
         exclude:
           - python-version: 'pypy-3.10'
             impl: cpython
-          - python-version: '3.7'
-            impl: cffi
-          - python-version: '3.8'
-            impl: cffi
-          - python-version: '3.9'
-            impl: cffi
-          - python-version: '3.10'
-            impl: cffi
-          - python-version: '3.11'
-            impl: cffi
-
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-20.04
