@@ -248,6 +248,8 @@ jobs:
         exclude:
           - python-version: 'pypy-3.10'
             impl: cpython
+          - python-version: '3.7'
+            os: macos-latest
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-20.04
