@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 The py-lmdb authors, all rights reserved.
+ * Copyright 2013-2024 The py-lmdb authors, all rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted only as authorized by the OpenLDAP
@@ -112,49 +112,11 @@ typedef struct IterObject IterObject;
 typedef struct TransObject TransObject;
 
 
-/* ------------------------ */
-/* Python 3.x Compatibility */
-/* ------------------------ */
-
-#if PY_MAJOR_VERSION >= 3
-
 #   define MOD_RETURN(mod) return mod;
 #   define MODINIT_NAME PyInit_cpython
 
 #   define MAKE_ID(id) PyCapsule_New((void *) (1 + (id)), NULL, NULL)
 #   define READ_ID(obj) (((int) (long) PyCapsule_GetPointer(obj, NULL)) - 1)
-
-#else
-
-#   define MOD_RETURN(mod) return
-#   define MODINIT_NAME initcpython
-
-#   define MAKE_ID(id) PyInt_FromLong((long) id)
-#   define READ_ID(obj) PyInt_AS_LONG(obj)
-
-#   define PyUnicode_InternFromString PyString_InternFromString
-#   define PyBytes_AS_STRING PyString_AS_STRING
-#   define PyBytes_GET_SIZE PyString_GET_SIZE
-#   define PyBytes_CheckExact PyString_CheckExact
-#   define PyBytes_FromStringAndSize PyString_FromStringAndSize
-#   define _PyBytes_Resize _PyString_Resize
-#   define PyMemoryView_FromMemory(x, y, z) PyBuffer_FromMemory(x, y)
-
-#   ifndef PyBUF_READ
-#       define PyBUF_READ 0
-#   endif
-
-/* Python 2.5 */
-#   ifndef Py_TYPE
-#       define Py_TYPE(ob) (((PyObject*)(ob))->ob_type)
-#   endif
-
-#   ifndef PyVarObject_HEAD_INIT
-#       define PyVarObject_HEAD_INIT(x, y) \
-            PyObject_HEAD_INIT(x) y,
-#   endif
-
-#endif
 
 struct list_head {
     struct lmdb_object *prev;
@@ -649,11 +611,7 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
         PyErr_Format(PyExc_OverflowError, "Integer argument exceeds limit.");
         return -1;
     }
-#if PY_MAJOR_VERSION >= 3
     *l = PyLong_AsUnsignedLongLongMask(obj);
-#else
-    *l = PyInt_AsUnsignedLongLongMask(obj);
-#endif
     return 0;
 }
 
@@ -2124,7 +2082,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     };
 
     size_t buffer_pos = 0, buffer_size = 8;
-    size_t key_size, val_size, item_size = 0;
+    size_t key_size = 0, val_size, item_size = 0;
     char *buffer = NULL;
 
     static PyObject *cache = NULL;
@@ -3797,11 +3755,7 @@ static PyTypeObject PyTransaction_Type = {
 static int
 append_string(PyObject *list, const char *s)
 {
-#if PY_MAJOR_VERSION >= 3
     PyObject *o = PyUnicode_FromString(s);
-#else
-    PyObject *o = PyBytes_FromStringAndSize(s, strlen(s));
-#endif
 
     if(! o) {
         return -1;
@@ -3862,7 +3816,6 @@ static struct PyMethodDef module_methods[] = {
     {0, 0, 0, 0}
 };
 
-#if PY_MAJOR_VERSION >= 3
 static struct PyModuleDef moduledef = {
     PyModuleDef_HEAD_INIT,
     "cpython",
@@ -3874,7 +3827,6 @@ static struct PyModuleDef moduledef = {
     NULL,
     NULL
 };
-#endif
 
 /**
  * Initialize and publish the LMDB built-in types.
@@ -3985,11 +3937,7 @@ PyMODINIT_FUNC
 MODINIT_NAME(void)
 {
     PyObject *__all__;
-#if PY_MAJOR_VERSION >= 3
     PyObject *mod = PyModule_Create(&moduledef);
-#else
-    PyObject *mod = Py_InitModule3("cpython", module_methods, "");
-#endif
     if(! mod) {
         MOD_RETURN(NULL);
     }
