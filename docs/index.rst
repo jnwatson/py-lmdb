@@ -11,9 +11,8 @@ lmdb
 This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://lmdb.tech/>`_. Two variants are provided and automatically selected
 during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
-that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=2.7,
-and a C extension that supports CPython >=2.7 and >=3.4. Both variants
-provide the same interface.
+that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=3.5,
+and a C extension that supports >= 3.5. Both variants provide the same interface.
 
 LMDB is a tiny database with some excellent properties:
 
@@ -41,20 +40,11 @@ to be installed via pip and easy_install without the need for a compiler to be
 present. The binary releases statically link against the bundled version of
 LMDB.
 
-Initially 32-bit and 64-bit binaries are provided for Python 2.7; in future
-binaries will be published for all supported versions of Python.
-
 To install, use a command like:
 
     ::
 
         C:\Python27\python -mpip install lmdb
-
-Or:
-
-    ::
-
-        C:\Python27\python -measy_install lmdb
 
 
 Installation: UNIX
@@ -78,14 +68,12 @@ depend on the CPython development headers. On Debian/Ubuntu:
 
         apt-get install libffi-dev python-dev build-essential
 
-To install the C extension, ensure a C compiler and `pip` or `easy_install` are
+To install the C extension, ensure a C compiler and `pip` are
 available and type:
 
     ::
 
         pip install lmdb
-        # or
-        easy_install lmdb
 
 The CFFI variant may be used on CPython by setting the ``LMDB_FORCE_CFFI``
 environment variable before installation, or before module import with an
@@ -194,21 +182,11 @@ written the dirty pages to disk.
 Bytestrings
 +++++++++++
 
-This documentation uses `bytestring` to mean either the Python<=2.7
-:py:func:`str` type, or the Python>=3.0 :py:func:`bytes` type, depending on the
-Python version in use.
-
-Due to the design of Python 2.x, LMDB will happily accept Unicode instances
-where :py:func:`str` instances are expected, so long as they contain only ASCII
-characters, in which case they are implicitly encoded to ASCII. You should not
-rely on this behaviour! It results in brittle programs that often break the
-moment they are deployed in production. Always explicitly encode and decode any
-Unicode values before passing them to LMDB.
+This documentation uses `bytestring` to mean the Python>=3.0 :py:func:`bytes`
+type.
 
 This documentation uses :py:func:`bytes` in examples. In Python 3.x this is a
-distinct type, whereas in Python 2.7 it is simply an alias for
-:py:func:`str`.
-
+distinct type.
 
 Buffers
 +++++++
