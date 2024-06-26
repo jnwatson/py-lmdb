@@ -87,7 +87,9 @@ jobs:
       #
       - name: Test with pytest
         # Limit the test cycle a little
-        if: matrix.python-version != '3.7' && matrix.python-version != '3.8'
+        if: >- 
+          matrix.python-version != '3.7' && matrix.python-version != '3.9' && 
+          matrix.python-version != '3.11'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
