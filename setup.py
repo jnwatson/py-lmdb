@@ -1,5 +1,5 @@
 #
-# Copyright 2013-2020 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2024 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -45,8 +45,8 @@ else:
 if os.getenv('LMDB_FORCE_CFFI') is not None:
     use_cpython = False
 
-if sys.version[:3] < '2.7' or (3, 0) < sys.version_info[:2] < (3, 4):
-    sys.stderr.write('Error: py-lmdb requires at least CPython 2.7 or 3.4\n')
+if (3, 0) < sys.version_info[:2] < (3, 5):
+    sys.stderr.write('Error: py-lmdb requires at CPython 3.5\n')
     raise SystemExit(1)
 
 #
@@ -110,11 +110,11 @@ if patch_lmdb_source:
     if sys.platform.startswith('win'):
         patchfile = 'lib' + os.sep + 'py-lmdb' + os.sep + 'env-copy-txn.patch'
         patchset = patch.fromfile(patchfile)
-        rv = patchset.apply(3, root=dest)
+        rv = patchset.apply(2, root=dest)
         if not rv:
             raise Exception('Applying patch failed')
     else:
-        rv = os.system('/usr/bin/patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
+        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
         if rv:
             raise Exception('Applying patch failed')
 
@@ -206,10 +206,7 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
-        "Programming Language :: Python :: 2",
-        "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
@@ -217,6 +214,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Database",
         "Topic :: Database :: Database Engines/Servers",
     ],

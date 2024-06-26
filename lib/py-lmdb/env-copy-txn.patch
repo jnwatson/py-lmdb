@@ -1,5 +1,5 @@
 diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
-index 69aa2751a2..ff7f77a10d 100644
+index ff03c22..3d6f4cc 100644
 --- a/libraries/liblmdb/lmdb.h
 +++ b/libraries/liblmdb/lmdb.h
 @@ -682,9 +682,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
@@ -32,10 +32,10 @@ index 69aa2751a2..ff7f77a10d 100644
  	/** @brief Return statistics about the LMDB environment.
  	 *
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
-index 8cecdb2e69..9ede4183dd 100644
+index deb6779..b5d152c 100644
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9332,12 +9332,12 @@ done:
+@@ -9366,12 +9366,12 @@ done:
  
  	/** Copy environment with compaction. */
  static int ESECT
@@ -50,7 +50,7 @@ index 8cecdb2e69..9ede4183dd 100644
  	pthread_t thr;
  	pgno_t root, new_root;
  	int rc = MDB_SUCCESS;
-@@ -9383,9 +9383,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
+@@ -9417,9 +9417,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
  	if (rc)
  		goto done;
  
@@ -65,7 +65,7 @@ index 8cecdb2e69..9ede4183dd 100644
  
  	mp = (MDB_page *)my.mc_wbuf[0];
  	memset(mp, 0, NUM_METAS * env->me_psize);
-@@ -9445,7 +9447,8 @@ finish:
+@@ -9479,7 +9481,8 @@ finish:
  		my.mc_error = rc;
  	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
  	rc = THREAD_FINISH(thr);
@@ -75,7 +75,7 @@ index 8cecdb2e69..9ede4183dd 100644
  
  done:
  #ifdef _WIN32
-@@ -9562,12 +9565,22 @@ leave:
+@@ -9596,12 +9599,22 @@ leave:
  }
  
  int ESECT
@@ -100,7 +100,7 @@ index 8cecdb2e69..9ede4183dd 100644
  }
  
  int ESECT
-@@ -9578,6 +9591,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
+@@ -9612,6 +9625,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
  
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
@@ -113,7 +113,7 @@ index 8cecdb2e69..9ede4183dd 100644
  {
  	int rc;
  	MDB_name fname;
-@@ -9589,7 +9608,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+@@ -9623,7 +9642,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
  		mdb_fname_destroy(fname);
  	}
  	if (rc == MDB_SUCCESS) {

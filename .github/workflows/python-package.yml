@@ -16,29 +16,22 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: [2.7, 3.5, 3.6, 3.7, 3.8, 3.9, '3.10', '3.11', pypy-2.7, pypy-3.9]
+        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', pypy-3.10]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
         exclude:
-          - python-version: pypy-2.7
+          # Pypy doesn't work with cpython
+          - python-version: pypy-3.10
             impl: cpython
-          - python-version: pypy-3.9
-            impl: cpython
-          # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
-          - python-version: 3.5
-            os: windows-latest
-          # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
-          - python-version: 2.7
-            os: windows-latest
-          # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.9
+          # macos latest is now arm64 and 3.7 doesn't have arm64 build
+          - python-version: 3.7
             os: macos-latest
 
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Set env vars Windows
@@ -79,7 +72,7 @@ jobs:
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
-          python -m pip install wheel
+          python -m pip install setuptools wheel
           # Install this separately since sometimes Github Actions can't find it
           python -m pip install cffi
           python -m pip install flake8 pytest patch-ng
@@ -94,7 +87,9 @@ jobs:
       #
       - name: Test with pytest
         # Limit the test cycle a little
-        if: matrix.python-version != '3.6' && matrix.python-version != '3.8'
+        if: >- 
+          matrix.python-version != '3.7' && matrix.python-version != '3.9' && 
+          matrix.python-version != '3.11'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
@@ -141,7 +136,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.7.1
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -165,7 +160,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp36-cp36m", "cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311"]
+        PYTHON: ["cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311"]
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -179,7 +174,7 @@ jobs:
               python --version;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
               yum install -y libffi-devel;
-              .venv/bin/pip install -U pip wheel cffi six;
+              .venv/bin/pip install -U pip setuptools wheel cffi six;
               if \[ ${{ matrix.impl }} == cpython \] ; then
                 echo LMDB_FORCE_CPYTHON=1
               else
@@ -194,7 +189,7 @@ jobs:
                 cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
               echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
                 cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
-              .venv/bin/pip install flake8 pytest patch-ng;
+              .venv/bin/pip install setuptools flake8 pytest patch-ng;
               /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
               ls dist;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
@@ -212,29 +207,29 @@ jobs:
 
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: vers.txt
           name: vers.txt
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*.tar.gz
           name: source
       - uses: RalfG/python-wheels-manylinux-build@v0.7.1-manylinux2014_aarch64
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
           build-requirements: 'patch-ng'
       - uses: actions/upload-artifact@v2
         if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' && 
+            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*manylinux*.whl
@@ -248,41 +243,15 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', pypy-2.7, pypy-3.9]
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', pypy-3.10]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
         exclude:
-          - python-version: 'pypy-2.7'
+          - python-version: 'pypy-3.10'
             impl: cpython
-          - python-version: 'pypy-3.9'
-            impl: cpython
-          - python-version: '2.7'
-            impl: cffi
-          - python-version: '3.5'
-            impl: cffi
-          - python-version: '3.6'
-            impl: cffi
           - python-version: '3.7'
-            impl: cffi
-          - python-version: '3.8'
-            impl: cffi
-          - python-version: '3.9'
-            impl: cffi
-          - python-version: '3.10'
-            impl: cffi
-          - python-version: '3.11'
-            impl: cffi
-          # CFFI has trouble building on Windows for 3.5 "self.find_available_vc_vers()[-1]" fails
-          - python-version: 3.5
-            os: windows-latest
-          # Microsoft removed VC 9.0 installer so Python 2.7 modules can no longer be built on Windows
-          - python-version: '2.7'
-            os: windows-latest
-          # Doesn't seem to exist on github MacOS
-          - python-version: pypy-3.9
             os: macos-latest
-
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-20.04
