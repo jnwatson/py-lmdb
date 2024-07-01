@@ -87,8 +87,8 @@ jobs:
       #
       - name: Test with pytest
         # Limit the test cycle a little
-        if: >- 
-          matrix.python-version != '3.7' && matrix.python-version != '3.9' && 
+        if: >-
+          matrix.python-version != '3.7' && matrix.python-version != '3.9' &&
           matrix.python-version != '3.11'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
@@ -251,7 +251,18 @@ jobs:
           - python-version: 'pypy-3.10'
             impl: cpython
           - python-version: '3.7'
-            os: macos-latest
+            impl: cffi
+          - python-version: '3.8'
+            impl: cffi
+          - python-version: '3.9'
+            impl: cffi
+          - python-version: '3.10'
+            impl: cffi
+          - python-version: '3.11'
+            impl: cffi
+          - python-version: '3.12'
+            impl: cffi
+
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-20.04
@@ -286,7 +297,8 @@ jobs:
           find .
 
       - name: Publish distribution 📦 to Test PyPI
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
+
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository_url: https://test.pypi.org/legacy/
@@ -294,6 +306,6 @@ jobs:
 
       - name: Publish distribution 📦 to PyPI
         if: startsWith(github.ref, 'refs/tags')
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
