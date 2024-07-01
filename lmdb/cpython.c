@@ -168,6 +168,8 @@ struct EnvObject {
     int readonly;
     /** Spare read-only transaction . */
     struct MDB_txn *spare_txn;
+    /* PID of the process this Environment was opened in. */
+    pid_t pid;
 };
 
 /** TransObject.flags bitfield values. */
@@ -1087,8 +1089,12 @@ env_clear(EnvObject *self)
 
     txn = self->spare_txn;
     if(txn) {
-        MDEBUG("killing spare txn %p", txn);
-        txn_abort(txn);
+        if (self->pid != getpid()) {
+            MDEBUG("In forked process, not killing spare txn %p", txn);
+        } else {
+            MDEBUG("killing spare txn %p", txn);
+            txn_abort(txn);
+        }
         self->spare_txn = NULL;
     }
 
@@ -1196,6 +1202,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = NULL;
     self->env = NULL;
     self->spare_txn = NULL;
+    self->pid = getpid();
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -3201,16 +3208,21 @@ trans_dealloc(TransObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
-    if(txn && self->env && !self->env->spare_txn &&
-      (self->flags & TRANS_RDONLY)) {
-        MDEBUG("caching trans")
-        mdb_txn_reset(txn);
-        self->env->spare_txn = txn;
-        self->txn = NULL;
+    if(self->env && self->env->pid == getpid()) {
+        if(txn && self->env && !self->env->spare_txn &&
+          (self->flags & TRANS_RDONLY)) {
+            MDEBUG("caching trans")
+            mdb_txn_reset(txn);
+            self->env->spare_txn = txn;
+            self->txn = NULL;
+        }
+
+        MDEBUG("deleting trans")
+        trans_clear(self);
+    } else {
+        MDEBUG("In forked process, not deleting trans")
     }
 
-    MDEBUG("deleting trans")
-    trans_clear(self);
     PyObject_Del(self);
 }
 

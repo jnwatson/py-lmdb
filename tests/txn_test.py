@@ -22,7 +22,9 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import os
 import struct
+import sys
 import unittest
 import weakref
 
@@ -30,6 +32,7 @@ import testlib
 from testlib import B
 from testlib import INT_TYPES
 from testlib import BytesType
+from testlib import UnicodeType
 
 import lmdb
 
@@ -38,6 +41,8 @@ UINT_0001 = struct.pack('I', 1)
 UINT_0002 = struct.pack('I', 2)
 ULONG_0001 = struct.pack('L', 1)  # L != size_t
 ULONG_0002 = struct.pack('L', 2)  # L != size_t
+
+NO_READERS = UnicodeType('(no active readers)\n')
 
 
 class InitTest(unittest.TestCase):
@@ -563,6 +568,25 @@ class LeakTest(unittest.TestCase):
         testlib.debug_collect()
         assert r1() is None
         assert r2() is None
+
+
+class ForkTest(unittest.TestCase):
+
+    def test_dealloc_in_fork(self):
+        temp_dir = testlib.temp_dir()
+        env = lmdb.open(temp_dir)
+        txn = env.begin()
+
+        r = env.readers()
+        assert r != NO_READERS
+
+        pid = os.fork()
+        if pid == 0:
+            del txn
+            os._exit(0)
+
+        os.waitpid(pid, 0)
+        assert env.readers() == r, '%r != %r' % (env.readers(), r)
 
 
 if __name__ == '__main__':
