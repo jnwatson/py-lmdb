@@ -275,21 +275,21 @@ jobs:
     steps:
       - name: Download source
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4.1.7
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4.1.7
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
         if: matrix.os != 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4.1.7
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist
