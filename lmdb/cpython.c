@@ -545,9 +545,21 @@ val_from_buffer(MDB_val *val, PyObject *buf)
         type_error("Won't implicitly convert Unicode to bytes; use .encode()");
         return -1;
     }
+#if PY_VERSION_HEX < 0x030d0000
     return PyObject_AsReadBuffer(buf,
         (const void **) &val->mv_data,
         (Py_ssize_t *) &val->mv_size);
+#else
+    Py_buffer view;
+    int ret;
+    ret = PyObject_GetBuffer(buf, &view, PyBUF_SIMPLE);
+    if(ret == 0) {
+        val->mv_data = view.buf;
+        val->mv_size = view.len;
+        PyBuffer_Release(&view);
+    }
+    return ret;
+#endif
 }
 
 /* ------------------- */
