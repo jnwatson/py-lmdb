@@ -173,8 +173,9 @@ jobs:
               chown -R $(whoami) /github/home/.cache;
               python --version;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
+              .venv/bin/pip install -U pip setuptools;
               yum install -y libffi-devel;
-              .venv/bin/pip install -U pip setuptools wheel cffi six;
+              .venv/bin/pip install -U pip wheel cffi six;
               if \[ ${{ matrix.impl }} == cpython \] ; then
                 echo LMDB_FORCE_CPYTHON=1
               else
