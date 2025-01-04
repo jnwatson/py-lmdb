@@ -96,7 +96,7 @@ jobs:
           pytest
 
       - name: Save wheel
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
@@ -112,7 +112,7 @@ jobs:
         if: >-
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: vers.txt
           name: vers.txt
@@ -124,7 +124,7 @@ jobs:
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: dist/lmdb*.tar.gz
           name: source
@@ -148,7 +148,7 @@ jobs:
         if: >-
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: dist/lmdb*manylinux*.whl
           name: manylinux
@@ -200,19 +200,19 @@ jobs:
               if \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
                 /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
               fi;"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
           name: "${{ runner.os }}-${{ matrix.PYTHON }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: vers.txt
           name: vers.txt
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
@@ -227,7 +227,7 @@ jobs:
           python-versions: >-
               cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
           build-requirements: 'patch-ng'
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
@@ -277,21 +277,21 @@ jobs:
     steps:
       - name: Download source
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifact
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: manylinux
           path: dist
 
       - name: Download non-Linux wheel
         if: matrix.os != 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist
