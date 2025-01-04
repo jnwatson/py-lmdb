@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', pypy-3.10]
+        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13', pypy-3.10]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -243,7 +243,7 @@ jobs:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', pypy-3.10]
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', pypy-3.10]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -263,6 +263,8 @@ jobs:
           - python-version: '3.11'
             impl: cffi
           - python-version: '3.12'
+            impl: cffi
+          - python-version: '3.13'
             impl: cffi
 
         include:
