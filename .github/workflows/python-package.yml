@@ -225,7 +225,7 @@ jobs:
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*manylinux*.whl
-          name: manylinux
+          name: manylinux.aarch64
 
   publish:
     permissions:
