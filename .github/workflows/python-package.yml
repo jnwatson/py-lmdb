@@ -276,11 +276,18 @@ jobs:
           name: source
           path: dist
 
-      - name: Download manylinux artifact
+      - name: Download manylinux artifacts
         if: matrix.os == 'ubuntu-20.04'
         uses: actions/download-artifact@v4
         with:
           name: manylinux
+          path: dist
+
+      - name: Download aarch64 manylinux artifacts
+        if: matrix.os == 'ubuntu-20.04'
+        uses: actions/download-artifact@v4
+        with:
+          name: manylinux.aarch64
           path: dist
 
       - name: Download non-Linux wheel
