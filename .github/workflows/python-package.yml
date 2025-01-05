@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', pypy-3.10]
+        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13', pypy-3.10]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
 
@@ -96,7 +96,7 @@ jobs:
           pytest
 
       - name: Save wheel
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
@@ -112,7 +112,7 @@ jobs:
         if: >-
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: vers.txt
           name: vers.txt
@@ -124,7 +124,7 @@ jobs:
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: dist/lmdb*.tar.gz
           name: source
@@ -136,7 +136,7 @@ jobs:
         uses: RalfG/python-wheels-manylinux-build@v0.7.1
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -148,7 +148,7 @@ jobs:
         if: >-
           matrix.python-version == '3.10' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           path: dist/lmdb*manylinux*.whl
           name: manylinux
@@ -160,7 +160,7 @@ jobs:
        matrix:
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311", 'cp312-cp312']
+        PYTHON: ["cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311", 'cp312-cp312', 'cp313-cp313']
     steps:
       - uses: actions/checkout@v2
       - run: |
@@ -190,60 +190,54 @@ jobs:
               echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
                 cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
               .venv/bin/pip install setuptools flake8 pytest patch-ng;
+              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install setuptools;
               /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
               ls dist;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
-              if \[ ${{ matrix.PYTHON }} != cp36-cp36 \] && \[ ${{ matrix.PYTHON }} != cp38-cp38 \] ; then
-                echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
+              echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
+              if \[ ${{ matrix.PYTHON }} != cp36-cp36 \] && \[ ${{ matrix.PYTHON }} != cp38-cp38 \] && \[ ${{ matrix.PYTHON }} != cp311-cp311 \] ; then
                 /opt/python/${{ matrix.PYTHON }}/bin/python -m pytest;
               fi;
-              if \[ ${{ matrix.PYTHON }} == cp310-cp310 \] && \[ ${{ runner.os }} == 'Linux' \] && \[ ${{ matrix.purity }} == 'with-pylmdb-mods' \] && \[ ${{ matrix.impl }} == 'cpython' \] ; then
-                /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
-              fi;"
-      - uses: actions/upload-artifact@v2
+              /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
+      - uses: actions/upload-artifact@v4
         with:
           name: "${{ runner.os }}-${{ matrix.PYTHON }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: vers.txt
-          name: vers.txt
-      - uses: actions/upload-artifact@v2
-        if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
-            matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        with:
-          path: dist/lmdb*.tar.gz
-          name: source
+          name: vers.txt.aarch64
       - uses: RalfG/python-wheels-manylinux-build@v0.7.1-manylinux2014_aarch64
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312
+              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313
           build-requirements: 'patch-ng'
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         if: >-
             matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
             matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         with:
           path: dist/lmdb*manylinux*.whl
-          name: manylinux
+          name: manylinux.aarch64
 
   publish:
-    needs: build
+    permissions:
+      id-token: write # This is required for passwordless publishing to PyPI
+    needs: [build, build_aarch64]
     # N.B. the host running twine to upload is distinct from the target image
     runs-on: ubuntu-20.04
     strategy:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', pypy-3.10]
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', pypy-3.10]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
 
@@ -264,6 +258,8 @@ jobs:
             impl: cffi
           - python-version: '3.12'
             impl: cffi
+          - python-version: '3.13'
+            impl: cffi
 
         include:
           # Ubuntu artifacts apply to all python versions
@@ -275,21 +271,28 @@ jobs:
     steps:
       - name: Download source
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: source
           path: dist
 
-      - name: Download manylinux artifact
+      - name: Download manylinux artifacts
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: manylinux
           path: dist
 
+      - name: Download aarch64 manylinux artifacts
+        if: matrix.os == 'ubuntu-20.04'
+        uses: actions/download-artifact@v4
+        with:
+          name: manylinux.aarch64
+          path: dist
+
       - name: Download non-Linux wheel
         if: matrix.os != 'ubuntu-20.04'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist
@@ -302,12 +305,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          # password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
       - name: Publish distribution 📦 to PyPI
         if: startsWith(github.ref, 'refs/tags')
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        # with: password: ${{ secrets.PYPI_API_TOKEN }}
