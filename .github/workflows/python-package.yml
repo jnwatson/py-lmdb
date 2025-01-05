@@ -229,8 +229,8 @@ jobs:
 
   publish:
     permissions:
-      id-token: write # This is required for requesting the JWT
-    needs: build
+      id-token: write # This is required for passwordless publishing to PyPI
+    needs: [build, build_aarch64]
     # N.B. the host running twine to upload is distinct from the target image
     runs-on: ubuntu-20.04
     strategy:
