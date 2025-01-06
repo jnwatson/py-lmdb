@@ -1,3 +1,8 @@
+2025-01-05 1.6.0
+* Support for Python 3.13.  Contributed by Miro Hrončok and Adam Williamson.
+
+* CI:  Publish 3.13 binaries and Linux aarch64 wheels for multiple versions.
+
 2024-07-01 1.5.1
 * CI-only fix.
 
