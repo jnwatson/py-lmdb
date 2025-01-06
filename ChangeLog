@@ -1,3 +1,6 @@
+2025-01-05 1.6.1
+* CI-only fix.
+
 2025-01-05 1.6.0
 * Support for Python 3.13.  Contributed by Miro Hrončok and Adam Williamson.
 
