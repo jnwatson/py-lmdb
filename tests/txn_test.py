@@ -1,5 +1,5 @@
 #
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2025 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -20,8 +20,8 @@
 # <http://www.openldap.org/>.
 #
 
-from __future__ import absolute_import
-from __future__ import with_statement
+import os
+import sys
 import struct
 import unittest
 import weakref
@@ -139,6 +139,16 @@ class InitTest(unittest.TestCase):
         assert len(b) == 1
         assert isinstance(b, type(B('')))
         txn.abort()
+
+    @unittest.skipIf(sys.platform.startswith('win'), "No fork on Windows")
+    def test_fork(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=False)
+        del txn
+
+        if (os.fork() != 0):
+            os.wait()
+            txn = env.begin(write=False)
 
 
 class ContextManagerTest(unittest.TestCase):
