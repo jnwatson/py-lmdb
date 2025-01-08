@@ -3221,7 +3221,7 @@ trans_dealloc(TransObject *self)
     }
 
     if(self->env && self->env->pid == getpid()) {
-        if(txn && self->env && !self->env->spare_txn && 
+        if(txn && self->env && !self->env->spare_txn &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             mdb_txn_reset(txn);
