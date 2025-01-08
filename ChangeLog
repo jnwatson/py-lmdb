@@ -31,7 +31,7 @@
 * Add Python 3.10 support.
 
 * Fix crash relating to caching of transactions.  The 'max_spare_txns'
-  parameter to Environment/open is currently ignored.
+  parameter to Environment/open is currently ignored in cpython.
 
 2021-04-19 v1.2.1
 * Resolve CI bug where non-Linux wheels were not being published to PyPI.

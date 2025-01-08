@@ -168,6 +168,9 @@ struct EnvObject {
     int readonly;
     /** Spare read-only transaction . */
     struct MDB_txn *spare_txn;
+    /** Maximum number of spare transactions.  In cpython only 0 and 1 are supported.
+     *  If process will be forked, this must be set to 0. */
+    int max_spare_txns;
 };
 
 /** TransObject.flags bitfield values. */
@@ -1162,7 +1165,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         int max_dbs;
         int max_spare_txns;
         int lock;
-    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 1, 1};
+    } arg = {NULL, 10485760, 1, 0, 1, 1, 0, 0755, 1, 1, 0, 1, 126, 0, 0, 1};
 
     static const struct argspec argspec[] = {
         {"path", ARG_OBJ, OFFSET(env_new, path)},
@@ -1180,7 +1183,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         {"max_readers", ARG_INT, OFFSET(env_new, max_readers)},
         {"max_dbs", ARG_INT, OFFSET(env_new, max_dbs)},
         {"max_spare_txns", ARG_INT, OFFSET(env_new, max_spare_txns)},
-        {"lock", ARG_BOOL, OFFSET(env_new, lock)}
+        {"lock", ARG_BOOL, OFFSET(env_new, lock)},
     };
 
     PyObject *fspath_obj = NULL;
@@ -1208,6 +1211,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = NULL;
     self->env = NULL;
     self->spare_txn = NULL;
+    self->max_spare_txns = arg.max_spare_txns;
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -3213,8 +3217,8 @@ trans_dealloc(TransObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
-    if(txn && self->env && !self->env->spare_txn &&
-      (self->flags & TRANS_RDONLY)) {
+    if(txn && self->env && !self->env->spare_txn && 
+            self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
         MDEBUG("caching trans")
         mdb_txn_reset(txn);
         self->env->spare_txn = txn;
