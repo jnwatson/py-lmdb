@@ -172,6 +172,8 @@ class InitTest(testlib.LmdbTest):
         assert r2 == r, '%r != %r' % (r2, r)
         assert txn.get(b'a') == b'foo'
         del txn
+        r3 = env.readers()
+        print(r, r2, r3)
 
 
 class ContextManagerTest(unittest.TestCase):
