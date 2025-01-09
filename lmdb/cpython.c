@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2024 The py-lmdb authors, all rights reserved.
+ * Copyright 2013-2025 The py-lmdb authors, all rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted only as authorized by the OpenLDAP
@@ -166,11 +166,13 @@ struct EnvObject {
     DbObject *main_db;
     /**  1 if env opened read-only; transactions must always be read-only. */
     int readonly;
-    /** Spare read-only transaction . */
+    /** Spare read-only transaction. */
     struct MDB_txn *spare_txn;
     /** Maximum number of spare transactions.  In cpython only 0 and 1 are supported.
      *  If process will be forked, this must be set to 0. */
     int max_spare_txns;
+    /** Process ID of the process this Environment was opened in. */
+    pid_t pid;
 };
 
 /** TransObject.flags bitfield values. */
@@ -1212,6 +1214,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->env = NULL;
     self->spare_txn = NULL;
     self->max_spare_txns = arg.max_spare_txns;
+    self->pid = getpid();
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -3217,16 +3220,21 @@ trans_dealloc(TransObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
-    if(txn && self->env && !self->env->spare_txn && 
-            self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
-        MDEBUG("caching trans")
-        mdb_txn_reset(txn);
-        self->env->spare_txn = txn;
-        self->txn = NULL;
+    if(self->env && self->env->pid == getpid()) {
+        if(txn && self->env && !self->env->spare_txn && 
+                self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
+            MDEBUG("caching trans")
+            mdb_txn_reset(txn);
+            self->env->spare_txn = txn;
+            self->txn = NULL;
+        }
+        MDEBUG("deleting trans")
+        trans_clear(self);
+    }
+    else {
+       MDEBUG("In forked process, not deleting trans");
     }
 
-    MDEBUG("deleting trans")
-    trans_clear(self);
     PyObject_Del(self);
 }
 

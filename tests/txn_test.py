@@ -40,7 +40,7 @@ ULONG_0001 = struct.pack('L', 1)  # L != size_t
 ULONG_0002 = struct.pack('L', 2)  # L != size_t
 
 
-class InitTest(unittest.TestCase):
+class InitTest(testlib.LmdbTest):
     def tearDown(self):
         testlib.cleanup()
 
@@ -141,14 +141,40 @@ class InitTest(unittest.TestCase):
         txn.abort()
 
     @unittest.skipIf(sys.platform.startswith('win'), "No fork on Windows")
-    def test_fork(self):
+    def test_cached_txn_across_fork(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=False)
         del txn
 
-        if (os.fork() != 0):
-            os.wait()
-            txn = env.begin(write=False)
+        if os.fork() != 0:
+            # I am the parent
+            os.wait()  # Wait for child to finish
+            txn = env.begin(write=False)  # Used to raise MDB_BAD_RSLOT (#346)
+
+    @unittest.skipIf(sys.platform.startswith('win'), "No fork on Windows")
+    def test_child_deleting_transaction(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'a', b'foo')
+        txn = env.begin()
+
+        r = env.readers()
+        assert r != '(no active readers)\n'
+
+        pid = os.fork()
+        if pid == 0:
+            del txn   # I am the child
+            os._exit(0)
+
+        os.waitpid(pid, 0)
+        # Make sure my child didn't mess with my environment
+        r2 = env.readers()
+        assert r2 == r, '%r != %r' % (r2, r)
+        assert txn.get(b'a') == b'foo'
+        print 
+        del txn
+        r3 = env.readers()
+        print(r, r2, r3)
 
 
 class ContextManagerTest(unittest.TestCase):
