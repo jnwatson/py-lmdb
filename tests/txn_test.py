@@ -1,5 +1,5 @@
 #
-# Copyright 2013 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2025 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -20,8 +20,8 @@
 # <http://www.openldap.org/>.
 #
 
-from __future__ import absolute_import
-from __future__ import with_statement
+import os
+import sys
 import struct
 import unittest
 import weakref
@@ -40,7 +40,7 @@ ULONG_0001 = struct.pack('L', 1)  # L != size_t
 ULONG_0002 = struct.pack('L', 2)  # L != size_t
 
 
-class InitTest(unittest.TestCase):
+class InitTest(testlib.LmdbTest):
     def tearDown(self):
         testlib.cleanup()
 
@@ -139,6 +139,39 @@ class InitTest(unittest.TestCase):
         assert len(b) == 1
         assert isinstance(b, type(B('')))
         txn.abort()
+
+    @unittest.skipIf(sys.platform.startswith('win'), "No fork on Windows")
+    def test_cached_txn_across_fork(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=False)
+        del txn
+
+        if os.fork() != 0:
+            # I am the parent
+            os.wait()  # Wait for child to finish
+            txn = env.begin(write=False)  # Used to raise MDB_BAD_RSLOT (#346)
+
+    @unittest.skipIf(sys.platform.startswith('win'), "No fork on Windows")
+    def test_child_deleting_transaction(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'a', b'foo')
+        txn = env.begin()
+
+        r = env.readers()
+        assert r != '(no active readers)\n'
+
+        pid = os.fork()
+        if pid == 0:
+            del txn   # I am the child
+            os._exit(0)
+
+        os.waitpid(pid, 0)
+        # Make sure my child didn't mess with my environment
+        r2 = env.readers()
+        assert r2 == r, '%r != %r' % (r2, r)
+        assert txn.get(b'a') == b'foo'
+        del txn
 
 
 class ContextManagerTest(unittest.TestCase):
