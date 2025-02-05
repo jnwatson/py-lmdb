@@ -9366,12 +9366,12 @@ done:
 
 	/** Copy environment with compaction. */
 static int ESECT
-mdb_env_copyfd1(MDB_env *env, HANDLE fd)
+mdb_env_copyfd1(MDB_env *env, HANDLE fd, MDB_txn *txn)
 {
 	MDB_meta *mm;
 	MDB_page *mp;
 	mdb_copy my = {0};
-	MDB_txn *txn = NULL;
+	MDB_txn *orig_txn = txn;
 	pthread_t thr;
 	pgno_t root, new_root;
 	int rc = MDB_SUCCESS;
@@ -9417,9 +9417,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
 	if (rc)
 		goto done;
 
-	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-	if (rc)
-		goto finish;
+	if (!txn) {
+		rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+		if (rc)
+			goto finish;
+	}
 
 	mp = (MDB_page *)my.mc_wbuf[0];
 	memset(mp, 0, NUM_METAS * env->me_psize);
@@ -9479,7 +9481,8 @@ finish:
 		my.mc_error = rc;
 	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
 	rc = THREAD_FINISH(thr);
-	mdb_txn_abort(txn);
+	if (!orig_txn)
+		mdb_txn_abort(txn);
 
 done:
 #ifdef _WIN32
@@ -9596,12 +9599,22 @@ leave:
 }
 
 int ESECT
-mdb_env_copyfd2(MDB_env *env, HANDLE fd, unsigned int flags)
+mdb_env_copyfd3(MDB_env *env, HANDLE fd, unsigned int flags, MDB_txn *txn)
 {
 	if (flags & MDB_CP_COMPACT)
-		return mdb_env_copyfd1(env, fd);
+		return mdb_env_copyfd1(env, fd, txn);
 	else
+	{
+		if (txn) /* may only use txn with compact */
+			return EINVAL;
 		return mdb_env_copyfd0(env, fd);
+	}
+}
+
+int ESECT
+mdb_env_copyfd2(MDB_env *env, HANDLE fd, unsigned int flags)
+{
+	return mdb_env_copyfd3(env, fd, flags, NULL);
 }
 
 int ESECT
@@ -9613,6 +9626,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
 int ESECT
 mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 {
+	return mdb_env_copy3(env, path, flags, NULL);
+}
+
+int ESECT
+mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn)
+{
 	int rc;
 	MDB_name fname;
 	HANDLE newfd = INVALID_HANDLE_VALUE;
@@ -9623,7 +9642,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
 		mdb_fname_destroy(fname);
 	}
 	if (rc == MDB_SUCCESS) {
-		rc = mdb_env_copyfd2(env, newfd, flags);
+		rc = mdb_env_copyfd3(env, newfd, flags, txn);
 		if (close(newfd) < 0 && rc == MDB_SUCCESS)
 			rc = ErrCode();
 	}

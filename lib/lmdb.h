@@ -682,9 +682,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
 	 *		consumes more CPU and runs more slowly than the default.
 	 *		Currently it fails if the environment has suffered a page leak.
 	 * </ul>
+	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
+	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
+	 * flag is set.
+	 *
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
+int  mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn);
 
 	/** @brief Copy an LMDB environment to the specified file descriptor,
 	 *	with options.
@@ -701,9 +706,13 @@ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
 	 * have already been opened for Write access.
 	 * @param[in] flags Special options for this operation.
 	 * See #mdb_env_copy2() for options.
+	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
+	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
+	 * flag is set.
 	 * @return A non-zero error value on failure and 0 on success.
 	 */
 int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd, unsigned int flags);
+int  mdb_env_copyfd3(MDB_env *env, mdb_filehandle_t fd, unsigned int flags, MDB_txn *txn);
 
 	/** @brief Return statistics about the LMDB environment.
 	 *
