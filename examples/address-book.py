@@ -1,9 +1,9 @@
 
-import lmdb
+import lmdb_m
 
 # Open (and create if necessary) our database environment. Must specify
 # max_dbs=... since we're opening subdbs.
-env = lmdb.open('/tmp/address-book.lmdb', max_dbs=10)
+env = lmdb_m.open('/tmp/address-book.lmdb', max_dbs=10)
 
 # Now create subdbs for home and business addresses.
 home_db = env.open_db(b'home')

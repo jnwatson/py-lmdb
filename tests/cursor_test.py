@@ -27,7 +27,7 @@ from __future__ import with_statement
 import sys
 import unittest
 
-import lmdb
+import lmdb_m
 
 import testlib
 from testlib import B
@@ -321,7 +321,7 @@ class CursorReadOnlyTest(unittest.TestCase):
         path, env = testlib.temp_env(max_dbs=10)
         env.open_db(b'foo')
         env.close()
-        with lmdb.open(path, max_dbs=10, readonly=True) as env:
+        with lmdb_m.open(path, max_dbs=10, readonly=True) as env:
             db2 = env.open_db(b'foo')
             with env.begin(db=db2) as txn:
                 with txn.cursor(db=db2):

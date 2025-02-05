@@ -72,7 +72,7 @@ if os.getenv('LMDB_FORCE_SYSTEM') is not None:
     print('py-lmdb: Using system version of liblmdb.')
     extra_sources = []
     extra_include_dirs += []
-    libraries = ['lmdb']
+    libraries = ['lmdb_m']
 elif os.getenv('LMDB_PURE') is not None:
     print('py-lmdb: Using bundled unmodified liblmdb; override with LMDB_FORCE_SYSTEM=1.')
     extra_sources = ['lib/mdb.c', 'lib/midl.c']
@@ -145,13 +145,14 @@ if sys.platform.startswith('win'):
     extra_include_dirs += ['lib\\win32']
     extra_compile_args += [r'/FIPython.h']
     libraries += ['Advapi32']
+    libraries += ['ntdll'] # krpatter: needed for sparse file support
 
 
 # Capture setup.py configuration for later use by cffi, otherwise the
 # configuration may differ, forcing a recompile (and therefore likely compile
 # errors). This happens even when `use_cpython` since user might want to
 # LMDB_FORCE_CFFI=1 during testing.
-with open('lmdb/_config.py', 'w') as fp:
+with open('lmdb_m/_config.py', 'w') as fp:
     fp.write('CONFIG = dict(%r)\n\n' % ((
         ('extra_compile_args', extra_compile_args),
         ('extra_sources', extra_sources),
@@ -169,31 +170,33 @@ if use_cpython:
                                '-I' + os.path.dirname(memsink.__file__)]
     ext_modules = [Extension(
         name='cpython',
-        sources=['lmdb/cpython.c'] + extra_sources,
+        sources=['lmdb_m/cpython.c'] + extra_sources,
         extra_compile_args=extra_compile_args,
         libraries=libraries,
         include_dirs=extra_include_dirs,
-        library_dirs=extra_library_dirs
+        library_dirs=extra_library_dirs,
+        # krpatter - added for linking to get Nt related functions for sparse files
+        extra_link_args=['/DYNAMICBASE', '/NXCOMPAT']
     )]
 else:
     print('Using cffi extension.')
     install_requires = ['cffi>=0.8']
     try:
-        import lmdb.cffi
-        ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
+        import lmdb_m.cffi
+        ext_modules = [lmdb_m.cffi._ffi.verifier.get_extension()]
     except ImportError:
         sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
         ext_modules = []
 
 def grep_version():
-    path = os.path.join(os.path.dirname(__file__), 'lmdb/__init__.py')
+    path = os.path.join(os.path.dirname(__file__), 'lmdb_m/__init__.py')
     with open(path) as fp:
         for line in fp:
             if line.startswith('__version__'):
                 return eval(line.split()[-1])
 
 setup(
-    name='lmdb',
+    name='lmdb_m',
     version=grep_version(),
     description="Universal Python binding for the LMDB 'Lightning' Database",
     long_description="Universal Python binding for the LMDB 'Lightning' Database",
@@ -202,7 +205,7 @@ setup(
     maintainer='Nic Watson',
     license='OLDAP-2.8',
     url='http://github.com/jnwatson/py-lmdb/',
-    packages=['lmdb'],
+    packages=['lmdb_m'],
 
     classifiers=[
         "Programming Language :: Python",
@@ -221,7 +224,7 @@ setup(
         "Topic :: Database",
         "Topic :: Database :: Database Engines/Servers",
     ],
-    ext_package='lmdb',
+    ext_package='lmdb_m',
     ext_modules=ext_modules,
     install_requires=install_requires,
 )

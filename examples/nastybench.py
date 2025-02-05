@@ -7,7 +7,7 @@ import shutil
 import os
 import tempfile
 
-import lmdb
+import lmdb_m
 
 
 val = ' ' * 100
@@ -33,7 +33,7 @@ else:
 if os.path.exists(DB_PATH):
     shutil.rmtree(DB_PATH)
 
-env = lmdb.open(DB_PATH, map_size=1048576 * 1024,
+env = lmdb_m.open(DB_PATH, map_size=1048576 * 1024,
     metasync=False, sync=False, map_async=True)
 
 nextkey = iter(keys).next

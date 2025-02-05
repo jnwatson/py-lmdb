@@ -13,7 +13,7 @@ try:
     import affinity
 except:
     affinity = False
-import lmdb
+import lmdb_m
 
 
 USE_SPARSE_FILES = sys.platform != 'darwin'
@@ -27,7 +27,7 @@ else:
 
 
 def open_env():
-    return lmdb.open(DB_PATH,
+    return lmdb_m.open(DB_PATH,
         map_size=1048576 * 1024,
         metasync=False,
         sync=False,

@@ -23,7 +23,7 @@
 from __future__ import absolute_import
 import unittest
 
-import lmdb
+import lmdb_m
 
 
 class PackageExportsTest(unittest.TestCase):
@@ -33,7 +33,7 @@ class PackageExportsTest(unittest.TestCase):
     consistency of "from lmdb import *".
     """
     def test_exports(self):
-        assert sorted(lmdb.__all__) == [
+        assert sorted(lmdb_m.__all__) == [
             'BadDbiError',
             'BadRslotError',
             'BadTxnError',

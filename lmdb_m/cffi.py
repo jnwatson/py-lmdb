@@ -44,9 +44,9 @@ try:
 except ImportError:
     import builtins as __builtin__  # type: ignore
 
-import lmdb
+import lmdb_m
 try:
-    from lmdb import _config
+    from lmdb_m import _config
 except ImportError:
     _config = None  # type: ignore
 
@@ -349,7 +349,7 @@ _CFFI_VERIFY = '''
 
 '''
 
-if not lmdb._reading_docs():
+if not lmdb_m._reading_docs():
     import cffi
 
     # Try to use distutils-bundled CFFI configuration to avoid a recompile and
@@ -371,7 +371,7 @@ if not lmdb._reading_docs():
     _ffi.cdef(_CFFI_CDEF)
     _lib = _ffi.verify(_CFFI_VERIFY,
                        modulename='lmdb_cffi',
-                       ext_package='lmdb',
+                       ext_package='lmdb_m',
                        sources=_config_vars['extra_sources'],
                        extra_compile_args=_config_vars['extra_compile_args'],
                        include_dirs=_config_vars['extra_include_dirs'],
@@ -510,7 +510,7 @@ class DiskError(Error):
     MDB_NAME = 'ENOSPC'
 
 # Prepare _error_map, a mapping of integer MDB_ERROR_CODE to exception class.
-if not lmdb._reading_docs():
+if not lmdb_m._reading_docs():
     _error_map = {}
     for obj in list(globals().values()):
         if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:

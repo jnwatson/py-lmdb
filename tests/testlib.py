@@ -36,7 +36,7 @@ try:
 except ImportError:
     import builtins as __builtin__
 
-import lmdb
+import lmdb_m
 
 _cleanups = []
 
@@ -83,7 +83,7 @@ def temp_file(create=True):
 def temp_env(path=None, max_dbs=10, **kwargs):
     if not path:
         path = temp_dir()
-    env = lmdb.open(path, max_dbs=max_dbs, **kwargs)
+    env = lmdb_m.open(path, max_dbs=max_dbs, **kwargs)
     _cleanups.append(env.close)
     return path, env
 

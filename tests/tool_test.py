@@ -26,8 +26,8 @@ import sys
 import shlex
 import unittest
 
-import lmdb
-import lmdb.tool
+import lmdb_m
+import lmdb_m.tool
 import testlib
 
 def call_tool(cmdline):
@@ -35,7 +35,7 @@ def call_tool(cmdline):
         args = cmdline.split()
     else:
         args = shlex.split(cmdline)
-    return lmdb.tool.main(args)
+    return lmdb_m.tool.main(args)
 
 class ToolTest(testlib.LmdbTest):
     def test_cmd_get(self):

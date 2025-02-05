@@ -4,7 +4,7 @@ import webbrowser
 
 import twisted.internet.reactor
 
-import lmdb
+import lmdb_m
 import keystore.lmdb
 import keystore.webapi
 
@@ -13,7 +13,7 @@ def main():
     port = 9999
     interface = '127.0.0.1'
     url = 'http://%s:%d/' % (interface, port)
-    env = lmdb.open('/tmp/foo')
+    env = lmdb_m.open('/tmp/foo')
     reactor = twisted.internet.reactor
     pool = reactor.getThreadPool()
     store = keystore.lmdb.LmdbKeyStore(reactor, pool, env)

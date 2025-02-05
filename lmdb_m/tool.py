@@ -93,7 +93,7 @@ except ImportError:
     except ImportError:
         from StringIO import StringIO  # type: ignore
 
-import lmdb
+import lmdb_m
 
 
 BUF_SIZE = 10485760
@@ -500,7 +500,7 @@ def cmd_rewrite(opts, args):
         die('Must specify target environment path with -E')
 
     src_info = ENV.info()
-    target_env = lmdb.open(opts.target_env,
+    target_env = lmdb_m.open(opts.target_env,
                            map_size=src_info['map_size'] * 2,
                            max_dbs=opts.max_dbs, sync=False,
                            writemap=True, map_async=True,
@@ -609,7 +609,7 @@ def main(argv=None):
         die('Please specify environment (--env)')
 
     global ENV
-    ENV = lmdb.open(opts.env, map_size=opts.map_size * 1048576, subdir=not opts.use_single_file,
+    ENV = lmdb_m.open(opts.env, map_size=opts.map_size * 1048576, subdir=not opts.use_single_file,
                     max_dbs=opts.max_dbs, create=False, readonly=opts.read == 'READ')
 
     if opts.db:
