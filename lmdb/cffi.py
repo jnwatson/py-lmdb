@@ -354,21 +354,21 @@ if not lmdb._reading_docs():
 
     # Try to use distutils-bundled CFFI configuration to avoid a recompile and
     # potential compile errors during first module import.
-    _config_vars = _config.CONFIG if _config else {
-        'extra_compile_args': ['-w'],
-        'extra_sources': ['lib/mdb.c', 'lib/midl.c'],
-        'extra_include_dirs': ['lib'],
-        'extra_library_dirs': [],
-        'libraries': []
-    }
+    if _config:
+        _config_vars = _config.CONFIG
+    else:
+        _config_vars = {
+            'extra_compile_args': ['-w'],
+            'extra_sources': [os.path.abspath('./build/lib/mdb.c'), os.path.abspath('./build/lib/midl.c')],
+            'extra_include_dirs': [os.path.abspath('./build/lib/py-lmdb')],
+            'extra_library_dirs': [],
+            'libraries': []
+        }
 
     _have_patched_lmdb = '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']  # type: ignore
 
     if _have_patched_lmdb:
         _CFFI_CDEF += _CFFI_CDEF_PATCHED
-
-    _config_vars['extra_sources'] = [os.path.abspath('./build/lib/mdb.c'), os.path.abspath('./build/lib/midl.c')]
-    _config_vars['extra_include_dirs'] = [os.path.abspath('./lib/py-lmdb')]
 
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
