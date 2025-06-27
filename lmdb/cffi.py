@@ -359,8 +359,8 @@ if not lmdb._reading_docs():
     else:
         _config_vars = {
             'extra_compile_args': ['-w'],
-            'extra_sources': [os.path.abspath('./build/lib/mdb.c'), os.path.abspath('./build/lib/midl.c')],
-            'extra_include_dirs': [os.path.abspath('./build/lib/py-lmdb')],
+            'extra_sources': [os.path.abspath('build/lib/mdb.c'), os.path.abspath('build/lib/midl.c')],
+            'extra_include_dirs': [os.path.abspath('build/lib/py-lmdb')],
             'extra_library_dirs': [],
             'libraries': []
         }

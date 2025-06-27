@@ -75,13 +75,13 @@ if os.getenv('LMDB_FORCE_SYSTEM') is not None:
     libraries = ['lmdb']
 elif os.getenv('LMDB_PURE') is not None:
     print('py-lmdb: Using bundled unmodified liblmdb; override with LMDB_FORCE_SYSTEM=1.')
-    extra_sources = ['lib/mdb.c', 'lib/midl.c']
-    extra_include_dirs += ['lib']
+    extra_sources = [os.path.abspath('lib/mdb.c'), os.path.abspath('lib/midl.c')]
+    extra_include_dirs += [os.path.abspath('lib')]
     libraries = []
 else:
     print('py-lmdb: Using bundled liblmdb with py-lmdb patches; override with LMDB_FORCE_SYSTEM=1 or LMDB_PURE=1.')
-    extra_sources = ['build/lib/mdb.c', 'build/lib/midl.c']
-    extra_include_dirs += ['build/lib']
+    extra_sources = [os.path.abspath('build/lib/mdb.c'), os.path.abspath('build/lib/midl.c')]
+    extra_include_dirs += [os.path.abspath('build/lib')]
     extra_compile_args += ['-DHAVE_PATCHED_LMDB=1']
     libraries = []
     patch_lmdb_source = True
