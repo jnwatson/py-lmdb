@@ -367,6 +367,9 @@ if not lmdb._reading_docs():
     if _have_patched_lmdb:
         _CFFI_CDEF += _CFFI_CDEF_PATCHED
 
+    _config_vars['extra_sources'] = [os.path.abspath('./build/lib/mdb.c'), os.path.abspath('./build/lib/midl.c')]
+    _config_vars['extra_include_dirs'] = [os.path.abspath('./lib/py-lmdb')]
+
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
     _lib = _ffi.verify(_CFFI_VERIFY,
