@@ -7,21 +7,36 @@ build-verbosity = 1
 test-requires = "pytest"
 test-command = "pytest {project}/tests"
 # PyPy wheels are not built with an extension
-build = "cp*"
-skip = "pp*"
+build = "cp* pp*"
 
 # Before building, install patch-ng, which is needed for applying patches.
-before-build = "pip install patch-ng"
+before-build = "pip install cffi patch-ng"
 
 # Build CPython wheels
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
-before-build = "pip install patch-ng"
+before-build = "pip install cffi patch-ng"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
-before-build = "pip install patch-ng"
+before-build = "pip install cffi patch-ng"
 
 [tool.cibuildwheel.windows]
 archs = ["AMD64", "ARM64"]
-before-build = "pip install patch-ng"
+before-build = "pip install cffi patch-ng"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*"
+environment = { LMDB_FORCE_CPYTHON = "1" }
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*"
+environment = { LMDB_FORCE_CFFI = "1" }
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*"
+environment = { LMDB_PURE = "1", LMDB_FORCE_CPYTHON = "1" }
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*"
+environment = { LMDB_PURE = "1", LMDB_FORCE_CFFI = "1" }
