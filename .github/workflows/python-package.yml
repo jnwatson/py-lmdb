@@ -47,6 +47,16 @@ jobs:
         with:
           fetch-depth: 0  # Unshallow fetch for tags
 
+      - name: Cache cibuildwheel and pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/cibuildwheel
+          key: ${{ runner.os }}-cibw-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cibw-
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
         with:
