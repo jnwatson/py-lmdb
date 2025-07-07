@@ -57,6 +57,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cibw-
 
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
         with:
