@@ -63,15 +63,12 @@ jobs:
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
-        with:
-          # Only build the wheels for the default (patched) cpython version
-          build: "cp*"
-          skip: "pp*"
         env:
           CIBW_BUILD: "cp*"
           CIBW_SKIP: "pp*"
-          CIBW_ENVIRONMENT: >
-            ${{ toJSON(matrix.env) }}
+          CIBW_ENVIRONMENT_LINUX: 'LMDB_FORCE_CPYTHON=1'
+          CIBW_ENVIRONMENT_MACOS: 'LMDB_FORCE_CPYTHON=1'
+          CIBW_ENVIRONMENT_WINDOWS: 'LMDB_FORCE_CPYTHON=1'
 
       - uses: actions/upload-artifact@v4
         with:
