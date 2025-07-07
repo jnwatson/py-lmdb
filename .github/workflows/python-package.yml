@@ -16,17 +16,23 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-24.04, macos-latest, windows-latest]
-        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13', pypy-3.10]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', pypy-3.11]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
+        arch: [x64]
 
         exclude:
           # Pypy doesn't work with cpython
-          - python-version: pypy-3.10
+          - python-version: pypy-3.11
             impl: cpython
-          # macos latest is now arm64 and 3.7 doesn't have arm64 build
-          - python-version: 3.7
-            os: macos-latest
+
+        include:
+          - os: ubuntu-24.04
+            arch: arm64
+            python-version: ['3.10', '3.13']
+            impl: cpython
+            purity: with-pylmdb-mods
+
 
     steps:
       - uses: actions/checkout@v2
@@ -34,6 +40,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.arch }}
       - name: Set env vars Windows
         if: runner.os == 'Windows'
         run: >-
@@ -88,8 +95,7 @@ jobs:
       - name: Test with pytest
         # Limit the test cycle a little
         if: >-
-          matrix.python-version != '3.7' && matrix.python-version != '3.9' &&
-          matrix.python-version != '3.11'
+          matrix.python-version != '3.9' && matrix.python-version != '3.11'
         run: |
           echo "Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI
             pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
@@ -98,19 +104,19 @@ jobs:
       - name: Save wheel
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          name: "${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist/lmdb-*.whl
 
       - name: Get version
         if: >-
-          matrix.python-version == '3.10' && runner.os == 'Linux' &&
+          matrix.python-version == '3.13' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         run: |
           python -c 'import lmdb; print(lmdb.__version__, end="")' > vers.txt
 
       - name: Save version
         if: >-
-          matrix.python-version == '3.10' && runner.os == 'Linux' &&
+          matrix.python-version == '3.13' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v4
         with:
@@ -121,7 +127,7 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.10' && runner.os == 'Linux' &&
+          matrix.python-version == '3.13' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
 
         uses: actions/upload-artifact@v4
@@ -131,12 +137,12 @@ jobs:
 
       - name: Build manylinux wheel
         if: >-
-          matrix.python-version == '3.10' && runner.os == 'Linux' &&
+          matrix.python-version == '3.13' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: RalfG/python-wheels-manylinux-build@v0.7.1
         with:
           python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313
+              cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313
           build-requirements: 'patch-ng'
 
       - name: What do we have
@@ -146,110 +152,31 @@ jobs:
         # We only need a single target to upload the source
         # (all targets have the same source)
         if: >-
-          matrix.python-version == '3.10' && runner.os == 'Linux' &&
+          matrix.python-version == '3.13' && runner.os == 'Linux' &&
           matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
         uses: actions/upload-artifact@v4
         with:
           path: dist/lmdb*manylinux*.whl
-          name: manylinux
-
-  build_aarch64:
-    name: "build aarch64 ${{ matrix.PYTHON }} aarch64 ${{ matrix.impl }} ${{ matrix.purity }}"
-    runs-on: ubuntu-24.04
-    strategy:
-       matrix:
-        impl: [cpython, cffi]
-        purity: [pure, with-pylmdb-mods]
-        PYTHON: ["cp37-cp37m" , "cp38-cp38" , "cp39-cp39", "cp310-cp310", "cp311-cp311", 'cp312-cp312', 'cp313-cp313']
-    steps:
-      - uses: actions/checkout@v2
-      - run: |
-          docker run --rm --privileged hypriot/qemu-register
-      - uses: docker://quay.io/pypa/manylinux2014_aarch64
-        with:
-          args: |
-              bash -c "set -xe;
-              mkdir -p /github/home/.cache/pip;
-              chown -R $(whoami) /github/home/.cache;
-              python --version;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
-              yum install -y libffi-devel;
-              .venv/bin/pip install -U pip setuptools<80 wheel cffi six;
-              if \[ ${{ matrix.impl }} == cpython \] ; then
-                echo LMDB_FORCE_CPYTHON=1
-              else
-                echo LMDB_FORCE_CFFI=1
-              fi
-              if \[ ${{ matrix.purity }} == pure \] ; then
-                echo LMDB_PURE=1
-              elif \[ ${{ matrix.purity }} == system \] ; then
-                echo LMDB_FORCE_SYSTEM=1
-              fi
-              echo \"Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
-                cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
-              echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
-                cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
-              .venv/bin/pip install setuptools<80 flake8 pytest patch-ng;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install setuptools<80;
-              /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
-              ls dist;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
-              echo \"Envs are cpython=$LMDB_FORCE_CPYTHON cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
-              if \[ ${{ matrix.PYTHON }} != cp36-cp36 \] && \[ ${{ matrix.PYTHON }} != cp38-cp38 \] && \[ ${{ matrix.PYTHON }} != cp311-cp311 \] ; then
-                /opt/python/${{ matrix.PYTHON }}/bin/python -m pytest;
-              fi;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -c \"import lmdb; print(lmdb.__version__, end='')\" > vers.txt;
-      - uses: actions/upload-artifact@v4
-        with:
-          name: "${{ runner.os }}-${{ matrix.PYTHON }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path: dist/lmdb-*.whl
-
-      - uses: actions/upload-artifact@v4
-        if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
-            matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        with:
-          path: vers.txt
-          name: vers.txt.aarch64
-      - uses: RalfG/python-wheels-manylinux-build@v0.7.1-manylinux2014_aarch64
-        if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
-            matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        with:
-          python-versions: >-
-              cp36-cp36m cp37-cp37m cp38-cp38 cp39-cp39 cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313
-          build-requirements: 'patch-ng'
-      - uses: actions/upload-artifact@v4
-        if: >-
-            matrix.PYTHON == 'cp310-cp310' && runner.os == 'Linux' &&
-            matrix.purity == 'with-pylmdb-mods' && matrix.impl == 'cpython'
-        with:
-          path: dist/lmdb*manylinux*.whl
-          name: manylinux.aarch64
+          name: manylinux-${{ matrix.arch }}
 
   publish:
     permissions:
       id-token: write # This is required for passwordless publishing to PyPI
-    needs: [build, build_aarch64]
+    needs: [build]
     # N.B. the host running twine to upload is distinct from the target image
     runs-on: ubuntu-24.04
     strategy:
       # We publish a subset of the targets we test
       matrix:
         os: [macos-latest, windows-latest]
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13', pypy-3.10]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', pypy-3.11]
         impl: [cpython, cffi]
         purity: [with-pylmdb-mods]
+        arch: [x64]
 
         exclude:
-          - python-version: 'pypy-3.10'
+          - python-version: 'pypy-3.11'
             impl: cpython
-          - python-version: '3.7'
-            os: macos-latest
-          - python-version: '3.7'
-            impl: cffi
-          - python-version: '3.8'
-            impl: cffi
           - python-version: '3.9'
             impl: cffi
           - python-version: '3.10'
@@ -264,13 +191,15 @@ jobs:
         include:
           # Ubuntu artifacts apply to all python versions
           - os: ubuntu-24.04
-            python-version: '3.10'
+            python-version: '3.13'
             impl: cpython
             purity: with-pylmdb-mods
+            arch: arm64
+
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.os == 'ubuntu-24.04' && matrix.arch == 'x64' && matrix.impl == 'cpython'
         uses: actions/download-artifact@v4
         with:
           name: source
@@ -280,21 +209,14 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
-          name: manylinux
-          path: dist
-
-      - name: Download aarch64 manylinux artifacts
-        if: matrix.os == 'ubuntu-24.04'
-        uses: actions/download-artifact@v4
-        with:
-          name: manylinux.aarch64
+          name: manylinux-${{ matrix.arch }}
           path: dist
 
       - name: Download non-Linux wheel
         if: matrix.os != 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
-          name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
+          name: "${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
           path: dist
 
       - name: Inventory
