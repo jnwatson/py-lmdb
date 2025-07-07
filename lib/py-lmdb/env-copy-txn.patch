@@ -1,5 +1,5 @@
 diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
-index ff03c22..3d6f4cc 100644
+index 199382a..dd8374e 100644
 --- a/libraries/liblmdb/lmdb.h
 +++ b/libraries/liblmdb/lmdb.h
 @@ -682,9 +682,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
@@ -32,10 +32,10 @@ index ff03c22..3d6f4cc 100644
  	/** @brief Return statistics about the LMDB environment.
  	 *
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
-index deb6779..b5d152c 100644
+index 668f966..380e931 100644
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9366,12 +9366,12 @@ done:
+@@ -9442,12 +9442,12 @@ done:
  
  	/** Copy environment with compaction. */
  static int ESECT
@@ -50,7 +50,7 @@ index deb6779..b5d152c 100644
  	pthread_t thr;
  	pgno_t root, new_root;
  	int rc = MDB_SUCCESS;
-@@ -9417,9 +9417,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
+@@ -9493,9 +9493,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
  	if (rc)
  		goto done;
  
@@ -65,17 +65,17 @@ index deb6779..b5d152c 100644
  
  	mp = (MDB_page *)my.mc_wbuf[0];
  	memset(mp, 0, NUM_METAS * env->me_psize);
-@@ -9479,7 +9481,8 @@ finish:
+@@ -9555,7 +9557,8 @@ finish:
  		my.mc_error = rc;
  	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
  	rc = THREAD_FINISH(thr);
--	mdb_txn_abort(txn);
+-	_mdb_txn_abort(txn);
 +	if (!orig_txn)
-+		mdb_txn_abort(txn);
++		_mdb_txn_abort(txn);
  
  done:
  #ifdef _WIN32
-@@ -9596,12 +9599,22 @@ leave:
+@@ -9672,12 +9675,22 @@ leave:
  }
  
  int ESECT
@@ -100,7 +100,7 @@ index deb6779..b5d152c 100644
  }
  
  int ESECT
-@@ -9612,6 +9625,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
+@@ -9688,6 +9701,12 @@ mdb_env_copyfd(MDB_env *env, HANDLE fd)
  
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
@@ -113,7 +113,7 @@ index deb6779..b5d152c 100644
  {
  	int rc;
  	MDB_name fname;
-@@ -9623,7 +9642,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+@@ -9699,7 +9718,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
  		mdb_fname_destroy(fname);
  	}
  	if (rc == MDB_SUCCESS) {
