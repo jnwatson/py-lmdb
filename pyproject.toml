@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 build-verbosity = 1
 test-requires = "pytest"
 test-command = "pytest {project}/tests"
+# PyPy wheels are not built with an extension
+build = "cp*"
+skip = "pp*"
 
 # Before building, install patch-ng, which is needed for applying patches.
 before-build = "pip install patch-ng"
