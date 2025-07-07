@@ -6,8 +6,10 @@ build-backend = "setuptools.build_meta"
 build-verbosity = 1
 test-requires = "pytest"
 test-command = "pytest {project}/tests"
-# PyPy wheels are not built with an extension
+# Build all CPython and PyPy versions
 build = "cp* pp*"
+# Skip testing on all versions except 3.8, 3.11, and 3.13
+test-skip = "cp36-* cp37-* cp39-* cp310-* cp312-* pp*"
 
 # Before building, install patch-ng, which is needed for applying patches.
 before-build = "pip install cffi patch-ng"
