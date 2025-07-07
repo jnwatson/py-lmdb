@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
         python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13', pypy-3.10]
         impl: [cpython, cffi]
         purity: [pure, with-pylmdb-mods]
@@ -72,7 +72,7 @@ jobs:
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
             cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM"
-          python -m pip install setuptools==79.0.1 wheel
+          python -m pip install setuptools<80 wheel
           # Install this separately since sometimes Github Actions can't find it
           python -m pip install cffi
           python -m pip install flake8 pytest patch-ng
@@ -155,7 +155,7 @@ jobs:
 
   build_aarch64:
     name: "build aarch64 ${{ matrix.PYTHON }} aarch64 ${{ matrix.impl }} ${{ matrix.purity }}"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     strategy:
        matrix:
         impl: [cpython, cffi]
@@ -174,7 +174,7 @@ jobs:
               python --version;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m venv .venv;
               yum install -y libffi-devel;
-              .venv/bin/pip install -U pip setuptools==79.0.1 wheel cffi six;
+              .venv/bin/pip install -U pip setuptools<80 wheel cffi six;
               if \[ ${{ matrix.impl }} == cpython \] ; then
                 echo LMDB_FORCE_CPYTHON=1
               else
@@ -189,8 +189,8 @@ jobs:
                 cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM\";
               echo \"Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
                 cffi=$Env:LMDB_FORCE_CFFI pure=$Env:LMDB_PURE system=$Env:LMDB_FORCE_SYSTEM\";
-              .venv/bin/pip install setuptools==79.0.1 flake8 pytest patch-ng;
-              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install setuptools==79.0.1;
+              .venv/bin/pip install setuptools<80 flake8 pytest patch-ng;
+              /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install setuptools<80;
               /opt/python/${{ matrix.PYTHON }}/bin/python setup.py develop bdist_wheel;
               ls dist;
               /opt/python/${{ matrix.PYTHON }}/bin/python -m pip install pytest;
@@ -232,7 +232,7 @@ jobs:
       id-token: write # This is required for passwordless publishing to PyPI
     needs: [build, build_aarch64]
     # N.B. the host running twine to upload is distinct from the target image
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     strategy:
       # We publish a subset of the targets we test
       matrix:
@@ -263,35 +263,35 @@ jobs:
 
         include:
           # Ubuntu artifacts apply to all python versions
-          - os: ubuntu-20.04
+          - os: ubuntu-24.04
             python-version: '3.10'
             impl: cpython
             purity: with-pylmdb-mods
 
     steps:
       - name: Download source
-        if: matrix.os == 'ubuntu-20.04'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           name: source
           path: dist
 
       - name: Download manylinux artifacts
-        if: matrix.os == 'ubuntu-20.04'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           name: manylinux
           path: dist
 
       - name: Download aarch64 manylinux artifacts
-        if: matrix.os == 'ubuntu-20.04'
+        if: matrix.os == 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           name: manylinux.aarch64
           path: dist
 
       - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-20.04'
+        if: matrix.os != 'ubuntu-24.04'
         uses: actions/download-artifact@v4
         with:
           name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
