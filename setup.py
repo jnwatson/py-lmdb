@@ -108,13 +108,15 @@ if patch_lmdb_source:
 
     # Copy away the lmdb source then patch it
     if sys.platform.startswith('win'):
-        patchfile = 'lib' + os.sep + 'py-lmdb' + os.sep + 'env-copy-txn.patch'
-        patchset = patch.fromfile(patchfile)
-        rv = patchset.apply(2, root=dest)
-        if not rv:
-            raise Exception('Applying patch failed')
+
+        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch', 'lib\\py-lmdb\\its-10346.patch']:
+            patchset = patch.fromfile(patchfile)
+            rv = patchset.apply(2, root=dest)
+            if not rv:
+                raise Exception('Applying patch failed')
     else:
         rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
+        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/its-10346.patch')
         if rv:
             raise Exception('Applying patch failed')
 
