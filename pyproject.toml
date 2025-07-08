@@ -11,8 +11,8 @@ build = "cp* pp*"
 # Skip testing on all versions except 3.8, 3.11, and 3.13
 test-skip = "cp36-* cp37-* cp39-* cp310-* cp312-* pp*"
 # Disable musllinux builds
-manylinux-x86_64-image = "manylinux2014"
-manylinux-aarch64-image = "manylinux2014"
+# manylinux-x86_64-image = "manylinux2014"
+# manylinux-aarch64-image = "manylinux2014"
 
 
 # Before building, install patch-ng, which is needed for applying patches.

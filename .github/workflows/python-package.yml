@@ -65,10 +65,8 @@ jobs:
         uses: pypa/cibuildwheel@v2.17.0
         env:
           CIBW_BUILD: "cp*"
-          CIBW_SKIP: "pp*"
-          CIBW_ENVIRONMENT_LINUX: 'LMDB_FORCE_CPYTHON=1'
-          CIBW_ENVIRONMENT_MACOS: 'LMDB_FORCE_CPYTHON=1'
-          CIBW_ENVIRONMENT_WINDOWS: 'LMDB_FORCE_CPYTHON=1'
+          CIBW_SKIP: "pp* *-musllinux_*"
+          LMDB_FORCE_CPYTHON: "1"
 
       - uses: actions/upload-artifact@v4
         with:
