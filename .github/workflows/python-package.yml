@@ -49,7 +49,7 @@ jobs:
       run: pytest
 
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build CPython wheels on ${{ matrix.os }}
     needs: test
     runs-on: ${{ matrix.os }}
     strategy:
@@ -68,7 +68,7 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
         env:
-          CIBW_BUILD: "cp* pp*"
+          CIBW_BUILD: "cp*"
           CIBW_SKIP: "*-musllinux_*"
           LMDB_FORCE_CPYTHON: 1
           CIBW_TEST_COMMAND: ""
@@ -78,11 +78,37 @@ jobs:
           name: cibw-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
+  build_pypy_wheel:
+    name: Build PyPy wheel
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 'pypy-3.10'
+
+      - name: Install dependencies
+        run: pip install wheel cffi
+
+      - name: Build pure Python wheel
+        run: |
+          export LMDB_FORCE_CFFI=1
+          pip wheel . -w dist
+
+      - name: Upload PyPy wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypy-wheel
+          path: dist/*.whl
+
   publish:
     name: Publish wheels
     permissions:
       id-token: write
-    needs: build_wheels
+    needs: [build_wheels, build_pypy_wheel]
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags')
 
@@ -93,6 +119,12 @@ jobs:
           path: dist
           pattern: cibw-wheels-*
           merge-multiple: true
+      
+      - name: Download PyPy wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: pypy-wheel
+          path: dist
 
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
