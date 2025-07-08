@@ -4,29 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
 build-verbosity = 1
-test-requires = "pytest"
-test-command = "pytest {project}/tests"
-# Build all CPython and PyPy versions
-build = "cp* pp*"
-# Skip testing on all versions except 3.8, 3.11, and 3.13
-test-skip = "cp36-* cp37-* cp39-* cp310-* cp312-* pp*"
-# Disable musllinux builds
-# manylinux-x86_64-image = "manylinux2014"
-# manylinux-aarch64-image = "manylinux2014"
-
+skip = "*-musllinux_*"
 
 # Before building, install patch-ng, which is needed for applying patches.
 before-build = "pip install cffi patch-ng"
 
-# Build CPython wheels
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
-before-build = "pip install cffi patch-ng"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
-before-build = "pip install cffi patch-ng"
 
 [tool.cibuildwheel.windows]
 archs = ["AMD64", "ARM64"]
-before-build = "pip install cffi patch-ng"

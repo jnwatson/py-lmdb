@@ -9,33 +9,57 @@ on:
     branches: [master]
 
 jobs:
+  test:
+    name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+        python-version: ['3.8', '3.11', '3.13']
+        impl: [cpython, cffi]
+        purity: [patched, pure]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Set env vars
+      shell: bash
+      run: |
+        if [[ "${{ matrix.impl }}" == "cpython" ]]; then
+          echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV
+        else
+          echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV
+        fi
+        if [[ "${{ matrix.purity }}" == "pure" ]]; then
+          echo "LMDB_PURE=1" >> $GITHUB_ENV
+        fi
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest cffi patch-ng
+        python setup.py develop
+
+    - name: Test with pytest
+      run: pytest
+
   build_wheels:
-    name: Build wheels on ${{ matrix.os }} (${{ matrix.env.LMDB_FORCE_CPYTHON && 'cpython' || 'cffi' }}, ${{ matrix.env.LMDB_PURE && 'pure' || 'patched' }})
+    name: Build wheels on ${{ matrix.os }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-24.04, windows-latest, macos-latest]
-        # Define the build configurations
-        env:
-          - { LMDB_FORCE_CPYTHON: 1 }
-          - { LMDB_FORCE_CFFI: 1 }
-          - { LMDB_PURE: 1, LMDB_FORCE_CPYTHON: 1 }
-          - { LMDB_PURE: 1, LMDB_FORCE_CFFI: 1 }
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Unshallow fetch for tags
-
-      - name: Cache cibuildwheel and pip
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ~/.cache/cibuildwheel
-          key: ${{ runner.os }}-cibw-${{ hashFiles('**/pyproject.toml') }}-${{ toJSON(matrix.env) }}
-          restore-keys: |
-            ${{ runner.os }}-cibw-${{ hashFiles('**/pyproject.toml') }}-
+          fetch-depth: 0
 
       - name: Set up QEMU
         if: runner.os == 'Linux'
@@ -44,22 +68,20 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
         env:
-          CIBW_BUILD: "cp*"
-          CIBW_SKIP: "pp* *-musllinux_*"
-          CIBW_ENVIRONMENT: >
-            ${{ format('LMDB_FORCE_CPYTHON={0} LMDB_FORCE_CFFI={1} LMDB_PURE={2}', matrix.env.LMDB_FORCE_CPYTHON, matrix.env.LMDB_FORCE_CFFI, matrix.env.LMDB_PURE) }}
+          # This builds the default config: cpython and patched
+          LMDB_FORCE_CPYTHON: 1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ toJSON(matrix.env) }}
+          name: cibw-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
   publish:
+    name: Publish wheels
     permissions:
       id-token: write
-    needs: [build_wheels]
+    needs: build_wheels
     runs-on: ubuntu-24.04
-    # Only publish on tags
     if: startsWith(github.ref, 'refs/tags')
 
     steps:
@@ -70,5 +92,5 @@ jobs:
           pattern: cibw-wheels-*
           merge-multiple: true
 
-      - name: Publish distribution 📦 to PyPI
+      - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
