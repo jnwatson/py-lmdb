@@ -75,7 +75,7 @@ jobs:
         env:
           CIBW_BUILD: "cp*"
           CIBW_SKIP: "*-musllinux_*"
-          LMDB_FORCE_CPYTHON: 1
+          LMDB_FORCE_CPYTHON: "1"
           CIBW_TEST_COMMAND: ""
 
       - uses: actions/upload-artifact@v4
