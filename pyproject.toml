@@ -30,19 +30,3 @@ before-build = "pip install cffi patch-ng"
 [tool.cibuildwheel.windows]
 archs = ["AMD64", "ARM64"]
 before-build = "pip install cffi patch-ng"
-
-[[tool.cibuildwheel.overrides]]
-select = "*-manylinux*"
-environment = { LMDB_FORCE_CPYTHON = "1" }
-
-[[tool.cibuildwheel.overrides]]
-select = "*-manylinux*"
-environment = { LMDB_FORCE_CFFI = "1" }
-
-[[tool.cibuildwheel.overrides]]
-select = "*-manylinux*"
-environment = { LMDB_PURE = "1", LMDB_FORCE_CPYTHON = "1" }
-
-[[tool.cibuildwheel.overrides]]
-select = "*-manylinux*"
-environment = { LMDB_PURE = "1", LMDB_FORCE_CFFI = "1" }
