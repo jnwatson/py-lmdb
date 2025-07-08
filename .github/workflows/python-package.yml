@@ -19,6 +19,11 @@ jobs:
         python-version: ['3.8', '3.11', '3.13']
         impl: [cpython, cffi]
         purity: [patched, pure]
+        include:
+          - os: ubuntu-24.04
+            python-version: 'pypy-3.10'
+            impl: 'cffi'
+            purity: 'patched'
 
     steps:
     - uses: actions/checkout@v4
