@@ -1,3 +1,11 @@
+2025-07-09 1.7.0
+* Rewrite CI to use cibuildwheel.
+
+* Update bundled LMDB to 0.9.33, plus a patch to fix ITS#10346.
+
+* Prevent some accidental use of LMDB objects by child processes.
+Contributed by Callum Walker.
+
 2025-01-05 1.6.2
 * CI-only fix.
 
