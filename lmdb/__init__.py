@@ -1,4 +1,4 @@
-# Copyright 2013-2021 The py-lmdb authors, all rights reserved.
+# Copyright 2013-2025 The py-lmdb authors, all rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted only as authorized by the OpenLDAP
@@ -50,4 +50,4 @@ except ImportError:
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__version__ = '1.7.0'
+__version__ = '1.7.1'
