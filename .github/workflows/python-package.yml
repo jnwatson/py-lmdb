@@ -101,7 +101,7 @@ jobs:
       - name: Build pure Python wheel
         run: |
           export LMDB_FORCE_CFFI=1
-          pip wheel . -w dist
+          pip wheel . -w dist --no-deps
 
       - name: Upload PyPy wheel
         uses: actions/upload-artifact@v4
