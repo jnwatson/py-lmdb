@@ -124,8 +124,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Build sdist
-        run: python setup.py sdist
+      - name: Install dependencies
+        run: |
+          pip install setuptools
+          python setup.py sdist
 
       - name: Download all wheels
         uses: actions/download-artifact@v4
@@ -161,8 +163,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Build sdist
-        run: python setup.py sdist
+      - name: Install dependencies
+        run: |
+          pip install setuptools
+          python setup.py sdist
 
       - name: Download all wheels
         uses: actions/download-artifact@v4
