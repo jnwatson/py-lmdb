@@ -71,7 +71,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.17.0
+        uses: pypa/cibuildwheel@v2.23.3
         env:
           CIBW_BUILD: "cp*"
           CIBW_SKIP: "*-musllinux_*"
