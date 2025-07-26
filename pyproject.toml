@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools", "wheel", "cffi>=0.8", "patch-ng"]
+build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel]
+build-verbosity = 1
+skip = "*-musllinux_*"
+
+# Before building, install patch-ng, which is needed for applying patches.
+before-build = "pip install cffi patch-ng"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64", "ARM64"]

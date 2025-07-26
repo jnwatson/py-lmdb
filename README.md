@@ -3,7 +3,7 @@ This is a universal Python binding for the LMDB ‘Lightning’ Database.
 See [the documentation](https://lmdb.readthedocs.io) for more information.
 
 ### CI State
-[![master](https://github.com/jnwatson/py-lmdb/workflows/Build,%20run,%20and%20test%20py-lmdb/badge.svg)](https://github.com/jnwatson/py-lmdb/actions/workflows/python-package.yml)
+[![master](https://github.com/jnwatson/py-lmdb/workflows/Build%20and%20test%20py-lmdb/badge.svg)](https://github.com/jnwatson/py-lmdb/actions/workflows/python-package.yml)
 
 # Python Version Support Statement
 

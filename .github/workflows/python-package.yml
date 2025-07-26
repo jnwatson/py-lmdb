@@ -1,7 +1,6 @@
----
-name: Build, run, and test py-lmdb
+name: Build and test py-lmdb
 
-'on':
+on:
   push:
     branches: [master, release]
     tags:
@@ -10,64 +9,124 @@ name: Build, run, and test py-lmdb
     branches: [master]
 
 jobs:
-  build:
+  test:
+    name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+        python-version: ['3.8', '3.11', '3.13']
+        impl: [cpython, cffi]
+        purity: [patched, pure]
+        include:
+          - os: ubuntu-24.04
+            python-version: 'pypy-3.10'
+            impl: 'cffi'
+            purity: 'patched'
 
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Set env vars
+      shell: bash
+      run: |
+        if [[ "${{ matrix.impl }}" == "cpython" ]]; then
+          echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV
+        else
+          echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV
+        fi
+        if [[ "${{ matrix.purity }}" == "pure" ]]; then
+          echo "LMDB_PURE=1" >> $GITHUB_ENV
+        fi
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest cffi patch-ng setuptools
+        python setup.py develop
+
+    - name: Test with pytest
+      run: pytest
+
+  build_cpython_wheels:
+    name: Build CPython wheels on ${{ matrix.os }}
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: [3.7, 3.8, 3.9, '3.10', '3.11', '3.12', '3.13', pypy-3.10]
-        impl: [cpython, cffi]
-        purity: [pure, with-pylmdb-mods]
-
-        exclude:
-          # Pypy doesn't work with cpython
-          - python-version: pypy-3.10
-            impl: cpython
-          # macos latest is now arm64 and 3.7 doesn't have arm64 build
-          - python-version: 3.7
-            os: macos-latest
+        os: [ubuntu-24.04, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python-version }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.3
+        env:
+          CIBW_BUILD: "cp*"
+          CIBW_SKIP: "*-musllinux_*"
+          LMDB_FORCE_CPYTHON: 1
+          CIBW_TEST_COMMAND: ""
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build_pypy_wheel:
+    name: Build PyPy wheel
+    needs: test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Set env vars Windows
-        if: runner.os == 'Windows'
-        run: >-
-          if ( '${{ matrix.impl }}' -eq 'cpython' ) {
-            echo "LMDB_FORCE_CPYTHON=1" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } else {
-            echo "LMDB_FORCE_CFFI=1" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-          if ( '${{ matrix.purity }}' -eq 'pure' ) {
-            echo "LMDB_PURE=1" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } elseif ( '${{ matrix.purity }}' -eq 'system' ){
-            echo "LMDB_FORCE_SYSTEM=1" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-      - name: Set env vars *nix
-        if: runner.os != 'Windows'
+          python-version: 'pypy-3.10'
+
+      - name: Install dependencies
+        run: pip install wheel cffi
+
+      - name: Build pure Python wheel
         run: |
-          if [[ ${{ matrix.impl }} == cpython ]] ; then
-            echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV;
-          else
-            echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV;
-          fi
-          if [[ ${{ matrix.purity }} == pure ]] ; then
-            echo "LMDB_PURE=1" >> $GITHUB_ENV;
-          elif [[ ${{ matrix.purity }} == system ]] ; then
-            echo "LMDB_FORCE_SYSTEM=1" >> $GITHUB_ENV;
-            sudo apt-get install liblmdb-dev;
-          fi
+          export LMDB_FORCE_CFFI=1
+          pip wheel . -w dist --no-deps
+
+      - name: Upload PyPy wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypy-wheel
+          path: dist/*.whl
+
+  publish-to-test-pypi:
+    name: Publish wheels to Test PyPI
+    permissions:
+      id-token: write
+    needs: [build_cpython_wheels, build_pypy_wheel]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Install dependencies
         run: |
+<<<<<<< HEAD
           echo "Linux: Envs are cpython=$LMDB_FORCE_CPYTHON
             cffi=$LMDB_FORCE_CFFI pure=$LMDB_PURE system=$LMDB_FORCE_SYSTEM"
           echo "Windows: Envs are cpython=$Env:LMDB_FORCE_CPYTHON
@@ -271,46 +330,62 @@ jobs:
     steps:
       - name: Download source
         if: matrix.os == 'ubuntu-20.04'
+=======
+          pip install setuptools
+          python setup.py sdist
+
+      - name: Download all wheels
+>>>>>>> master
         uses: actions/download-artifact@v4
         with:
-          name: source
           path: dist
-
-      - name: Download manylinux artifacts
-        if: matrix.os == 'ubuntu-20.04'
+          pattern: cibw-wheels-*
+          merge-multiple: true
+      
+      - name: Download PyPy wheel
         uses: actions/download-artifact@v4
         with:
-          name: manylinux
+          name: pypy-wheel
           path: dist
 
-      - name: Download aarch64 manylinux artifacts
-        if: matrix.os == 'ubuntu-20.04'
-        uses: actions/download-artifact@v4
-        with:
-          name: manylinux.aarch64
-          path: dist
-
-      - name: Download non-Linux wheel
-        if: matrix.os != 'ubuntu-20.04'
-        uses: actions/download-artifact@v4
-        with:
-          name: "${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.impl }}-${{ matrix.purity }}.whl"
-          path: dist
-
-      - name: Inventory
-        run: >-
-          find .
-
-      - name: Publish distribution 📦 to Test PyPI
-        if: ${{ !startsWith(github.ref, 'refs/tags') }}
+      - name: Publish distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-
         with:
-          # password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-      - name: Publish distribution 📦 to PyPI
-        if: startsWith(github.ref, 'refs/tags')
+  publish:
+    name: Publish wheels
+    permissions:
+      id-token: write
+    needs: [build_cpython_wheels, build_pypy_wheel]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags')
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install setuptools
+          python setup.py sdist
+
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: cibw-wheels-*
+          merge-multiple: true
+      
+      - name: Download PyPy wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: pypy-wheel
+          path: dist
+
+      - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # with: password: ${{ secrets.PYPI_API_TOKEN }}

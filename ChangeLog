@@ -1,3 +1,22 @@
+2025-07-15 1.7.3
+* Fix CFFI build on some platforms by ensuring paths are absolute.
+
+* Correct CI badge URL in README.
+
+2025-07-10 1.7.2
+* CI-only fix
+
+2025-07-09 1.7.1
+* CI-only fix
+
+2025-07-09 1.7.0
+* Rewrite CI to use cibuildwheel.
+
+* Update bundled LMDB to 0.9.33, plus a patch to fix ITS#10346.
+
+* Prevent some accidental use of LMDB objects by child processes.
+Contributed by Callum Walker.
+
 2025-01-05 1.6.2
 * CI-only fix.
 
