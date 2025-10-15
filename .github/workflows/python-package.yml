@@ -71,7 +71,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.23.3
+        uses: pypa/cibuildwheel@v3.2.1
         env:
           CIBW_BUILD: "cp*"
           CIBW_SKIP: "*-musllinux_*"
@@ -135,7 +135,7 @@ jobs:
           path: dist
           pattern: cibw-wheels-*
           merge-multiple: true
-      
+
       - name: Download PyPy wheel
         uses: actions/download-artifact@v4
         with:
@@ -174,7 +174,7 @@ jobs:
           path: dist
           pattern: cibw-wheels-*
           merge-multiple: true
-      
+
       - name: Download PyPy wheel
         uses: actions/download-artifact@v4
         with:
