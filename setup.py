@@ -186,7 +186,7 @@ else:
         ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
     except ImportError:
         sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
-        sys.exit(1)
+        ext_modules = []
 
 def grep_version():
     path = os.path.join(os.path.dirname(__file__), 'lmdb/__init__.py')
