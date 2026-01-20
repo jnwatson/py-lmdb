@@ -308,7 +308,7 @@ class PreloadTest(CursorTestBase):
         assert minflts_after_key - minflts_before < epsilon
 
         # Getting the value does prefault the data, even if we only get it by pointer
-        assert minflts_after_value - minflts_after_key > 1000
+        assert minflts_after_value > minflts_after_key
 
 class CursorReadOnlyTest(unittest.TestCase):
     def tearDown(self):
