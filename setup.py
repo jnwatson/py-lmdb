@@ -181,6 +181,12 @@ else:
     print('Using cffi extension.')
     install_requires = ['cffi>=0.8; implementation_name=="cpython"']
     print('Using cffi, building extension module.')
+    # Ensure the source directory is on sys.path so that `import lmdb.cffi`
+    # works in build-isolated environments where pip runs setup.py from a
+    # temporary directory.
+    _source_dir = os.path.dirname(os.path.abspath(__file__))
+    if _source_dir not in sys.path:
+        sys.path.insert(0, _source_dir)
     try:
         import lmdb.cffi
         ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
