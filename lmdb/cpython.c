@@ -1138,7 +1138,7 @@ env_dealloc(EnvObject *self)
  * Environment.close()
  */
 static PyObject *
-env_close(EnvObject *self)
+env_close(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     env_clear(self);
     Py_RETURN_NONE;
@@ -1483,7 +1483,7 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
  * Environment.info() -> dict
  */
 static PyObject *
-env_info(EnvObject *self)
+env_info(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     static const struct dict_field fields[] = {
         {TYPE_ADDR, "map_addr",    offsetof(MDB_envinfo, me_mapaddr)},
@@ -1513,7 +1513,7 @@ env_info(EnvObject *self)
  * Environment.flags() -> dict
  */
 static PyObject *
-env_flags(EnvObject *self)
+env_flags(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     PyObject *dct;
     unsigned int flags;
@@ -1545,7 +1545,7 @@ env_flags(EnvObject *self)
  * Environment.max_key_size() -> int
  */
 static PyObject *
-env_max_key_size(EnvObject *self)
+env_max_key_size(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     int key_size;
     if(! self->valid) {
@@ -1559,7 +1559,7 @@ env_max_key_size(EnvObject *self)
  * Environment.max_key_size() -> int
  */
 static PyObject *
-env_max_readers(EnvObject *self)
+env_max_readers(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     unsigned int readers;
     int rc;
@@ -1647,7 +1647,7 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
  * Environment.path() -> Unicode
  */
 static PyObject *
-env_path(EnvObject *self)
+env_path(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     const char *path;
     int rc;
@@ -1676,7 +1676,7 @@ static const struct dict_field mdb_stat_fields[] = {
  * Environment.stat() -> dict
  */
 static PyObject *
-env_stat(EnvObject *self)
+env_stat(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     MDB_stat st;
     int rc;
@@ -1718,7 +1718,7 @@ static int env_readers_callback(const char *msg, void *str_)
  * Environment.readers() -> string
  */
 static PyObject *
-env_readers(EnvObject *self)
+env_readers(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     PyObject *str;
     if(! self->valid) {
@@ -1739,7 +1739,7 @@ env_readers(EnvObject *self)
  * Environment.reader_check() -> int
  */
 static PyObject *
-env_reader_check(EnvObject *self)
+env_reader_check(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     int rc;
     int dead;
@@ -1812,7 +1812,7 @@ env_sync(EnvObject *self, PyObject *args)
 /**
  * Environment.__enter__()
  */
-static PyObject *env_enter(EnvObject *self)
+static PyObject *env_enter(EnvObject *self, PyObject *Py_UNUSED(ignored))
 {
     Py_INCREF(self);
     return (PyObject *)self;
@@ -1952,7 +1952,7 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
  * Cursor.count() -> long
  */
 static PyObject *
-cursor_count(CursorObject *self)
+cursor_count(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     size_t count;
     int rc;
@@ -2057,7 +2057,7 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
  * Cursor.first() -> bool
  */
 static PyObject *
-cursor_first(CursorObject *self)
+cursor_first(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_FIRST);
 }
@@ -2066,13 +2066,13 @@ cursor_first(CursorObject *self)
  * Cursor.first_dup() -> bool
  */
 static PyObject *
-cursor_first_dup(CursorObject *self)
+cursor_first_dup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_FIRST_DUP);
 }
 
 static PyObject *
-cursor_value(CursorObject *self);
+cursor_value(CursorObject *self, PyObject *Py_UNUSED(ignored));
 
 /**
  * Cursor.getmulti() -> Iterable of (key, value)
@@ -2300,14 +2300,14 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         Py_INCREF(arg.default_);
         return arg.default_;
     }
-    return cursor_value(self);
+    return cursor_value(self, NULL);
 }
 
 /**
  * Cursor.item() -> (key, value)
  */
 static PyObject *
-cursor_item(CursorObject *self)
+cursor_item(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     int as_buffer;
     PyObject *key;
@@ -2344,7 +2344,7 @@ cursor_item(CursorObject *self)
  * Cursor.key() -> result
  */
 static PyObject *
-cursor_key(CursorObject *self)
+cursor_key(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(! self->valid) {
         return err_invalid();
@@ -2361,7 +2361,7 @@ cursor_key(CursorObject *self)
  * Cursor.last() -> bool
  */
 static PyObject *
-cursor_last(CursorObject *self)
+cursor_last(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_LAST);
 }
@@ -2370,7 +2370,7 @@ cursor_last(CursorObject *self)
  * Cursor.last_dup() -> bool
  */
 static PyObject *
-cursor_last_dup(CursorObject *self)
+cursor_last_dup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_LAST_DUP);
 }
@@ -2379,7 +2379,7 @@ cursor_last_dup(CursorObject *self)
  * Cursor.next() -> bool
  */
 static PyObject *
-cursor_next(CursorObject *self)
+cursor_next(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_NEXT);
 }
@@ -2388,7 +2388,7 @@ cursor_next(CursorObject *self)
  * Cursor.next_dup() -> bool
  */
 static PyObject *
-cursor_next_dup(CursorObject *self)
+cursor_next_dup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_NEXT_DUP);
 }
@@ -2397,7 +2397,7 @@ cursor_next_dup(CursorObject *self)
  * Cursor.next_nodup() -> bool
  */
 static PyObject *
-cursor_next_nodup(CursorObject *self)
+cursor_next_nodup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_NEXT_NODUP);
 }
@@ -2406,7 +2406,7 @@ cursor_next_nodup(CursorObject *self)
  * Cursor.prev() -> bool
  */
 static PyObject *
-cursor_prev(CursorObject *self)
+cursor_prev(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_PREV);
 }
@@ -2415,7 +2415,7 @@ cursor_prev(CursorObject *self)
  * Cursor.prev_dup() -> bool
  */
 static PyObject *
-cursor_prev_dup(CursorObject *self)
+cursor_prev_dup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_PREV_DUP);
 }
@@ -2424,7 +2424,7 @@ cursor_prev_dup(CursorObject *self)
  * Cursor.prev_nodup() -> bool
  */
 static PyObject *
-cursor_prev_nodup(CursorObject *self)
+cursor_prev_nodup(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     return _cursor_get(self, MDB_PREV_NODUP);
 }
@@ -2788,7 +2788,7 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
  * Cursor.value() -> result
  */
 static PyObject *
-cursor_value(CursorObject *self)
+cursor_value(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(! self->valid) {
         return err_invalid();
@@ -2969,7 +2969,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
 /**
  * Cursor.__enter__()
  */
-static PyObject *cursor_enter(CursorObject *self)
+static PyObject *cursor_enter(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     Py_INCREF(self);
     return (PyObject *)self;
@@ -2987,7 +2987,7 @@ static PyObject *cursor_exit(CursorObject *self, PyObject *args)
 /**
  * Cursor.close()
  */
-static PyObject *cursor_close(CursorObject *self)
+static PyObject *cursor_close(CursorObject *self, PyObject *Py_UNUSED(ignored))
 {
     cursor_clear(self);
     Py_RETURN_NONE;
@@ -3274,7 +3274,7 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
  * Transaction.abort()
  */
 static PyObject *
-trans_abort(TransObject *self)
+trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(self->valid) {
         DEBUG("invalidate")
@@ -3303,7 +3303,7 @@ trans_abort(TransObject *self)
  * Transaction.commit()
  */
 static PyObject *
-trans_commit(TransObject *self)
+trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     int rc;
 
@@ -3642,7 +3642,7 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
 /**
  * Transaction.__enter__()
  */
-static PyObject *trans_enter(TransObject *self)
+static PyObject *trans_enter(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(! self->valid) {
         return err_invalid();
@@ -3660,16 +3660,16 @@ static PyObject *trans_exit(TransObject *self, PyObject *args)
         return err_invalid();
     }
     if(PyTuple_GET_ITEM(args, 0) == Py_None) {
-        return trans_commit(self);
+        return trans_commit(self, NULL);
     } else {
-        return trans_abort(self);
+        return trans_abort(self, NULL);
     }
 }
 
 /**
  * Transaction.id() -> int
  */
-static PyObject *trans_id(TransObject *self)
+static PyObject *trans_id(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     size_t id;
 
@@ -3797,7 +3797,7 @@ append_string(PyObject *list, const char *s)
  * lmdb.enable_drop_gil()
  */
 static PyObject *
-enable_drop_gil(void)
+enable_drop_gil(PyObject *Py_UNUSED(self), PyObject *Py_UNUSED(ignored))
 {
     Py_RETURN_NONE;
 }
