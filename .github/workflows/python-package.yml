@@ -159,12 +159,13 @@ jobs:
           python-version: 'pypy-3.10'
 
       - name: Install dependencies
-        run: pip install wheel cffi
+        run: pip install wheel cffi auditwheel patchelf
 
-      - name: Build pure Python wheel
+      - name: Build PyPy CFFI wheel
         run: |
           export LMDB_FORCE_CFFI=1
-          pip wheel . -w dist --no-deps
+          pip wheel . -w raw-dist --no-deps
+          auditwheel repair raw-dist/*.whl -w dist
 
       - name: Upload PyPy wheel
         uses: actions/upload-artifact@v4
