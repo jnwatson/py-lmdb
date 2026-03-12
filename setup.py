@@ -179,18 +179,20 @@ if use_cpython:
     )]
 else:
     print('Using cffi extension.')
-    install_requires = ['cffi>=0.8']
-    if platform.python_implementation() == 'PyPy':
-        print('Using cffi with PyPy, no extension module to build.')
+    install_requires = ['cffi>=0.8; implementation_name=="cpython"']
+    print('Using cffi, building extension module.')
+    # Ensure the source directory is on sys.path so that `import lmdb.cffi`
+    # works in build-isolated environments where pip runs setup.py from a
+    # temporary directory.
+    _source_dir = os.path.dirname(os.path.abspath(__file__))
+    if _source_dir not in sys.path:
+        sys.path.insert(0, _source_dir)
+    try:
+        import lmdb.cffi
+        ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
+    except ImportError:
+        sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
         ext_modules = []
-    else:
-        print('Using cffi with CPython, building extension module.')
-        try:
-            import lmdb.cffi
-            ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
-        except ImportError:
-            sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
-            ext_modules = []
 
 def grep_version():
     path = os.path.join(os.path.dirname(__file__), 'lmdb/__init__.py')
