@@ -579,6 +579,57 @@ class ReplaceTest(unittest.TestCase):
         txn.get(B('a'))
 
 
+class DoubleWriteTxnTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_double_write_txn_raises(self):
+        '''Issue #394: two concurrent write txns must be rejected.'''
+        _, env = testlib.temp_env()
+        txn1 = env.begin(write=True)
+        self.assertRaises(lmdb.Error,
+            lambda: env.begin(write=True))
+        txn1.abort()
+
+    def test_write_txn_after_abort(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.abort()
+        txn2 = env.begin(write=True)
+        txn2.abort()
+
+    def test_write_txn_after_commit(self):
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        txn.commit()
+        txn2 = env.begin(write=True)
+        txn2.abort()
+
+    def test_nested_write_txn_allowed(self):
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        child = env.begin(write=True, parent=parent)
+        child.abort()
+        parent.abort()
+
+    def test_write_txn_after_context_manager(self):
+        _, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(B('key'), B('val'))
+        txn2 = env.begin(write=True)
+        txn2.abort()
+
+    def test_write_txn_after_context_manager_exception(self):
+        _, env = testlib.temp_env()
+        try:
+            with env.begin(write=True) as txn:
+                raise ValueError('test')
+        except ValueError:
+            pass
+        txn2 = env.begin(write=True)
+        txn2.abort()
+
+
 class LeakTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()

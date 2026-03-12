@@ -74,7 +74,7 @@ The C library source lives in `lib/` (mdb.c, lmdb.h, midl.c, midl.h). Patches in
 
 `setup.py` handles patching, compiler flag configuration, and selecting between bundled vs system LMDB. On Windows, patches are applied via `patch_ng`; on other platforms, via the `patch` command.
 
-**Upstream changes**: Never modify `lib/mdb.c`, `lib/midl.c`, `lib/lmdb.h`, or `lib/midl.h` directly. Instead, create a patch file in `lib/py-lmdb/` and add it to `setup.py`'s patch list (both the Windows `patch_ng` loop and the Unix `patch` commands). Patches must use git diff format (with a `diff --git` header line) so `patch_ng` correctly strips `a/`/`b/` prefixes. The patch must apply cleanly after all preceding patches. When fixing an upstream LMDB bug, also prepare a minimal C reproducer and a bug report to file with the LMDB project.
+**Upstream changes**: Never modify `lib/mdb.c`, `lib/midl.c`, `lib/lmdb.h`, or `lib/midl.h` directly. Instead, create a patch file in `lib/py-lmdb/` and add it to `setup.py`'s patch list (both the Windows `patch_ng` loop and the Unix `patch` commands). Patches must use git diff format (with a `diff --git` header line) so `patch_ng` correctly strips `a/`/`b/` prefixes. The patch must apply cleanly after all preceding patches. When fixing an upstream LMDB bug, also prepare a minimal C reproducer and a bug report to file with the LMDB project. Bug reports must conform to OpenLDAP bug-writing guidelines (https://bugs.openldap.org/page.cgi?id=bug-writing.html): one issue per report, concise summary (~60 chars), steps to reproduce, actual vs expected results, and build/platform info. Distinguish facts from speculation.
 
 ### Test Structure
 
