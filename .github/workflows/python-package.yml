@@ -153,18 +153,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
+      - name: Set up PyPy
         uses: actions/setup-python@v6
         with:
           python-version: 'pypy-3.10'
 
-      - name: Install dependencies
-        run: pip install wheel cffi auditwheel patchelf
-
       - name: Build PyPy CFFI wheel
         run: |
+          pip install wheel cffi
           export LMDB_FORCE_CFFI=1
           pip wheel . -w raw-dist --no-deps
+
+      - name: Set up CPython for auditwheel
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Repair wheel with auditwheel
+        run: |
+          pip install auditwheel patchelf
           auditwheel repair raw-dist/*.whl -w dist
 
       - name: Upload PyPy wheel
