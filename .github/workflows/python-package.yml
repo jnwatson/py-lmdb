@@ -15,6 +15,66 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        include:
+          # Linux - all Python versions, both impls, patched
+          - {os: ubuntu-24.04, python-version: '3.8', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.11', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.13', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.8', impl: cffi, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.11', impl: cffi, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.13', impl: cffi, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: patched}
+          # Linux - pure variant on latest Python only
+          - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: pure}
+          - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: pure}
+          # Windows - newest + one older, both impls
+          - {os: windows-latest, python-version: '3.11', impl: cpython, purity: patched}
+          - {os: windows-latest, python-version: '3.14', impl: cpython, purity: patched}
+          - {os: windows-latest, python-version: '3.14', impl: cffi, purity: patched}
+          # macOS - newest + one older, both impls
+          - {os: macos-latest, python-version: '3.11', impl: cpython, purity: patched}
+          - {os: macos-latest, python-version: '3.14', impl: cpython, purity: patched}
+          - {os: macos-latest, python-version: '3.14', impl: cffi, purity: patched}
+          # PyPy
+          - {os: ubuntu-24.04, python-version: 'pypy-3.10', impl: cffi, purity: patched}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Set env vars
+      shell: bash
+      run: |
+        if [[ "${{ matrix.impl }}" == "cpython" ]]; then
+          echo "LMDB_FORCE_CPYTHON=1" >> $GITHUB_ENV
+        else
+          echo "LMDB_FORCE_CFFI=1" >> $GITHUB_ENV
+        fi
+        if [[ "${{ matrix.purity }}" == "pure" ]]; then
+          echo "LMDB_PURE=1" >> $GITHUB_ENV
+        fi
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest cffi patch-ng setuptools
+        python setup.py develop
+
+    - name: Test with pytest
+      run: pytest
+
+  test-full:
+    name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
         os: [ubuntu-24.04, windows-latest, macos-latest]
         python-version: ['3.8', '3.11', '3.13', '3.14']
         impl: [cpython, cffi]
@@ -31,6 +91,7 @@ jobs:
       uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
+        cache: 'pip'
 
     - name: Set env vars
       shell: bash
@@ -55,7 +116,8 @@ jobs:
 
   build_cpython_wheels:
     name: Build CPython wheels on ${{ matrix.os }}
-    needs: test
+    if: github.event_name == 'push'
+    needs: [test, test-full]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -85,7 +147,8 @@ jobs:
 
   build_pypy_wheel:
     name: Build PyPy wheel
-    needs: test
+    if: github.event_name == 'push'
+    needs: [test, test-full]
     runs-on: ubuntu-24.04
 
     steps:
