@@ -111,13 +111,16 @@ if patch_lmdb_source:
     # Copy away the lmdb source then patch it
     if sys.platform.startswith('win'):
 
-        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch']:
+        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch', 'lib\\py-lmdb\\cursor-next-prev-uninitialized.patch']:
             patchset = patch.fromfile(patchfile)
             rv = patchset.apply(2, root=dest)
             if not rv:
                 raise Exception('Applying patch failed')
     else:
         rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
+        if rv:
+            raise Exception('Applying patch failed')
+        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cursor-next-prev-uninitialized.patch')
         if rv:
             raise Exception('Applying patch failed')
 

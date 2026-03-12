@@ -1,0 +1,26 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+index 9fcc6f9..25030ea 100644
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5964,8 +5964,11 @@ mdb_cursor_next(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
+ 	if ((mc->mc_flags & C_DEL && op == MDB_NEXT_DUP))
+ 		return MDB_NOTFOUND;
+ 
+-	if (!(mc->mc_flags & C_INITIALIZED))
++	if (!(mc->mc_flags & C_INITIALIZED)) {
++		if (mc->mc_flags & C_DEL)
++			return MDB_NOTFOUND;
+ 		return mdb_cursor_first(mc, key, data);
++	}
+ 
+ 	mp = mc->mc_pg[mc->mc_top];
+ 
+@@ -6047,6 +6050,8 @@ mdb_cursor_prev(MDB_cursor *mc, MDB_val *key, MDB_val *data, MDB_cursor_op op)
+ 	int rc;
+ 
+ 	if (!(mc->mc_flags & C_INITIALIZED)) {
++		if (mc->mc_flags & C_DEL)
++			return MDB_NOTFOUND;
+ 		rc = mdb_cursor_last(mc, key, data);
+ 		if (rc)
+ 			return rc;

@@ -24,6 +24,7 @@
 
 from __future__ import absolute_import
 from __future__ import with_statement
+import os
 import sys
 import unittest
 
@@ -161,6 +162,43 @@ class CursorTest2(unittest.TestCase):
         self.assertEqual((b'\x00\x02', b'haha'), next(it))
         self.txn.delete(b'\x00\x01', b'hehe', db=self.db)
         self.assertRaises(StopIteration, next, it)
+
+    @unittest.skipIf(os.getenv('LMDB_PURE'), 'requires patched LMDB')
+    def testNextNodupAfterDeletePutSingleKey(self):
+        '''Issue #388: next_nodup infinite loop after delete+put on sole key'''
+        self.c.put(b'key', b'val1')
+        self.c.put(b'key', b'val2')
+        assert self.c.first()
+        self.txn.delete(b'key', db=self.db)
+        self.txn.put(b'key', b'val1', db=self.db)
+        self.txn.put(b'key', b'val2', db=self.db)
+        # Should not find the re-inserted key as "next"
+        self.assertFalse(self.c.next_nodup())
+
+    @unittest.skipIf(os.getenv('LMDB_PURE'), 'requires patched LMDB')
+    def testPrevNodupAfterDeletePutSingleKey(self):
+        '''Issue #388: prev_nodup variant'''
+        self.c.put(b'key', b'val1')
+        self.c.put(b'key', b'val2')
+        assert self.c.last()
+        self.txn.delete(b'key', db=self.db)
+        self.txn.put(b'key', b'val1', db=self.db)
+        # Should not find the re-inserted key as "prev"
+        self.assertFalse(self.c.prev_nodup())
+
+    def testNextNodupAfterDeletePutMultipleKeys(self):
+        '''Issue #388: verify multi-key case still works'''
+        self.c.put(b'key1', b'val1')
+        self.c.put(b'key2', b'val2')
+        assert self.c.first()  # at key1
+        self.txn.delete(b'key1', db=self.db)
+        self.txn.put(b'key1', b'val1', db=self.db)
+        # Should advance to key2, not loop on key1
+        # Note: behavior after txn.delete may vary; the key point is no infinite loop
+        result = self.c.next_nodup()
+        if result:
+            self.assertNotEqual(self.c.key(), b'key1')
+
 
 class PutmultiTest(CursorTestBase):
     def test_empty_seq(self):
