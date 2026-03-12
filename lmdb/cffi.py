@@ -211,6 +211,7 @@ _CFFI_CDEF = '''
 
     #define EACCES ...
     #define EAGAIN ...
+    #define EBUSY ...
     #define EINVAL ...
     #define ENOMEM ...
     #define ENOSPC ...
@@ -729,6 +730,7 @@ class Environment(object):
         self._env = envpp[0]
         self._deps = set()
         self._creating_db_in_readonly = False
+        self._has_write_txn = False
 
         self.set_mapsize(map_size)
 
@@ -1372,9 +1374,19 @@ class Transaction(object):
                 msg = 'Cannot start write transaction with read-only env'
                 raise _error(msg, _lib.EACCES)
 
+            if not parent and env._has_write_txn:
+                msg = ('A write transaction is already active on this '
+                       'environment. Only one top-level write transaction '
+                       'is allowed at a time.')
+                raise _error(msg, _lib.EBUSY)
+
+            if not parent:
+                env._has_write_txn = True
             txnpp = _ffi.new('MDB_txn **')
             rc = _lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
             if rc:
+                if not parent:
+                    env._has_write_txn = False
                 raise _error("mdb_txn_begin", rc)
             self._txn = txnpp[0]
             self._write = True
@@ -1486,6 +1498,8 @@ class Transaction(object):
         if self._write or not self._cache_spare():
             rc = _lib.mdb_txn_commit(self._txn)
             self._txn = _invalid
+            if self._write and not self._parent:
+                self.env._has_write_txn = False
             if rc:
                 raise _error("mdb_txn_commit", rc)
             self._invalidate()
@@ -1505,6 +1519,8 @@ class Transaction(object):
             if self._write or not self._cache_spare():
                 rc = _lib.mdb_txn_abort(self._txn)
                 self._txn = _invalid
+                if self._write and not self._parent:
+                    self.env._has_write_txn = False
                 if rc:
                     raise _error("mdb_txn_abort", rc)
             self._invalidate()

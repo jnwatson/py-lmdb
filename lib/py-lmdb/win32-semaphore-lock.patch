@@ -1,0 +1,63 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -317,7 +317,7 @@
+ #define pthread_key_delete(x)	TlsFree(x)
+ #define pthread_getspecific(x)	TlsGetValue(x)
+ #define pthread_setspecific(x,y)	(TlsSetValue(x,y) ? 0 : ErrCode())
+-#define pthread_mutex_unlock(x)	ReleaseMutex(*x)
++#define pthread_mutex_unlock(x)	ReleaseSemaphore(*x, 1, NULL)
+ #define pthread_mutex_lock(x)	WaitForSingleObject(*x, INFINITE)
+ #define pthread_cond_signal(x)	SetEvent(*x)
+ #define pthread_cond_wait(cond,mutex)	do{SignalObjectAndWait(*mutex, *cond, INFINITE, FALSE); WaitForSingleObject(*mutex, INFINITE);}while(0)
+@@ -326,7 +326,7 @@
+ #define THREAD_FINISH(thr) \
+ 	(WaitForSingleObject(thr, INFINITE) ? ErrCode() : 0)
+ #define LOCK_MUTEX0(mutex)		WaitForSingleObject(mutex, INFINITE)
+-#define UNLOCK_MUTEX(mutex)		ReleaseMutex(mutex)
++#define UNLOCK_MUTEX(mutex)		ReleaseSemaphore(mutex, 1, NULL)
+ #define mdb_mutex_consistent(mutex)	0
+ #define getpid()	GetCurrentProcessId()
+ #define	MDB_FDATASYNC(fd)	(!FlushFileBuffers(fd))
+@@ -4935,9 +4935,9 @@
+ 		mdb_hash_enc(&val, encbuf);
+ 		sprintf(env->me_txns->mti_rmname, "Global\\MDBr%s", encbuf);
+ 		sprintf(env->me_txns->mti_wmname, "Global\\MDBw%s", encbuf);
+-		env->me_rmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_rmname);
++		env->me_rmutex = CreateSemaphoreA(&mdb_all_sa, 1, 1, env->me_txns->mti_rmname);
+ 		if (!env->me_rmutex) goto fail_errno;
+-		env->me_wmutex = CreateMutexA(&mdb_all_sa, FALSE, env->me_txns->mti_wmname);
++		env->me_wmutex = CreateSemaphoreA(&mdb_all_sa, 1, 1, env->me_txns->mti_wmname);
+ 		if (!env->me_wmutex) goto fail_errno;
+ #elif defined(MDB_USE_POSIX_SEM)
+ 		struct stat stbuf;
+@@ -5019,9 +5019,9 @@
+ 			goto fail;
+ 		}
+ #ifdef _WIN32
+-		env->me_rmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_rmname);
++		env->me_rmutex = OpenSemaphoreA(SYNCHRONIZE|SEMAPHORE_MODIFY_STATE, FALSE, env->me_txns->mti_rmname);
+ 		if (!env->me_rmutex) goto fail_errno;
+-		env->me_wmutex = OpenMutexA(SYNCHRONIZE, FALSE, env->me_txns->mti_wmname);
++		env->me_wmutex = OpenSemaphoreA(SYNCHRONIZE|SEMAPHORE_MODIFY_STATE, FALSE, env->me_txns->mti_wmname);
+ 		if (!env->me_wmutex) goto fail_errno;
+ #elif defined(MDB_USE_POSIX_SEM)
+ 		env->me_rmutex = sem_open(env->me_txns->mti_rmname, 0);
+@@ -5212,7 +5212,7 @@
+ 			CloseHandle(env->me_rmutex);
+ 			if (env->me_wmutex) CloseHandle(env->me_wmutex);
+ 		}
+-		/* Windows automatically destroys the mutexes when
++		/* Windows automatically destroys the semaphores when
+ 		 * the last handle closes.
+ 		 */
+ #elif defined(MDB_USE_POSIX_SEM)
+@@ -9473,7 +9473,7 @@
+ 	int rc = MDB_SUCCESS;
+ 
+ #ifdef _WIN32
+-	if (!(my.mc_mutex = CreateMutex(NULL, FALSE, NULL)) ||
++	if (!(my.mc_mutex = CreateSemaphore(NULL, 1, 1, NULL)) ||
+ 		!(my.mc_cond = CreateEvent(NULL, FALSE, FALSE, NULL))) {
+ 		rc = ErrCode();
+ 		goto done;

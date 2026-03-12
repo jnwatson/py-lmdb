@@ -173,6 +173,8 @@ struct EnvObject {
     int max_spare_txns;
     /** Process ID of the process this Environment was opened in. */
     pid_t pid;
+    /** 1 if a write transaction is active on this environment. */
+    int has_write_txn;
 };
 
 /** TransObject.flags bitfield values. */
@@ -835,6 +837,13 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         return err_set(msg, EACCES);
     }
 
+    if(write && !parent && env->has_write_txn) {
+        const char *msg =
+            "A write transaction is already active on this environment. "
+            "Only one top-level write transaction is allowed at a time.";
+        return err_set(msg, EBUSY);
+    }
+
     if((!write) && env->spare_txn) {
         txn = env->spare_txn;
         DEBUG("using cached txn", txn)
@@ -847,14 +856,23 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
     }
     else {
         flags = write ? 0 : MDB_RDONLY;
+        if(write && !parent) {
+            env->has_write_txn = 1;
+        }
         UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &txn));
         if(rc) {
+            if(write && !parent) {
+                env->has_write_txn = 0;
+            }
             return err_set("mdb_txn_begin", rc);
         }
     }
 
     if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
         mdb_txn_abort(txn);
+        if(write && !parent) {
+            env->has_write_txn = 0;
+        }
         return NULL;
     }
     self->txn = txn;
@@ -1215,6 +1233,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->spare_txn = NULL;
     self->max_spare_txns = arg.max_spare_txns;
     self->pid = getpid();
+    self->has_write_txn = 0;
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -3195,6 +3214,9 @@ trans_clear(TransObject *self)
 #endif
 
     if(self->txn) {
+        if(self->env && !(self->flags & TRANS_RDONLY)) {
+            self->env->has_write_txn = 0;
+        }
         txn_abort(self->txn);
         self->txn = NULL;
     }
@@ -3293,6 +3315,7 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
             mdb_txn_abort(self->txn);
             Py_END_ALLOW_THREADS
             self->txn = NULL;
+            self->env->has_write_txn = 0;
         }
         self->valid = 0;
     }
@@ -3324,6 +3347,7 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         DEBUG("committing")
         UNLOCKED(rc, mdb_txn_commit(self->txn));
         self->txn = NULL;
+        self->env->has_write_txn = 0;
         if(rc) {
             return err_set("mdb_txn_commit", rc);
         }
