@@ -217,6 +217,7 @@ setup(
     license='OLDAP-2.8',
     url='http://github.com/jnwatson/py-lmdb/',
     packages=['lmdb'],
+    package_data={'lmdb': ['py.typed', '*.pyi']},
 
     classifiers=[
         "Programming Language :: Python",
