@@ -3547,6 +3547,17 @@ trans_dealloc(TransObject *self)
             mdb_txn_reset(txn);
             self->env->spare_txn = txn;
             self->txn = NULL;
+        } else if(txn && !(self->flags & TRANS_RDONLY)) {
+            /* Abort write txn with GIL released — mdb_txn_abort may do I/O
+             * flushing dirty pages.  Safe here because trans_dealloc is the
+             * normal refcount-to-zero path, not called from invalidate()'s
+             * child list iteration.  trans_clear will see txn==NULL and skip
+             * the abort.  Issue #180. */
+            self->txn = NULL;
+            if(self->env) {
+                self->env->has_write_txn = 0;
+            }
+            txn_abort(txn);
         }
         MDEBUG("deleting trans")
         trans_clear(self);
