@@ -534,15 +534,50 @@ obj_from_val(MDB_val *val, int as_buffer)
     return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
 }
 
+/* Track Py_buffer views acquired during argument parsing so they can be
+ * released after the LMDB operation that consumes the data completes.
+ * This prevents mutable buffer objects (bytearray, memoryview, etc.) from
+ * being resized by another thread while LMDB reads from the pointer. */
+#define MAX_BUF_VIEWS 2
+
+typedef struct {
+    Py_buffer views[MAX_BUF_VIEWS];
+    int count;
+} BufViewList;
+
+static void
+bufviewlist_init(BufViewList *bvl)
+{
+    bvl->count = 0;
+}
+
+static void
+bufviewlist_release(BufViewList *bvl)
+{
+    int i;
+    for(i = 0; i < bvl->count; i++) {
+        PyBuffer_Release(&bvl->views[i]);
+    }
+    bvl->count = 0;
+}
+
 /**
  * Given some Python object, try to get at its raw data. For string or bytes
  * objects, this is the object value. For Unicode objects, this is the UTF-8
- * representation of the object value. For all other objects, attempt to invoke
- * the Python 2.x buffer protocol.
+ * representation of the object value. For all other objects, use the buffer
+ * protocol.
+ *
+ * If `bvl` is non-NULL, the acquired Py_buffer view is kept alive in the
+ * BufViewList and the caller must call bufviewlist_release() after the data
+ * is consumed. If `bvl` is NULL, the view is released immediately (unsafe
+ * for mutable buffers, but matches the legacy behavior).
  */
 static int NOINLINE
-val_from_buffer(MDB_val *val, PyObject *buf)
+val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 {
+    int ret;
+    Py_buffer *view;
+
     if(PyBytes_CheckExact(buf)) {
         val->mv_data = PyBytes_AS_STRING(buf);
         val->mv_size = PyBytes_GET_SIZE(buf);
@@ -552,21 +587,34 @@ val_from_buffer(MDB_val *val, PyObject *buf)
         type_error("Won't implicitly convert Unicode to bytes; use .encode()");
         return -1;
     }
+
 #if PY_VERSION_HEX < 0x030d0000
-    return PyObject_AsReadBuffer(buf,
-        (const void **) &val->mv_data,
-        (Py_ssize_t *) &val->mv_size);
-#else
-    Py_buffer view;
-    int ret;
-    ret = PyObject_GetBuffer(buf, &view, PyBUF_SIMPLE);
-    if(ret == 0) {
-        val->mv_data = view.buf;
-        val->mv_size = view.len;
-        PyBuffer_Release(&view);
+    if(! bvl) {
+        return PyObject_AsReadBuffer(buf,
+            (const void **) &val->mv_data,
+            (Py_ssize_t *) &val->mv_size);
     }
-    return ret;
 #endif
+
+    if(bvl && bvl->count < MAX_BUF_VIEWS) {
+        view = &bvl->views[bvl->count];
+        ret = PyObject_GetBuffer(buf, view, PyBUF_SIMPLE);
+        if(ret == 0) {
+            val->mv_data = view->buf;
+            val->mv_size = view->len;
+            bvl->count++;
+        }
+        return ret;
+    } else {
+        Py_buffer tmp;
+        ret = PyObject_GetBuffer(buf, &tmp, PyBUF_SIMPLE);
+        if(ret == 0) {
+            val->mv_data = tmp.buf;
+            val->mv_size = tmp.len;
+            PyBuffer_Release(&tmp);
+        }
+        return ret;
+    }
 }
 
 /* ------------------- */
@@ -637,9 +685,13 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
 /**
  * Parse a single argument specified by `spec` into `out`, returning 0 on
  * success or setting an exception and returning -1 on error.
+ *
+ * `bvl` is passed through to val_from_buffer() for ARG_BUF args.
+ * For ARG_STR, NULL is passed since the string is consumed immediately.
  */
 static int
-parse_arg(const struct argspec *spec, PyObject *val, void *out)
+parse_arg(const struct argspec *spec, PyObject *val, void *out,
+          BufViewList *bvl)
 {
     void *dst = ((uint8_t *)out) + spec->offset;
     int ret = 0;
@@ -662,11 +714,11 @@ parse_arg(const struct argspec *spec, PyObject *val, void *out)
             *((int *)dst) = PyObject_IsTrue(val);
             break;
         case ARG_BUF:
-            ret = val_from_buffer((MDB_val *)dst, val);
+            ret = val_from_buffer((MDB_val *)dst, val, bvl);
             break;
         case ARG_STR: {
             MDB_val mv;
-            if(! (ret = val_from_buffer(&mv, val))) {
+            if(! (ret = val_from_buffer(&mv, val, NULL))) {
                 *((char **) dst) = mv.mv_data;
             }
             break;
@@ -715,10 +767,14 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
 /**
  * Like PyArg_ParseTupleAndKeywords except types are specialized for this
  * module, keyword strings aren't dup'd every call and the code is >3x smaller.
+ *
+ * `bvl` is passed through to parse_arg() for buffer lifetime tracking.
+ * May be NULL for callers with no ARG_BUF args.
  */
 static int NOINLINE
 parse_args(int valid, int specsize, const struct argspec *argspec,
-           PyObject **cache, PyObject *args, PyObject *kwds, void *out)
+           PyObject **cache, PyObject *args, PyObject *kwds, void *out,
+           BufViewList *bvl)
 {
     unsigned set = 0;
     unsigned i;
@@ -738,7 +794,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
             size = specsize;
         }
         for(i = 0; i < size; i++) {
-            if(parse_arg(argspec + i, PyTuple_GET_ITEM(args, i), out)) {
+            if(parse_arg(argspec + i, PyTuple_GET_ITEM(args, i), out, bvl)) {
                 return -1;
             }
             set |= 1 << i;
@@ -769,7 +825,7 @@ parse_args(int valid, int specsize, const struct argspec *argspec,
                 return -1;
             }
 
-            if(parse_arg(argspec + i, pvalue, out)) {
+            if(parse_arg(argspec + i, pvalue, out, bvl)) {
                 return -1;
             }
         }
@@ -1214,7 +1270,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int mode;
 
     static PyObject *cache = NULL;
-    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -1342,7 +1398,7 @@ env_begin(EnvObject *self, PyObject *args, PyObject *kwds)
     };
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     return make_trans(self, arg.db, arg.parent, arg.write, arg.buffers);
@@ -1375,7 +1431,7 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
 #endif
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     if(! arg.path) {
@@ -1447,7 +1503,7 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
     int flags;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     if(arg.fd == -1) {
@@ -1622,7 +1678,7 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
     int flags;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -1790,7 +1846,7 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache,
-                  args, kwargs, &arg)) {
+                  args, kwargs, &arg, NULL)) {
         return NULL;
     }
 
@@ -1817,7 +1873,7 @@ env_sync(EnvObject *self, PyObject *args)
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg, NULL)) {
         return NULL;
     }
 
@@ -1957,7 +2013,7 @@ cursor_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     };
 
     static PyObject *cache = NULL;
-    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2050,7 +2106,7 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
     int res;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2124,7 +2180,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     char *buffer = NULL;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2157,15 +2213,20 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     first = true;
     while((item = PyIter_Next(iter))) {
         MDB_val mkey;
+        BufViewList bvl;
+        bufviewlist_init(&bvl);
 
-        if(val_from_buffer(&mkey, item)) {
+        if(val_from_buffer(&mkey, item, &bvl)) {
+            bufviewlist_release(&bvl);
             goto failiter;
         } /* val_from_buffer sets exception */
 
         self->key = mkey;
         if(_cursor_get_c(self, MDB_SET_KEY)) {
+            bufviewlist_release(&bvl);
             goto failiter;
         }
+        bufviewlist_release(&bvl);
 
         done = false;
         while (!done) {
@@ -2301,25 +2362,34 @@ cursor_get(CursorObject *self, PyObject *args, PyObject *kwds)
         {"key", ARG_BUF, OFFSET(cursor_get, key)},
         {"default", ARG_OBJ, OFFSET(cursor_get, default_)}
     };
+    BufViewList bvl;
+    PyObject *ret = NULL;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
 
     if(! arg.key.mv_data) {
-        return type_error("key must be given.");
+        type_error("key must be given.");
+        goto out;
     }
 
     self->key = arg.key;
     if(_cursor_get_c(self, MDB_SET_KEY)) {
-        return NULL;
+        goto out;
     }
+    bufviewlist_release(&bvl);
     if(! self->positioned) {
         Py_INCREF(arg.default_);
         return arg.default_;
     }
     return cursor_value(self, NULL);
+
+out:
+    bufviewlist_release(&bvl);
+    return ret;
 }
 
 /**
@@ -2477,7 +2547,7 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     PyObject *ret = NULL;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2500,6 +2570,9 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     added = 0;
     while((item = PyIter_Next(iter))) {
         MDB_val mkey, mval;
+        BufViewList bvl;
+        bufviewlist_init(&bvl);
+
         if(! (PyTuple_CheckExact(item) && PyTuple_GET_SIZE(item) == 2)) {
             PyErr_SetString(PyExc_TypeError,
                             "putmulti() elements must be 2-tuples");
@@ -2508,14 +2581,16 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
             return NULL;
         }
 
-        if(val_from_buffer(&mkey, PyTuple_GET_ITEM(item, 0)) ||
-           val_from_buffer(&mval, PyTuple_GET_ITEM(item, 1))) {
+        if(val_from_buffer(&mkey, PyTuple_GET_ITEM(item, 0), &bvl) ||
+           val_from_buffer(&mval, PyTuple_GET_ITEM(item, 1), &bvl)) {
+            bufviewlist_release(&bvl);
             Py_DECREF(item);
             Py_DECREF(iter);
             return NULL; /* val_from_buffer sets exception */
         }
 
         UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
+        bufviewlist_release(&bvl);
         self->trans->mutations++;
         switch(rc) {
         case MDB_SUCCESS:
@@ -2561,11 +2636,14 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         {"overwrite", ARG_BOOL, OFFSET(cursor_put, overwrite)},
         {"append", ARG_BOOL, OFFSET(cursor_put, append)}
     };
+    BufViewList bvl;
     int flags;
     int rc;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
 
@@ -2581,6 +2659,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
+    bufviewlist_release(&bvl);
     self->trans->mutations++;
     if(rc) {
         if(rc == MDB_KEYEXIST) {
@@ -2660,13 +2739,19 @@ cursor_replace(CursorObject *self, PyObject *args, PyObject *kwds)
         {"key", ARG_BUF, OFFSET(cursor_replace, key)},
         {"value", ARG_BUF, OFFSET(cursor_replace, val)}
     };
+    BufViewList bvl;
+    PyObject *ret;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
 
-    return do_cursor_replace(self, &arg.key, &arg.val);
+    ret = do_cursor_replace(self, &arg.key, &arg.val);
+    bufviewlist_release(&bvl);
+    return ret;
 }
 
 /**
@@ -2682,18 +2767,21 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     static const struct argspec argspec[] = {
         {"key", ARG_BUF, OFFSET(cursor_pop, key)},
     };
+    BufViewList bvl;
     PyObject *old;
     int rc = 0;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
 
     self->key = arg.key;
     if(_cursor_get_c(self, MDB_SET_KEY)) {
-        return NULL;
+        goto out;
     }
+    bufviewlist_release(&bvl);
     if(! self->positioned) {
         Py_RETURN_NONE;
     }
@@ -2709,6 +2797,10 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_cursor_del", rc);
     }
     return old;
+
+out:
+    bufviewlist_release(&bvl);
+    return NULL;
 }
 
 /**
@@ -2717,13 +2809,20 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 cursor_set_key(CursorObject *self, PyObject *arg)
 {
+    BufViewList bvl;
+    PyObject *ret;
+
     if(! self->valid) {
         return err_invalid();
     }
-    if(val_from_buffer(&self->key, arg)) {
+    bufviewlist_init(&bvl);
+    if(val_from_buffer(&self->key, arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
-    return _cursor_get(self, MDB_SET_KEY);
+    ret = _cursor_get(self, MDB_SET_KEY);
+    bufviewlist_release(&bvl);
+    return ret;
 }
 
 /**
@@ -2741,14 +2840,20 @@ cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {"key", ARG_BUF, OFFSET(cursor_set_key_dup, key)},
         {"value", ARG_BUF, OFFSET(cursor_set_key_dup, value)}
     };
+    BufViewList bvl;
+    PyObject *ret;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
     self->key = arg.key;
     self->val = arg.value;
-    return _cursor_get(self, MDB_GET_BOTH);
+    ret = _cursor_get(self, MDB_GET_BOTH);
+    bufviewlist_release(&bvl);
+    return ret;
 }
 
 /**
@@ -2757,16 +2862,24 @@ cursor_set_key_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 cursor_set_range(CursorObject *self, PyObject *arg)
 {
+    BufViewList bvl;
+    PyObject *ret;
+
     if(! self->valid) {
         return err_invalid();
     }
-    if(val_from_buffer(&self->key, arg)) {
+    bufviewlist_init(&bvl);
+    if(val_from_buffer(&self->key, arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
     if(self->key.mv_size) {
-        return _cursor_get(self, MDB_SET_RANGE);
+        ret = _cursor_get(self, MDB_SET_RANGE);
+    } else {
+        ret = _cursor_get(self, MDB_FIRST);
     }
-    return _cursor_get(self, MDB_FIRST);
+    bufviewlist_release(&bvl);
+    return ret;
 }
 
 /**
@@ -2775,6 +2888,7 @@ cursor_set_range(CursorObject *self, PyObject *arg)
 static PyObject *
 cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 {
+    BufViewList bvl;
     PyObject *ret;
     struct cursor_set_range_dup {
         MDB_val key;
@@ -2786,14 +2900,17 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
         {"value", ARG_BUF, OFFSET(cursor_set_range_dup, value)}
     };
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
 
     self->key = arg.key;
     self->val = arg.value;
     ret = _cursor_get(self, MDB_GET_BOTH_RANGE);
+    bufviewlist_release(&bvl);
 
     /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
      * fails to update `key` and `value` on success. Therefore explicitly call
@@ -2857,7 +2974,7 @@ iter_from_args(CursorObject *self, PyObject *args, PyObject *kwds,
     void *val_func;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2952,11 +3069,14 @@ cursor_iter_from(CursorObject *self, PyObject *args)
         {"key", ARG_BUF, OFFSET(cursor_iter_from, key)},
         {"reverse", ARG_BOOL, OFFSET(cursor_iter_from, reverse)}
     };
+    BufViewList bvl;
     enum MDB_cursor_op op;
     int rc;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg, &bvl)) {
+        bufviewlist_release(&bvl);
         return NULL;
     }
 
@@ -2966,6 +3086,7 @@ cursor_iter_from(CursorObject *self, PyObject *args)
         self->key = arg.key;
         rc = _cursor_get_c(self, MDB_SET_RANGE);
     }
+    bufviewlist_release(&bvl);
 
     if(rc) {
         return NULL;
@@ -3283,7 +3404,7 @@ trans_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     };
 
     static PyObject *cache = NULL;
-    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     if(! arg.env) {
@@ -3371,7 +3492,7 @@ trans_cursor(TransObject *self, PyObject *args, PyObject *kwds)
     };
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     return make_cursor(arg.db, self);
@@ -3394,19 +3515,22 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
         {"value", ARG_BUF, OFFSET(trans_delete, val)},
         {"db", ARG_DB, OFFSET(trans_delete, db)}
     };
+    BufViewList bvl;
     MDB_val *val_ptr;
     int rc;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
     if(! db_owner_check(arg.db, self->env)) {
-        return NULL;
+        goto out;
     }
     val_ptr = arg.val.mv_size ? &arg.val : NULL;
     self->mutations++;
     UNLOCKED(rc, mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr));
+    bufviewlist_release(&bvl);
     if(rc) {
         if(rc == MDB_NOTFOUND) {
              Py_RETURN_FALSE;
@@ -3414,6 +3538,10 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_del", rc);
     }
     Py_RETURN_TRUE;
+
+out:
+    bufviewlist_release(&bvl);
+    return NULL;
 }
 
 /**
@@ -3434,7 +3562,7 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     if(! arg.db) {
@@ -3468,25 +3596,29 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         {"default", ARG_OBJ, OFFSET(trans_get, default_)},
         {"db", ARG_DB, OFFSET(trans_get, db)}
     };
+    BufViewList bvl;
     MDB_val val;
     int rc;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
     if(! db_owner_check(arg.db, self->env)) {
-        return NULL;
+        goto out;
     }
 
     if(! arg.key.mv_data) {
-        return type_error("key must be given.");
+        type_error("key must be given.");
+        goto out;
     }
 
     Py_BEGIN_ALLOW_THREADS
     rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
     preload(rc, val.mv_data, val.mv_size);
     Py_END_ALLOW_THREADS
+    bufviewlist_release(&bvl);
 
     if(rc) {
         if(rc == MDB_NOTFOUND) {
@@ -3496,6 +3628,10 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_get", rc);
     }
     return obj_from_val(&val, self->flags & TRANS_BUFFERS);
+
+out:
+    bufviewlist_release(&bvl);
+    return NULL;
 }
 
 /**
@@ -3521,15 +3657,17 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         {"append", ARG_BOOL, OFFSET(trans_put, append)},
         {"db", ARG_DB, OFFSET(trans_put, db)}
     };
+    BufViewList bvl;
     int flags;
     int rc;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
     if(! db_owner_check(arg.db, self->env)) {
-        return NULL;
+        goto out;
     }
 
     flags = 0;
@@ -3552,6 +3690,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
     self->mutations++;
     UNLOCKED(rc, mdb_put(self->txn, (arg.db)->dbi,
                          &arg.key, &arg.value, flags));
+    bufviewlist_release(&bvl);
     if(rc) {
         if(rc == MDB_KEYEXIST) {
             Py_RETURN_FALSE;
@@ -3559,6 +3698,10 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_put", rc);
     }
     Py_RETURN_TRUE;
+
+out:
+    bufviewlist_release(&bvl);
+    return NULL;
 }
 
 static PyObject *
@@ -3583,23 +3726,27 @@ trans_replace(TransObject *self, PyObject *args, PyObject *kwds)
         {"value", ARG_BUF, OFFSET(trans_replace, value)},
         {"db", ARG_DB, OFFSET(trans_replace, db)}
     };
-    PyObject *ret;
+    BufViewList bvl;
+    PyObject *ret = NULL;
     CursorObject *cursor;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
     if(! db_owner_check(arg.db, self->env)) {
-        return NULL;
+        goto out;
     }
 
-    ret = NULL;
     cursor = (CursorObject *) make_cursor(arg.db, self);
     if(cursor) {
         ret = do_cursor_replace(cursor, &arg.key, &arg.value);
         Py_DECREF(cursor);
     }
+
+out:
+    bufviewlist_release(&bvl);
     return ret;
 }
 
@@ -3621,27 +3768,31 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         {"key", ARG_BUF, OFFSET(trans_pop, key)},
         {"db", ARG_DB, OFFSET(trans_pop, db)}
     };
+    BufViewList bvl;
     CursorObject *cursor;
     PyObject *old;
     int rc = 0;
 
+    bufviewlist_init(&bvl);
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
-        return NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, &bvl)) {
+        goto out;
     }
     if(! db_owner_check(arg.db, self->env)) {
-        return NULL;
+        goto out;
     }
 
     if(! ((cursor = (CursorObject *) make_cursor(arg.db, self)))) {
-        return NULL;
+        goto out;
     }
 
     cursor->key = arg.key;
     if(_cursor_get_c(cursor, MDB_SET_KEY)) {
+        bufviewlist_release(&bvl);
         Py_DECREF((PyObject *)cursor);
         return NULL;
     }
+    bufviewlist_release(&bvl);
     if(! cursor->positioned) {
         Py_DECREF((PyObject *)cursor);
         Py_RETURN_NONE;
@@ -3661,6 +3812,10 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         return err_set("mdb_cursor_del", rc);
     }
     return old;
+
+out:
+    bufviewlist_release(&bvl);
+    return NULL;
 }
 
 /**
@@ -3722,7 +3877,7 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
     if(! db_owner_check(arg.db, self->env)) {
@@ -3841,7 +3996,7 @@ get_version(PyObject *mod, PyObject *args, PyObject *kwds)
     };
 
     static PyObject *cache = NULL;
-    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg)) {
+    if(parse_args(1, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
