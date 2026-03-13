@@ -179,6 +179,15 @@ struct EnvObject {
     int has_write_txn;
     /** Resolved path used to track this env in open_env_paths. */
     PyObject *open_path;
+    /** Count of in-flight LMDB operations (GIL released).  env_clear waits
+     *  for this to reach 0 before calling mdb_env_close.  Issue #180. */
+    int active_ops;
+    /** Lock used to block-wait for active_ops to reach 0 instead of
+     *  spinning.  Allocated in locked state; released when active_ops
+     *  decrements to 0 and active_ops_waiter is set.  Issue #180. */
+    PyThread_type_lock active_ops_lock;
+    /** 1 if a thread is blocked waiting for active_ops to reach 0. */
+    int active_ops_waiter;
 };
 
 /** TransObject.flags bitfield values. */
@@ -314,15 +323,42 @@ static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
 static void invalidate(struct lmdb_object *parent)
 {
     struct lmdb_object *child = parent->children.next;
+    PyObject *held_ref = NULL;
     while(child) {
         struct lmdb_object *next = child->siblings.next;
+        /* tp_clear may release the GIL (e.g. during txn_abort), allowing
+         * another thread to Py_DECREF both `child` and `next` to zero.
+         * Hold temporary references to prevent use-after-free. */
+        Py_XINCREF((PyObject *) next);
+        Py_INCREF((PyObject *) child);
         DEBUG("invalidating parent=%p child %p", parent, child)
         Py_TYPE(child)->tp_clear((PyObject *) child);
+        Py_DECREF((PyObject *) child);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
         child = next;
+    }
+    Py_XDECREF(held_ref);
+}
+
+/**
+ * Quickly mark `parent` and all its descendants as invalid (valid=0).
+ * This is fast (no I/O, no GIL release) and prevents new operations from
+ * starting on any descendant.  Must be called before the slower invalidate()
+ * which does actual cleanup.  Issue #180.
+ */
+static void invalidate_mark(struct lmdb_object *parent)
+{
+    struct lmdb_object *child = parent->children.next;
+    while(child) {
+        child->valid = 0;
+        invalidate_mark(child);
+        child = child->siblings.next;
     }
 }
 
 #define INVALIDATE(parent) invalidate((void *)parent);
+#define INVALIDATE_MARK(parent) invalidate_mark((void *)parent);
 
 
 /* ---------- */
@@ -625,15 +661,50 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 /* Concurrency control */
 /* ------------------- */
 
+/* UNLOCKED: release GIL for a plain LMDB call (no env protection). */
 #define UNLOCKED(out, e) \
     Py_BEGIN_ALLOW_THREADS \
     out = (e); \
     Py_END_ALLOW_THREADS
 
+/* ACTIVE_OPS_DEC: decrement active_ops and signal the waiter lock if it
+ * reaches 0 and someone is waiting.  Must be called with the GIL held.
+ * Issue #180. */
+#define ACTIVE_OPS_DEC(_env) \
+    do { \
+        if(--(_env)->active_ops == 0 && (_env)->active_ops_waiter) { \
+            (_env)->active_ops_waiter = 0; \
+            PyThread_release_lock((_env)->active_ops_lock); \
+        } \
+    } while(0)
+
+/* ENV_UNLOCKED: release GIL for an LMDB call, holding the env's active_ops
+ * counter to prevent env_clear from closing the env underneath us.  The
+ * counter is incremented while the GIL is still held (so env_clear can't
+ * start between our valid-check and the increment), and decremented after
+ * we reacquire the GIL.  See issue #180. */
+#define ENV_UNLOCKED(_env, out, e) \
+    do { \
+        (_env)->active_ops++; \
+        Py_BEGIN_ALLOW_THREADS \
+        out = (e); \
+        Py_END_ALLOW_THREADS \
+        ACTIVE_OPS_DEC(_env); \
+    } while(0)
+
 #define PRELOAD_UNLOCKED(_rc, _data, _size) \
     Py_BEGIN_ALLOW_THREADS \
     preload(_rc, _data, _size); \
     Py_END_ALLOW_THREADS
+
+#define ENV_PRELOAD_UNLOCKED(_env, _rc, _data, _size) \
+    do { \
+        (_env)->active_ops++; \
+        Py_BEGIN_ALLOW_THREADS \
+        preload(_rc, _data, _size); \
+        Py_END_ALLOW_THREADS \
+        ACTIVE_OPS_DEC(_env); \
+    } while(0)
 
 /* ---------------- */
 /* Argument parsing */
@@ -908,7 +979,10 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         txn = env->spare_txn;
         DEBUG("using cached txn", txn)
         env->spare_txn = NULL;
-        UNLOCKED(rc, mdb_txn_renew(txn));
+        /* Hold GIL during mdb_txn_renew to prevent race with env_clear:
+         * env->valid check above must be atomic with the LMDB operation.
+         * See https://github.com/jnwatson/py-lmdb/issues/180 */
+        rc = mdb_txn_renew(txn);
         if(rc) {
             mdb_txn_abort(txn);
             return err_set("mdb_txn_renew", rc);
@@ -919,7 +993,10 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         if(write && !parent) {
             env->has_write_txn = 1;
         }
-        UNLOCKED(rc, mdb_txn_begin(env->env, parent_txn, flags, &txn));
+        /* Hold GIL during mdb_txn_begin to prevent race with env_clear:
+         * env->valid check above must be atomic with the LMDB operation.
+         * See https://github.com/jnwatson/py-lmdb/issues/180 */
+        rc = mdb_txn_begin(env->env, parent_txn, flags, &txn);
         if(rc) {
             if(write && !parent) {
                 env->has_write_txn = 0;
@@ -976,7 +1053,8 @@ make_cursor(DbObject *db, TransObject *trans)
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_cursor_open(trans->txn, db->dbi, &curs));
+    /* Hold GIL: see make_trans comment and issue #180. */
+    rc = mdb_cursor_open(trans->txn, db->dbi, &curs);
     if(rc) {
         return err_set("mdb_cursor_open", rc);
     }
@@ -1017,7 +1095,7 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     int rc;
     DbObject *dbo;
 
-    UNLOCKED(rc, mdb_dbi_open(txn, name, flags, &dbi));
+    ENV_UNLOCKED(env, rc, mdb_dbi_open(txn, name, flags, &dbi));
     if(rc) {
         err_set("mdb_dbi_open", rc);
         return NULL;
@@ -1054,7 +1132,8 @@ txn_db_from_name(EnvObject *env, const char *name,
     DbObject *dbo;
 
     int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
-    UNLOCKED(rc, mdb_txn_begin(env->env, NULL, begin_flags, &txn));
+    /* Hold GIL: see make_trans comment and issue #180. */
+    rc = mdb_txn_begin(env->env, NULL, begin_flags, &txn);
     if(rc) {
         err_set("mdb_txn_begin", rc);
         return NULL;
@@ -1067,7 +1146,7 @@ txn_db_from_name(EnvObject *env, const char *name,
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_txn_commit(txn));
+    ENV_UNLOCKED(env, rc, mdb_txn_commit(txn));
     if(rc) {
         Py_DECREF(dbo);
         return err_set("mdb_txn_commit", rc);
@@ -1176,23 +1255,43 @@ env_clear(EnvObject *self)
 
     MDEBUG("env_clear")
 
-    INVALIDATE(self)
     self->valid = 0;
+    /* Phase 1: quickly mark all descendants invalid (no I/O, GIL held).
+     * This prevents any descendant from starting new LMDB operations. */
+    INVALIDATE_MARK(self)
+
+    /* Wait for in-flight LMDB operations to complete.  active_ops is
+     * incremented/decremented under the GIL.  ACTIVE_OPS_DEC releases
+     * the lock when active_ops reaches 0, waking us.  Issue #180. */
+    if(self->active_ops > 0) {
+        self->active_ops_waiter = 1;
+        Py_BEGIN_ALLOW_THREADS
+        PyThread_acquire_lock(self->active_ops_lock, WAIT_LOCK);
+        Py_END_ALLOW_THREADS
+        /* Re-acquire so lock stays in locked state for next wait. */
+        PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+    }
+
+    /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */
+    INVALIDATE(self)
     Py_CLEAR(self->main_db);
 
     txn = self->spare_txn;
     if(txn) {
-        MDEBUG("killing spare txn %p", txn);
-        txn_abort(txn);
         self->spare_txn = NULL;
+        MDEBUG("killing spare txn %p", txn);
+        /* Don't release GIL — env is being torn down, workers could
+         * re-stash a spare_txn during the GIL release. */
+        mdb_txn_abort(txn);
     }
 
     if(self->env) {
+        MDB_env *env = self->env;
+        self->env = NULL;
         DEBUG("Closing env")
         Py_BEGIN_ALLOW_THREADS
-        mdb_env_close(self->env);
+        mdb_env_close(env);
         Py_END_ALLOW_THREADS
-        self->env = NULL;
     }
 
     if(self->open_path) {
@@ -1214,6 +1313,10 @@ env_dealloc(EnvObject *self)
     }
 
     env_clear(self);
+    if(self->active_ops_lock) {
+        PyThread_free_lock(self->active_ops_lock);
+        self->active_ops_lock = NULL;
+    }
     PyObject_Del(self);
 }
 
@@ -1300,6 +1403,16 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->max_spare_txns = arg.max_spare_txns;
     self->pid = getpid();
     self->has_write_txn = 0;
+    self->active_ops = 0;
+    self->active_ops_waiter = 0;
+    self->active_ops_lock = PyThread_allocate_lock();
+    if(! self->active_ops_lock) {
+        PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
+        Py_DECREF(self);
+        return NULL;
+    }
+    /* Acquire immediately so waiters will block until signaled. */
+    PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -1512,9 +1625,9 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     fspath_s = PyBytes_AS_STRING(fspath_obj);
     flags = arg.compact ? MDB_CP_COMPACT : 0;
 #ifdef HAVE_PATCHED_LMDB
-    UNLOCKED(rc, mdb_env_copy3(self->env, fspath_s, flags, txn));
+    ENV_UNLOCKED(self, rc, mdb_env_copy3(self->env, fspath_s, flags, txn));
 #else
-    UNLOCKED(rc, mdb_env_copy2(self->env, fspath_s, flags));
+    ENV_UNLOCKED(self, rc, mdb_env_copy2(self->env, fspath_s, flags));
 #endif
     Py_CLEAR(fspath_obj);
     if(rc) {
@@ -1595,9 +1708,9 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
 #endif
 
 #ifdef HAVE_PATCHED_LMDB
-    UNLOCKED(rc, mdb_env_copyfd3(self->env, HANDLE_ARG, flags, txn));
+    ENV_UNLOCKED(self, rc, mdb_env_copyfd3(self->env, HANDLE_ARG, flags, txn));
 #else
-    UNLOCKED(rc, mdb_env_copyfd2(self->env, HANDLE_ARG, flags));
+    ENV_UNLOCKED(self, rc, mdb_env_copyfd2(self->env, HANDLE_ARG, flags));
 #endif
 
     if(rc) {
@@ -1628,7 +1741,7 @@ env_info(EnvObject *self, PyObject *Py_UNUSED(ignored))
         return err_invalid();
     }
 
-    UNLOCKED(rc, mdb_env_info(self->env, &info));
+    ENV_UNLOCKED(self, rc, mdb_env_info(self->env, &info));
     if(rc) {
         err_set("mdb_env_info", rc);
         return NULL;
@@ -1812,7 +1925,7 @@ env_stat(EnvObject *self, PyObject *Py_UNUSED(ignored))
         return err_invalid();
     }
 
-    UNLOCKED(rc, mdb_env_stat(self->env, &st));
+    ENV_UNLOCKED(self, rc, mdb_env_stat(self->env, &st));
     if(rc) {
         err_set("mdb_env_stat", rc);
         return NULL;
@@ -1929,7 +2042,7 @@ env_sync(EnvObject *self, PyObject *args)
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_env_sync(self->env, arg.force));
+    ENV_UNLOCKED(self, rc, mdb_env_sync(self->env, arg.force));
     if(rc) {
         return err_set("mdb_env_sync", rc);
     }
@@ -2025,13 +2138,16 @@ static PyTypeObject PyEnvironment_Type = {
 static int
 cursor_clear(CursorObject *self)
 {
-    if(self->valid) {
+    if(self->curs) {
+        MDB_cursor *curs = self->curs;
+        self->valid = 0;
+        self->curs = NULL;  /* Prevent double-close (issue #180). */
         INVALIDATE(self)
         UNLINK_CHILD(self->trans, self)
-        Py_BEGIN_ALLOW_THREADS
-        mdb_cursor_close(self->curs);
-        Py_END_ALLOW_THREADS
-        self->valid = 0;
+        /* mdb_cursor_close does no I/O — just unlinks from txn and frees.
+         * No need to release the GIL; keeping it held avoids widening the
+         * race window during INVALIDATE. */
+        mdb_cursor_close(curs);
     }
     Py_CLEAR(self->trans);
     return 0;
@@ -2088,7 +2204,7 @@ cursor_count(CursorObject *self, PyObject *Py_UNUSED(ignored))
         return err_invalid();
     }
 
-    UNLOCKED(rc, mdb_cursor_count(self->curs, &count));
+    ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_count(self->curs, &count));
     if(rc) {
         return err_set("mdb_cursor_count", rc);
     }
@@ -2107,9 +2223,11 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 {
     int rc;
 
+    self->trans->env->active_ops++;
     Py_BEGIN_ALLOW_THREADS;
     rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
     Py_END_ALLOW_THREADS;
+    ACTIVE_OPS_DEC(self->trans->env);
 
     self->positioned = rc == 0;
     self->last_mutation = self->trans->mutations;
@@ -2169,7 +2287,7 @@ cursor_delete(CursorObject *self, PyObject *args, PyObject *kwds)
         DEBUG("deleting key '%.*s'",
               (int) self->key.mv_size,
               (char*) self->key.mv_data)
-        UNLOCKED(rc, mdb_cursor_del(self->curs, flags));
+        ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_del(self->curs, flags));
         self->trans->mutations++;
         if(rc) {
             return err_set("mdb_cursor_del", rc);
@@ -2290,7 +2408,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                 goto failiter;
             } else {
                 key = obj_from_val(&self->key, as_buffer);
-                PRELOAD_UNLOCKED(0, self->val.mv_data, self->val.mv_size);
+                ENV_PRELOAD_UNLOCKED(self->trans->env, 0, self->val.mv_data, self->val.mv_size);
 
                 if(!arg.dupfixed_bytes) {
                     /* Not dupfixed, MDB_GET_CURRENT returns single item */
@@ -2467,7 +2585,7 @@ cursor_item(CursorObject *self, PyObject *Py_UNUSED(ignored))
 
     as_buffer = self->trans->flags & TRANS_BUFFERS;
     key = obj_from_val(&self->key, as_buffer);
-    PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
+    ENV_PRELOAD_UNLOCKED(self->trans->env, rc, self->val.mv_data, self->val.mv_size);
     val = obj_from_val(&self->val, as_buffer);
     tup = PyTuple_New(2);
     if(tup && key && val) {
@@ -2641,7 +2759,7 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
             return NULL; /* val_from_buffer sets exception */
         }
 
-        UNLOCKED(rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
+        ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_put(self->curs, &mkey, &mval, flags));
         bufviewlist_release(&bvl);
         self->trans->mutations++;
         switch(rc) {
@@ -2710,7 +2828,7 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
-    UNLOCKED(rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
+    ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_put(self->curs, &arg.key, &arg.val, flags));
     bufviewlist_release(&bvl);
     self->trans->mutations++;
     if(rc) {
@@ -2738,11 +2856,11 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
             return NULL;
         }
         if(self->positioned) {
-            PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
+            ENV_PRELOAD_UNLOCKED(self->trans->env, rc, self->val.mv_data, self->val.mv_size);
             if(! ((old = obj_from_val(&self->val, 0)))) {
                 return NULL;
             }
-            UNLOCKED(rc, mdb_cursor_del(self->curs, MDB_NODUPDATA));
+            ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_del(self->curs, MDB_NODUPDATA));
             self->trans->mutations++;
             if(rc) {
                 Py_CLEAR(old);
@@ -2755,7 +2873,7 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
     } else {
         /* val is updated if MDB_KEYEXIST. */
         int flags = MDB_NOOVERWRITE;
-        UNLOCKED(rc, mdb_cursor_put(self->curs, key, val, flags));
+        ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_put(self->curs, key, val, flags));
         self->trans->mutations++;
         if(! rc) {
             Py_RETURN_NONE;
@@ -2768,7 +2886,7 @@ do_cursor_replace(CursorObject *self, MDB_val *key, MDB_val *val)
         }
     }
 
-    UNLOCKED(rc, mdb_cursor_put(self->curs, key, &newval, 0));
+    ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_put(self->curs, key, &newval, 0));
     if(rc) {
         Py_DECREF(old);
         return err_set("mdb_put", rc);
@@ -2837,12 +2955,12 @@ cursor_pop(CursorObject *self, PyObject *args, PyObject *kwds)
     if(! self->positioned) {
         Py_RETURN_NONE;
     }
-    PRELOAD_UNLOCKED(rc, self->val.mv_data, self->val.mv_size);
+    ENV_PRELOAD_UNLOCKED(self->trans->env, rc, self->val.mv_data, self->val.mv_size);
     if(! ((old = obj_from_val(&self->val, 0)))) {
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_cursor_del(self->curs, 0));
+    ENV_UNLOCKED(self->trans->env, rc, mdb_cursor_del(self->curs, 0));
     self->trans->mutations++;
     if(rc) {
         Py_DECREF(old);
@@ -2986,7 +3104,7 @@ cursor_value(CursorObject *self, PyObject *Py_UNUSED(ignored))
         _cursor_get_c(self, MDB_GET_CURRENT)) {
         return NULL;
     }
-    PRELOAD_UNLOCKED(0, self->val.mv_data, self->val.mv_size);
+    ENV_PRELOAD_UNLOCKED(self->trans->env, 0, self->val.mv_data, self->val.mv_size);
 
     return obj_from_val(&self->val, self->trans->flags & TRANS_BUFFERS);
 }
@@ -3381,21 +3499,28 @@ static int
 trans_clear(TransObject *self)
 {
     MDEBUG("clearing trans")
+    self->valid = 0;
     INVALIDATE(self)
 #ifdef HAVE_MEMSINK
     ms_notify((PyObject *) self, &self->sink_head);
 #endif
 
     if(self->txn) {
+        MDB_txn *txn = self->txn;
+        self->txn = NULL;  /* Prevent double-abort from concurrent
+                            * trans_clear calls (issue #180). */
         if(self->env && !(self->flags & TRANS_RDONLY)) {
             self->env->has_write_txn = 0;
         }
-        txn_abort(self->txn);
-        self->txn = NULL;
+        /* Don't release the GIL here — trans_clear is called from
+         * invalidate() while iterating the children list, and releasing
+         * the GIL would allow other threads to modify the list or free
+         * objects we're still using.  The explicit trans_abort() path
+         * releases the GIL for performance.  Issue #180. */
+        mdb_txn_abort(txn);
     }
     MDEBUG("db is/was %p", self->db)
     Py_CLEAR(self->db);
-    self->valid = 0;
     if(self->env) {
         UNLINK_CHILD(self->env, self)
         Py_CLEAR(self->env);
@@ -3416,12 +3541,23 @@ trans_dealloc(TransObject *self)
     }
 
     if(self->env && self->env->pid == getpid()) {
-        if(txn && self->env && !self->env->spare_txn && 
+        if(self->env->valid && txn && self->env && !self->env->spare_txn &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             mdb_txn_reset(txn);
             self->env->spare_txn = txn;
             self->txn = NULL;
+        } else if(txn && !(self->flags & TRANS_RDONLY)) {
+            /* Abort write txn with GIL released — mdb_txn_abort may do I/O
+             * flushing dirty pages.  Safe here because trans_dealloc is the
+             * normal refcount-to-zero path, not called from invalidate()'s
+             * child list iteration.  trans_clear will see txn==NULL and skip
+             * the abort.  Issue #180. */
+            self->txn = NULL;
+            if(self->env) {
+                self->env->has_write_txn = 0;
+            }
+            txn_abort(txn);
         }
         MDEBUG("deleting trans")
         trans_clear(self);
@@ -3472,6 +3608,13 @@ static PyObject *
 trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(self->valid) {
+        self->valid = 0;  /* Prevent concurrent trans_clear (issue #180). */
+        /* Save txn and env before INVALIDATE, which may release the GIL
+         * and allow concurrent trans_clear to NULL them. */
+        MDB_txn *txn = self->txn;
+        EnvObject *env = self->env;
+        self->txn = NULL;  /* Prevent double-abort (issue #180). */
+        Py_XINCREF((PyObject *) env);
         DEBUG("invalidate")
         INVALIDATE(self)
 #ifdef HAVE_MEMSINK
@@ -3480,17 +3623,37 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
         if(self->flags & TRANS_RDONLY) {
             DEBUG("resetting")
             /* Reset to spare state, ready for _dealloc to freelist it. */
-            mdb_txn_reset(self->txn);
+            if(txn) {
+                mdb_txn_reset(txn);
+                self->txn = txn;  /* Restore for spare_txn caching. */
+            }
             self->flags |= TRANS_SPARE;
         } else {
-            DEBUG("aborting")
-            Py_BEGIN_ALLOW_THREADS
-            mdb_txn_abort(self->txn);
-            Py_END_ALLOW_THREADS
-            self->txn = NULL;
-            self->env->has_write_txn = 0;
+            if(env) {
+                env->has_write_txn = 0;
+            }
+            if(txn && env) {
+                DEBUG("aborting")
+                /* Wait for child ops (e.g. child commit) to finish before
+                 * aborting, since LMDB doesn't allow concurrent access to
+                 * parent+child txns.  Issue #180. */
+                if(env->active_ops > 0) {
+                    env->active_ops_waiter = 1;
+                    Py_BEGIN_ALLOW_THREADS
+                    PyThread_acquire_lock(env->active_ops_lock, WAIT_LOCK);
+                    Py_END_ALLOW_THREADS
+                    PyThread_acquire_lock(env->active_ops_lock, NOWAIT_LOCK);
+                }
+                env->active_ops++;
+                Py_BEGIN_ALLOW_THREADS
+                mdb_txn_abort(txn);
+                Py_END_ALLOW_THREADS
+                ACTIVE_OPS_DEC(env);
+            } else if(txn) {
+                mdb_txn_abort(txn);
+            }
         }
-        self->valid = 0;
+        Py_XDECREF((PyObject *) env);
     }
     Py_RETURN_NONE;
 }
@@ -3506,6 +3669,7 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
     if(! self->valid) {
         return err_invalid();
     }
+    self->valid = 0;  /* Prevent new operations from starting (issue #180). */
     DEBUG("invalidate")
     INVALIDATE(self)
 #ifdef HAVE_MEMSINK
@@ -3517,15 +3681,27 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         mdb_txn_reset(self->txn);
         self->flags |= TRANS_SPARE;
     } else {
-        DEBUG("committing")
-        UNLOCKED(rc, mdb_txn_commit(self->txn));
+        /* Save txn/env locally before releasing the GIL.  mdb_txn_commit
+         * frees the MDB_txn, so self->txn must be NULLed first to prevent
+         * concurrent trans_clear from calling mdb_txn_abort on freed memory.
+         * Similarly, Py_INCREF the env since trans_clear may Py_CLEAR it
+         * while the GIL is released.  Issue #180. */
+        MDB_txn *txn = self->txn;
+        EnvObject *env = self->env;
         self->txn = NULL;
-        self->env->has_write_txn = 0;
+        Py_INCREF((PyObject *) env);
+        env->has_write_txn = 0;
+        DEBUG("committing")
+        env->active_ops++;
+        Py_BEGIN_ALLOW_THREADS
+        rc = mdb_txn_commit(txn);
+        Py_END_ALLOW_THREADS
+        ACTIVE_OPS_DEC(env);
+        Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
         }
     }
-    self->valid = 0;
     Py_RETURN_NONE;
 }
 
@@ -3581,7 +3757,7 @@ trans_delete(TransObject *self, PyObject *args, PyObject *kwds)
     }
     val_ptr = arg.val.mv_size ? &arg.val : NULL;
     self->mutations++;
-    UNLOCKED(rc, mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr));
+    ENV_UNLOCKED(self->env, rc, mdb_del(self->txn, arg.db->dbi, &arg.key, val_ptr));
     bufviewlist_release(&bvl);
     if(rc) {
         if(rc == MDB_NOTFOUND) {
@@ -3623,7 +3799,7 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_drop(self->txn, arg.db->dbi, arg.delete));
+    ENV_UNLOCKED(self->env, rc, mdb_drop(self->txn, arg.db->dbi, arg.delete));
     self->mutations++;
     if(rc) {
         return err_set("mdb_drop", rc);
@@ -3666,10 +3842,12 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         goto out;
     }
 
+    self->env->active_ops++;
     Py_BEGIN_ALLOW_THREADS
     rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
     preload(rc, val.mv_data, val.mv_size);
     Py_END_ALLOW_THREADS
+    ACTIVE_OPS_DEC(self->env);
     bufviewlist_release(&bvl);
 
     if(rc) {
@@ -3740,7 +3918,7 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         (int)arg.value.mv_size)
 
     self->mutations++;
-    UNLOCKED(rc, mdb_put(self->txn, (arg.db)->dbi,
+    ENV_UNLOCKED(self->env, rc, mdb_put(self->txn, (arg.db)->dbi,
                          &arg.key, &arg.value, flags));
     bufviewlist_release(&bvl);
     if(rc) {
@@ -3850,13 +4028,13 @@ trans_pop(TransObject *self, PyObject *args, PyObject *kwds)
         Py_RETURN_NONE;
     }
 
-    PRELOAD_UNLOCKED(rc, cursor->val.mv_data, cursor->val.mv_size);
+    ENV_PRELOAD_UNLOCKED(self->env, rc, cursor->val.mv_data, cursor->val.mv_size);
     if(! ((old = obj_from_val(&cursor->val, 0)))) {
         Py_DECREF((PyObject *)cursor);
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_cursor_del(cursor->curs, 0));
+    ENV_UNLOCKED(self->env, rc, mdb_cursor_del(cursor->curs, 0));
     Py_DECREF((PyObject *)cursor);
     self->mutations++;
     if(rc) {
@@ -3936,7 +4114,7 @@ trans_stat(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    UNLOCKED(rc, mdb_stat(self->txn, arg.db->dbi, &st));
+    ENV_UNLOCKED(self->env, rc, mdb_stat(self->txn, arg.db->dbi, &st));
     if(rc) {
         return err_set("mdb_stat", rc);
     }
