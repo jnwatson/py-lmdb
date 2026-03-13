@@ -326,13 +326,16 @@ static void invalidate(struct lmdb_object *parent)
     PyObject *held_ref = NULL;
     while(child) {
         struct lmdb_object *next = child->siblings.next;
-        /* tp_clear may release the GIL, allowing another thread to dealloc
-         * `next`.  Hold a reference to prevent use-after-free. */
+        /* tp_clear may release the GIL (e.g. during txn_abort), allowing
+         * another thread to Py_DECREF both `child` and `next` to zero.
+         * Hold temporary references to prevent use-after-free. */
         Py_XINCREF((PyObject *) next);
-        Py_XDECREF(held_ref);
-        held_ref = (PyObject *) next;
+        Py_INCREF((PyObject *) child);
         DEBUG("invalidating parent=%p child %p", parent, child)
         Py_TYPE(child)->tp_clear((PyObject *) child);
+        Py_DECREF((PyObject *) child);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
         child = next;
     }
     Py_XDECREF(held_ref);
@@ -1277,7 +1280,9 @@ env_clear(EnvObject *self)
     if(txn) {
         self->spare_txn = NULL;
         MDEBUG("killing spare txn %p", txn);
-        txn_abort(txn);
+        /* Don't release GIL — env is being torn down, workers could
+         * re-stash a spare_txn during the GIL release. */
+        mdb_txn_abort(txn);
     }
 
     if(self->env) {
@@ -3507,7 +3512,12 @@ trans_clear(TransObject *self)
         if(self->env && !(self->flags & TRANS_RDONLY)) {
             self->env->has_write_txn = 0;
         }
-        txn_abort(txn);
+        /* Don't release the GIL here — trans_clear is called from
+         * invalidate() while iterating the children list, and releasing
+         * the GIL would allow other threads to modify the list or free
+         * objects we're still using.  The explicit trans_abort() path
+         * releases the GIL for performance.  Issue #180. */
+        mdb_txn_abort(txn);
     }
     MDEBUG("db is/was %p", self->db)
     Py_CLEAR(self->db);
@@ -3531,7 +3541,7 @@ trans_dealloc(TransObject *self)
     }
 
     if(self->env && self->env->pid == getpid()) {
-        if(txn && self->env && !self->env->spare_txn && 
+        if(self->env->valid && txn && self->env && !self->env->spare_txn &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             mdb_txn_reset(txn);
