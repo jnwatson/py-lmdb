@@ -314,6 +314,45 @@ class CloseRaceTest(unittest.TestCase):
             t.join()
 
 
+class ChildCommitRaceTest(unittest.TestCase):
+    # https://github.com/jnwatson/py-lmdb/issues/180
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_parent_abort_during_child_commit(self):
+        """Ensure parent.abort() during child.commit() doesn't segfault.
+
+        The child commit releases the GIL while mdb_txn_commit runs.
+        Previously, the parent's abort could run concurrently, calling
+        mdb_txn_abort on the parent while the child commit was still in
+        progress, leading to use-after-free.
+        """
+        path, env = testlib.temp_env(map_size=2**24)
+        for _ in range(500):
+            try:
+                parent = env.begin(write=True)
+                child = env.begin(write=True, parent=parent)
+                for j in range(100):
+                    child.put(j.to_bytes(8, 'big'), b'x' * 200)
+                committed = [False]
+                def do_commit():
+                    try:
+                        child.commit()
+                        committed[0] = True
+                    except lmdb.Error:
+                        pass
+                t = threading.Thread(target=do_commit)
+                t.start()
+                try:
+                    parent.abort()
+                except lmdb.Error:
+                    pass
+                t.join()
+            except lmdb.Error:
+                pass
+        env.close()
+
+
 MINDBSIZE = 64 * 1024 * 2  # certain ppcle Linux distros have a 64K page size
 
 if sys.version_info[:2] >= (3, 4):

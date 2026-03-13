@@ -317,15 +317,39 @@ static void unlink_child(struct lmdb_object *parent, struct lmdb_object *child)
 static void invalidate(struct lmdb_object *parent)
 {
     struct lmdb_object *child = parent->children.next;
+    PyObject *held_ref = NULL;
     while(child) {
         struct lmdb_object *next = child->siblings.next;
+        /* tp_clear may release the GIL, allowing another thread to dealloc
+         * `next`.  Hold a reference to prevent use-after-free. */
+        Py_XINCREF((PyObject *) next);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
         DEBUG("invalidating parent=%p child %p", parent, child)
         Py_TYPE(child)->tp_clear((PyObject *) child);
         child = next;
     }
+    Py_XDECREF(held_ref);
+}
+
+/**
+ * Quickly mark `parent` and all its descendants as invalid (valid=0).
+ * This is fast (no I/O, no GIL release) and prevents new operations from
+ * starting on any descendant.  Must be called before the slower invalidate()
+ * which does actual cleanup.  Issue #180.
+ */
+static void invalidate_mark(struct lmdb_object *parent)
+{
+    struct lmdb_object *child = parent->children.next;
+    while(child) {
+        child->valid = 0;
+        invalidate_mark(child);
+        child = child->siblings.next;
+    }
 }
 
 #define INVALIDATE(parent) invalidate((void *)parent);
+#define INVALIDATE_MARK(parent) invalidate_mark((void *)parent);
 
 
 /* ---------- */
@@ -1212,16 +1236,19 @@ env_clear(EnvObject *self)
     MDEBUG("env_clear")
 
     self->valid = 0;
+    /* Phase 1: quickly mark all descendants invalid (no I/O, GIL held).
+     * This prevents any descendant from starting new LMDB operations. */
+    INVALIDATE_MARK(self)
 
-    /* Wait for in-flight LMDB operations to complete before invalidating
-     * children.  Setting valid=0 above (under GIL) prevents new operations
-     * from starting.  active_ops is incremented/decremented under the GIL,
-     * so we release it briefly to let other threads finish.  Issue #180. */
+    /* Wait for in-flight LMDB operations to complete.  active_ops is
+     * incremented/decremented under the GIL, so we release it briefly
+     * to let other threads finish.  Issue #180. */
     while(self->active_ops > 0) {
         Py_BEGIN_ALLOW_THREADS
         Py_END_ALLOW_THREADS
     }
 
+    /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */
     INVALIDATE(self)
     Py_CLEAR(self->main_db);
 
@@ -2072,15 +2099,16 @@ static PyTypeObject PyEnvironment_Type = {
 static int
 cursor_clear(CursorObject *self)
 {
-    if(self->valid) {
+    if(self->curs) {
         MDB_cursor *curs = self->curs;
         self->valid = 0;
         self->curs = NULL;  /* Prevent double-close (issue #180). */
         INVALIDATE(self)
         UNLINK_CHILD(self->trans, self)
-        Py_BEGIN_ALLOW_THREADS
+        /* mdb_cursor_close does no I/O — just unlinks from txn and frees.
+         * No need to release the GIL; keeping it held avoids widening the
+         * race window during INVALIDATE. */
         mdb_cursor_close(curs);
-        Py_END_ALLOW_THREADS
     }
     Py_CLEAR(self->trans);
     return 0;
@@ -3526,6 +3554,12 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
 {
     if(self->valid) {
         self->valid = 0;  /* Prevent concurrent trans_clear (issue #180). */
+        /* Save txn and env before INVALIDATE, which may release the GIL
+         * and allow concurrent trans_clear to NULL them. */
+        MDB_txn *txn = self->txn;
+        EnvObject *env = self->env;
+        self->txn = NULL;  /* Prevent double-abort (issue #180). */
+        Py_XINCREF((PyObject *) env);
         DEBUG("invalidate")
         INVALIDATE(self)
 #ifdef HAVE_MEMSINK
@@ -3534,19 +3568,34 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
         if(self->flags & TRANS_RDONLY) {
             DEBUG("resetting")
             /* Reset to spare state, ready for _dealloc to freelist it. */
-            mdb_txn_reset(self->txn);
+            if(txn) {
+                mdb_txn_reset(txn);
+                self->txn = txn;  /* Restore for spare_txn caching. */
+            }
             self->flags |= TRANS_SPARE;
         } else {
-            MDB_txn *txn = self->txn;
-            self->txn = NULL;  /* Prevent double-abort (issue #180). */
-            self->env->has_write_txn = 0;
-            DEBUG("aborting")
-            self->env->active_ops++;
-            Py_BEGIN_ALLOW_THREADS
-            mdb_txn_abort(txn);
-            Py_END_ALLOW_THREADS
-            self->env->active_ops--;
+            if(env) {
+                env->has_write_txn = 0;
+            }
+            if(txn && env) {
+                DEBUG("aborting")
+                /* Wait for child ops (e.g. child commit) to finish before
+                 * aborting, since LMDB doesn't allow concurrent access to
+                 * parent+child txns.  Issue #180. */
+                while(env->active_ops > 0) {
+                    Py_BEGIN_ALLOW_THREADS
+                    Py_END_ALLOW_THREADS
+                }
+                env->active_ops++;
+                Py_BEGIN_ALLOW_THREADS
+                mdb_txn_abort(txn);
+                Py_END_ALLOW_THREADS
+                env->active_ops--;
+            } else if(txn) {
+                mdb_txn_abort(txn);
+            }
         }
+        Py_XDECREF((PyObject *) env);
     }
     Py_RETURN_NONE;
 }
@@ -3562,6 +3611,7 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
     if(! self->valid) {
         return err_invalid();
     }
+    self->valid = 0;  /* Prevent new operations from starting (issue #180). */
     DEBUG("invalidate")
     INVALIDATE(self)
 #ifdef HAVE_MEMSINK
@@ -3573,15 +3623,27 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         mdb_txn_reset(self->txn);
         self->flags |= TRANS_SPARE;
     } else {
-        DEBUG("committing")
-        ENV_UNLOCKED(self->env, rc, mdb_txn_commit(self->txn));
+        /* Save txn/env locally before releasing the GIL.  mdb_txn_commit
+         * frees the MDB_txn, so self->txn must be NULLed first to prevent
+         * concurrent trans_clear from calling mdb_txn_abort on freed memory.
+         * Similarly, Py_INCREF the env since trans_clear may Py_CLEAR it
+         * while the GIL is released.  Issue #180. */
+        MDB_txn *txn = self->txn;
+        EnvObject *env = self->env;
         self->txn = NULL;
-        self->env->has_write_txn = 0;
+        Py_INCREF((PyObject *) env);
+        env->has_write_txn = 0;
+        DEBUG("committing")
+        env->active_ops++;
+        Py_BEGIN_ALLOW_THREADS
+        rc = mdb_txn_commit(txn);
+        Py_END_ALLOW_THREADS
+        env->active_ops--;
+        Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
         }
     }
-    self->valid = 0;
     Py_RETURN_NONE;
 }
 
