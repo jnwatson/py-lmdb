@@ -97,6 +97,8 @@ static PyObject *py_int_max;
 static PyObject *py_size_max;
 /** lmdb.Error type. */
 static PyObject *Error;
+/** Global set of canonical paths for open environments. */
+static PyObject *open_env_paths;
 
 /** Typedefs and forward declarations. */
 static PyTypeObject PyDatabase_Type;
@@ -175,6 +177,8 @@ struct EnvObject {
     pid_t pid;
     /** 1 if a write transaction is active on this environment. */
     int has_write_txn;
+    /** Resolved path used to track this env in open_env_paths. */
+    PyObject *open_path;
 };
 
 /** TransObject.flags bitfield values. */
@@ -1190,6 +1194,11 @@ env_clear(EnvObject *self)
         Py_END_ALLOW_THREADS
         self->env = NULL;
     }
+
+    if(self->open_path) {
+        PySet_Discard(open_env_paths, self->open_path);
+        Py_CLEAR(self->open_path);
+    }
     return 0;
 }
 
@@ -1287,6 +1296,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = NULL;
     self->env = NULL;
     self->spare_txn = NULL;
+    self->open_path = NULL;
     self->max_spare_txns = arg.max_spare_txns;
     self->pid = getpid();
     self->has_write_txn = 0;
@@ -1321,6 +1331,45 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             PyErr_SetFromErrnoWithFilename(PyExc_OSError, fspath);
             goto fail;
         }
+    }
+
+    {
+        PyObject *os_path = PyImport_ImportModule("os.path");
+        PyObject *realpath_func;
+        PyObject *resolved;
+
+        if(! os_path) {
+            goto fail;
+        }
+        realpath_func = PyObject_GetAttrString(os_path, "realpath");
+        Py_DECREF(os_path);
+        if(! realpath_func) {
+            goto fail;
+        }
+        resolved = PyObject_CallFunctionObjArgs(realpath_func, arg.path, NULL);
+        Py_DECREF(realpath_func);
+        if(! resolved) {
+            goto fail;
+        }
+
+        /* Normalize to a string for consistent set membership. */
+        if(PyBytes_Check(resolved)) {
+            PyObject *tmp = PyUnicode_DecodeFSDefault(PyBytes_AS_STRING(resolved));
+            Py_DECREF(resolved);
+            if(! tmp) {
+                goto fail;
+            }
+            resolved = tmp;
+        }
+
+        if(PySet_Contains(open_env_paths, resolved)) {
+            PyErr_Format(Error,
+                "The environment '%s' is already open in this process.",
+                fspath);
+            Py_DECREF(resolved);
+            goto fail;
+        }
+        self->open_path = resolved;  /* steal reference */
     }
 
     flags = MDB_NOTLS;
@@ -1366,6 +1415,9 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->main_db = txn_db_from_name(self, NULL, 0);
     if(self->main_db) {
         self->valid = 1;
+        if(PySet_Add(open_env_paths, self->open_path)) {
+            goto fail;
+        }
         DEBUG("EnvObject '%s' opened at %p", fspath, self)
         return (PyObject *) self;
     }
@@ -4146,6 +4198,10 @@ MODINIT_NAME(void)
     }
 
     if(! ((__all__ = PyList_New(0)))) {
+        MOD_RETURN(NULL);
+    }
+
+    if(! ((open_env_paths = PySet_New(NULL)))) {
         MOD_RETURN(NULL);
     }
 
