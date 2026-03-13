@@ -735,7 +735,7 @@ class Environment(object):
         self._deps = set()
         self._creating_db_in_readonly = False
         self._has_write_txn = False
-        self._close_lock = threading.Lock()
+        self._close_lock = threading.RLock()
 
         self.set_mapsize(map_size)
 
@@ -1536,12 +1536,15 @@ class Transaction(object):
             # Grab and clear _txn before the C call.  CFFI releases the
             # GIL during mdb_txn_commit; clearing first prevents a
             # concurrent abort() from calling mdb_txn_abort on the same
-            # handle.  Issue #180.
+            # handle.  The _close_lock prevents a parent abort or
+            # env.close from freeing the txn while we're inside the C
+            # call.  Issue #180.
             txn = self._txn
             self._txn = _invalid
             if self._write and not self._parent:
                 self.env._has_write_txn = False
-            rc = _lib.mdb_txn_commit(txn)
+            with self.env._close_lock:
+                rc = _lib.mdb_txn_commit(txn)
             if rc:
                 raise _error("mdb_txn_commit", rc)
             self._invalidate()
@@ -1564,7 +1567,8 @@ class Transaction(object):
                 self._txn = _invalid
                 if self._write and not self._parent:
                     self.env._has_write_txn = False
-                _lib.mdb_txn_abort(txn)
+                with self.env._close_lock:
+                    _lib.mdb_txn_abort(txn)
             self._invalidate()
 
     def get(self, key, default=None, db=None):
