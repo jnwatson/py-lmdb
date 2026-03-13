@@ -182,6 +182,12 @@ struct EnvObject {
     /** Count of in-flight LMDB operations (GIL released).  env_clear waits
      *  for this to reach 0 before calling mdb_env_close.  Issue #180. */
     int active_ops;
+    /** Lock used to block-wait for active_ops to reach 0 instead of
+     *  spinning.  Allocated in locked state; released when active_ops
+     *  decrements to 0 and active_ops_waiter is set.  Issue #180. */
+    PyThread_type_lock active_ops_lock;
+    /** 1 if a thread is blocked waiting for active_ops to reach 0. */
+    int active_ops_waiter;
 };
 
 /** TransObject.flags bitfield values. */
@@ -658,6 +664,17 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
     out = (e); \
     Py_END_ALLOW_THREADS
 
+/* ACTIVE_OPS_DEC: decrement active_ops and signal the waiter lock if it
+ * reaches 0 and someone is waiting.  Must be called with the GIL held.
+ * Issue #180. */
+#define ACTIVE_OPS_DEC(_env) \
+    do { \
+        if(--(_env)->active_ops == 0 && (_env)->active_ops_waiter) { \
+            (_env)->active_ops_waiter = 0; \
+            PyThread_release_lock((_env)->active_ops_lock); \
+        } \
+    } while(0)
+
 /* ENV_UNLOCKED: release GIL for an LMDB call, holding the env's active_ops
  * counter to prevent env_clear from closing the env underneath us.  The
  * counter is incremented while the GIL is still held (so env_clear can't
@@ -669,7 +686,7 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
         Py_BEGIN_ALLOW_THREADS \
         out = (e); \
         Py_END_ALLOW_THREADS \
-        (_env)->active_ops--; \
+        ACTIVE_OPS_DEC(_env); \
     } while(0)
 
 #define PRELOAD_UNLOCKED(_rc, _data, _size) \
@@ -683,7 +700,7 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
         Py_BEGIN_ALLOW_THREADS \
         preload(_rc, _data, _size); \
         Py_END_ALLOW_THREADS \
-        (_env)->active_ops--; \
+        ACTIVE_OPS_DEC(_env); \
     } while(0)
 
 /* ---------------- */
@@ -1241,11 +1258,15 @@ env_clear(EnvObject *self)
     INVALIDATE_MARK(self)
 
     /* Wait for in-flight LMDB operations to complete.  active_ops is
-     * incremented/decremented under the GIL, so we release it briefly
-     * to let other threads finish.  Issue #180. */
-    while(self->active_ops > 0) {
+     * incremented/decremented under the GIL.  ACTIVE_OPS_DEC releases
+     * the lock when active_ops reaches 0, waking us.  Issue #180. */
+    if(self->active_ops > 0) {
+        self->active_ops_waiter = 1;
         Py_BEGIN_ALLOW_THREADS
+        PyThread_acquire_lock(self->active_ops_lock, WAIT_LOCK);
         Py_END_ALLOW_THREADS
+        /* Re-acquire so lock stays in locked state for next wait. */
+        PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
     }
 
     /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */
@@ -1287,6 +1308,10 @@ env_dealloc(EnvObject *self)
     }
 
     env_clear(self);
+    if(self->active_ops_lock) {
+        PyThread_free_lock(self->active_ops_lock);
+        self->active_ops_lock = NULL;
+    }
     PyObject_Del(self);
 }
 
@@ -1374,6 +1399,15 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->pid = getpid();
     self->has_write_txn = 0;
     self->active_ops = 0;
+    self->active_ops_waiter = 0;
+    self->active_ops_lock = PyThread_allocate_lock();
+    if(! self->active_ops_lock) {
+        PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
+        Py_DECREF(self);
+        return NULL;
+    }
+    /* Acquire immediately so waiters will block until signaled. */
+    PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -2188,7 +2222,7 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
     Py_BEGIN_ALLOW_THREADS;
     rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
     Py_END_ALLOW_THREADS;
-    self->trans->env->active_ops--;
+    ACTIVE_OPS_DEC(self->trans->env);
 
     self->positioned = rc == 0;
     self->last_mutation = self->trans->mutations;
@@ -3582,15 +3616,18 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                 /* Wait for child ops (e.g. child commit) to finish before
                  * aborting, since LMDB doesn't allow concurrent access to
                  * parent+child txns.  Issue #180. */
-                while(env->active_ops > 0) {
+                if(env->active_ops > 0) {
+                    env->active_ops_waiter = 1;
                     Py_BEGIN_ALLOW_THREADS
+                    PyThread_acquire_lock(env->active_ops_lock, WAIT_LOCK);
                     Py_END_ALLOW_THREADS
+                    PyThread_acquire_lock(env->active_ops_lock, NOWAIT_LOCK);
                 }
                 env->active_ops++;
                 Py_BEGIN_ALLOW_THREADS
                 mdb_txn_abort(txn);
                 Py_END_ALLOW_THREADS
-                env->active_ops--;
+                ACTIVE_OPS_DEC(env);
             } else if(txn) {
                 mdb_txn_abort(txn);
             }
@@ -3638,7 +3675,7 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         Py_BEGIN_ALLOW_THREADS
         rc = mdb_txn_commit(txn);
         Py_END_ALLOW_THREADS
-        env->active_ops--;
+        ACTIVE_OPS_DEC(env);
         Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
@@ -3789,7 +3826,7 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
     rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
     preload(rc, val.mv_data, val.mv_size);
     Py_END_ALLOW_THREADS
-    self->env->active_ops--;
+    ACTIVE_OPS_DEC(self->env);
     bufviewlist_release(&bvl);
 
     if(rc) {
