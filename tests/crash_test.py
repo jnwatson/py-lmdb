@@ -35,6 +35,7 @@ from __future__ import with_statement
 import sys
 import itertools
 import random
+import threading
 import unittest
 import multiprocessing
 
@@ -279,6 +280,39 @@ class BadCursorTest(unittest.TestCase):
         db = env.open_db(b'db', dupsort=True, txn=txn1)
         txn2 = env.begin(write=False)
         self.assertRaises(lmdb.InvalidParameterError, txn2.cursor, db=db)
+
+class CloseRaceTest(unittest.TestCase):
+    # https://github.com/jnwatson/py-lmdb/issues/180
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_close_get_race(self):
+        """Ensure close() while readers are active doesn't segfault.
+
+        Previously, env_clear released the GIL while aborting child
+        transactions (during INVALIDATE), but only set valid=0 afterward.
+        This allowed another thread to pass the valid check in make_trans
+        and create a new transaction against an environment being closed.
+        """
+        path, self.env = testlib.temp_env(max_dbs=10)
+
+        def reader():
+            for i in range(1000):
+                try:
+                    with self.env.begin() as txn:
+                        txn.get(i.to_bytes(8, 'big'))
+                except lmdb.Error:
+                    pass
+
+        threads = [threading.Thread(target=reader) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for i in range(1000):
+            self.env.close()
+            self.env = lmdb.open(path, max_dbs=10)
+        for t in threads:
+            t.join()
+
 
 MINDBSIZE = 64 * 1024 * 2  # certain ppcle Linux distros have a 64K page size
 
