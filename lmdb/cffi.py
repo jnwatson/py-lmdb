@@ -95,6 +95,10 @@ UnicodeType = getattr(__builtin__, 'unicode', str)
 BytesType = getattr(__builtin__, 'bytes', str)
 
 O_0755 = int('0755', 8)
+
+# Global set of canonical paths for open environments, to prevent
+# opening the same environment twice in one process (causes segfaults).
+_open_env_paths = set()
 O_0111 = int('0111', 8)
 EMPTY_BYTES = UnicodeType().encode()
 
@@ -749,6 +753,11 @@ class Environment(object):
                 if e.errno != errno.EEXIST:
                     raise
 
+        self._open_path = os.path.realpath(path)
+        if self._open_path in _open_env_paths:
+            raise Error("The environment %r is already open in this process."
+                        % (path,))
+
         flags = _lib.MDB_NOTLS
         if not subdir:
             flags |= _lib.MDB_NOSUBDIR
@@ -791,6 +800,7 @@ class Environment(object):
             )
 
         self._dbs = {None: self._db}
+        _open_env_paths.add(self._open_path)
 
     def __enter__(self):
         return self
@@ -856,6 +866,11 @@ class Environment(object):
 
             _lib.mdb_env_close(self._env)
             self._env = _invalid
+
+            open_path = getattr(self, '_open_path', None)
+            if open_path:
+                _open_env_paths.discard(open_path)
+                self._open_path = None
 
     def path(self):
         """Directory path or file name prefix where this environment is

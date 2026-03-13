@@ -120,10 +120,12 @@ class OpenTest(unittest.TestCase):
 
     def test_subdir_true_exist_nocreate(self):
         path, env = testlib.temp_env()
+        env.close()
         assert lmdb.open(path, subdir=True, create=False).path() == path
 
     def test_subdir_true_exist_create(self):
         path, env = testlib.temp_env()
+        env.close()
         assert lmdb.open(path, subdir=True, create=True).path() == path
 
     def test_readonly_false(self):
@@ -144,6 +146,7 @@ class OpenTest(unittest.TestCase):
 
     def test_readonly_true_exist(self):
         path, env = testlib.temp_env()
+        env.close()
         env2 = lmdb.open(path, readonly=True)
         assert env2.path() == path
         # Attempting a write txn should fail.
@@ -151,6 +154,17 @@ class OpenTest(unittest.TestCase):
             lambda: env2.begin(write=True))
         # Flag should be set.
         assert env2.flags()['readonly']
+
+    def test_open_same_path_twice(self):
+        path, env = testlib.temp_env()
+        self.assertRaises(lmdb.Error,
+            lambda: lmdb.open(path))
+
+    def test_open_same_path_after_close(self):
+        path, env = testlib.temp_env()
+        env.close()
+        env2 = lmdb.open(path)
+        env2.close()
 
     def test_metasync(self):
         for flag in True, False:
@@ -575,12 +589,7 @@ class OtherMethodsTest(unittest.TestCase):
         rc = env.reader_check()
         assert rc == 0
 
-        # We need to open a separate env since Transaction.abort() always calls
-        # reset for a read-only txn, the actual abort doesn't happen until
-        # __del__, when Transaction discovers there is no room for it on the
-        # freelist.
-        env1 = lmdb.open(path)
-        txn1 = env1.begin()
+        txn1 = env.begin()
         assert env.readers() != NO_READERS
         assert env.reader_check() == 0
 
@@ -593,8 +602,10 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.reader_check() == 0
         assert env.readers() != NO_READERS
 
+        # abort() only resets a read-only txn; the reader slot is freed
+        # when the TransObject is deallocated.
         txn1.abort()
-        env1.close()
+        del txn1
         assert env.readers() == NO_READERS
 
         env.close()
