@@ -357,12 +357,18 @@ class CloseRefcountRaceTest(unittest.TestCase):
             t.join()
 
 
+@unittest.skipIf(
+    lmdb.Environment.__module__ != 'builtins',
+    'cpython C extension only (CFFI lacks active_ops protection)'
+)
 class WriteDeallocloseRaceTest(unittest.TestCase):
-    """Test that write txn dealloc during env.close() doesn't segfault.
+    """Test that trans_dealloc write abort uses active_ops.
 
-    Both the cpython C extension and CFFI release the GIL for LMDB C
-    calls.  Without protection, a concurrent env.close() can call
-    mdb_env_close while mdb_txn_abort is still running.
+    When a write transaction is garbage-collected, trans_dealloc aborts it
+    with the GIL released.  Without active_ops protection, a concurrent
+    env.close() can call mdb_env_close while mdb_txn_abort is still running.
+    CFFI lacks an active_ops equivalent, so this test only runs on the
+    cpython C extension.
     """
 
     def tearDown(self):
