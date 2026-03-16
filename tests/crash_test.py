@@ -357,20 +357,12 @@ class CloseRefcountRaceTest(unittest.TestCase):
             t.join()
 
 
-@unittest.skipIf(
-    lmdb.Environment.__module__ != 'builtins',
-    'cpython C extension only (CFFI does not release the GIL for LMDB calls)'
-)
 class WriteDeallocloseRaceTest(unittest.TestCase):
-    """Test that trans_dealloc write abort uses active_ops.
+    """Test that write txn dealloc during env.close() doesn't segfault.
 
-    When a write transaction is garbage-collected, trans_dealloc aborts it
-    with the GIL released.  Without active_ops protection, a concurrent
-    env.close() can call mdb_env_close while mdb_txn_abort is still running,
-    freeing the txn memory from under it.
-
-    This test only runs on the cpython C extension — the CFFI implementation
-    does not release the GIL for LMDB calls, so the race cannot occur.
+    Both the cpython C extension and CFFI release the GIL for LMDB C
+    calls.  Without protection, a concurrent env.close() can call
+    mdb_env_close while mdb_txn_abort is still running.
     """
 
     def tearDown(self):
@@ -386,11 +378,13 @@ class WriteDeallocloseRaceTest(unittest.TestCase):
             for j in range(50):
                 txn.put(j.to_bytes(8, 'big'), b'x' * 500)
 
+            closed = []
             def do_close(e):
                 try:
                     e.close()
-                except lmdb.Error:
-                    pass
+                    closed.append(True)
+                except Exception as ex:
+                    closed.append(ex)
 
             t = threading.Thread(target=do_close, args=(env,))
             t.start()
@@ -399,7 +393,18 @@ class WriteDeallocloseRaceTest(unittest.TestCase):
             # can proceed to mdb_env_close concurrently.
             del txn
             t.join()
-            env.close()
+            if not closed or closed[0] is not True:
+                # Thread's close failed — close from main thread
+                try:
+                    env.close()
+                except Exception:
+                    pass
+            else:
+                env.close()  # no-op since thread already closed
+            del env
+        gc.collect()
+        gc.collect()
+        gc.collect()
 
 
 class ChildCommitRaceTest(unittest.TestCase):

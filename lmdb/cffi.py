@@ -871,8 +871,14 @@ class Environment(object):
                 self._dbs = None
                 self._db = None
 
-                _lib.mdb_env_close(self._env)
+                # Set _env BEFORE mdb_env_close: during the GIL release
+                # for mdb_env_close, another thread's Transaction.__del__
+                # → abort() will see "not self.env._env" and skip the
+                # mdb_txn_abort, avoiding use-after-free on the freed
+                # env memory.  Issue #180.
+                env = self._env
                 self._env = _invalid
+                _lib.mdb_env_close(env)
 
             open_path = getattr(self, '_open_path', None)
             if open_path:
