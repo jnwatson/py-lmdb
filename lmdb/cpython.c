@@ -1293,14 +1293,18 @@ env_clear(EnvObject *self)
          * large writemap regions.  Setting self->env = NULL above tells
          * any concurrent trans_clear (from trans_dealloc in another
          * thread) to skip its mdb_txn_abort — the txn memory will be
-         * freed by mdb_env_close.  active_ops prevents a concurrent
-         * env_dealloc from freeing this EnvObject while we're still
-         * using it.  Issue #180, #418. */
+         * freed by mdb_env_close.
+         *
+         * Py_INCREF prevents another thread from dropping the last
+         * reference and freeing the EnvObject while mdb_env_close is
+         * still running.  Issue #180, #418. */
+        Py_INCREF((PyObject *)self);
         self->active_ops++;
         Py_BEGIN_ALLOW_THREADS
         mdb_env_close(env);
         Py_END_ALLOW_THREADS
         ACTIVE_OPS_DEC(self);
+        Py_DECREF((PyObject *)self);
     }
 
     if(self->open_path) {
@@ -1321,6 +1325,12 @@ env_dealloc(EnvObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
+    /* Prevent re-entrant dealloc: env_clear Py_INCREFs self before
+     * releasing the GIL for mdb_env_close, then Py_DECREFs after.
+     * Without this, the DECREF would see refcount 0 and re-enter
+     * env_dealloc.  Setting refcount to 1 ensures the DECREF in
+     * env_clear drops it to 1, not 0. */
+    Py_SET_REFCNT((PyObject *)self, 1);
     env_clear(self);
     if(self->active_ops_lock) {
         PyThread_free_lock(self->active_ops_lock);

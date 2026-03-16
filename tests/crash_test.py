@@ -32,12 +32,14 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import gc
 import sys
 import itertools
 import random
 import threading
 import unittest
 import multiprocessing
+import weakref
 
 import lmdb
 import testlib
@@ -312,6 +314,55 @@ class CloseRaceTest(unittest.TestCase):
             self.env = lmdb.open(path, max_dbs=10)
         for t in threads:
             t.join()
+
+
+class CloseRefcountRaceTest(unittest.TestCase):
+    """Test that env_clear holds a self-reference during mdb_env_close.
+
+    When env_clear releases the GIL for mdb_env_close, another thread could
+    drop the last Python reference to the env, triggering env_dealloc and
+    freeing the EnvObject while mdb_env_close is still running.  The fix is
+    to Py_INCREF(self) before the GIL release and Py_DECREF after.
+
+    This test creates a large writemap env (so mdb_env_close takes longer
+    due to msync), starts close() in one thread, and drops all references
+    from another thread.  A weakref callback confirms the env is collected
+    at the expected time.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_close_dealloc_race(self):
+        for _ in range(50):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, writemap=True, sync=False)
+            # Write some data so mdb_env_close has work to do
+            with env.begin(write=True) as txn:
+                for j in range(100):
+                    txn.put(j.to_bytes(8, 'big'), b'x' * 1000)
+
+            collected = []
+            ref = weakref.ref(env, lambda r: collected.append(True))
+
+            def do_close(e):
+                try:
+                    e.close()
+                except lmdb.Error:
+                    pass
+
+            t = threading.Thread(target=do_close, args=(env,))
+            t.start()
+            # Drop our reference — if the INCREF fix is missing, the env
+            # could be freed while mdb_env_close is still running.
+            del env
+            gc.collect()
+            t.join()
+            # The env must have been collected by now (our ref was dropped,
+            # the thread's local is gone after join).
+            gc.collect()
+            self.assertTrue(collected, "env should have been collected")
 
 
 class ChildCommitRaceTest(unittest.TestCase):
