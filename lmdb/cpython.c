@@ -1289,12 +1289,18 @@ env_clear(EnvObject *self)
         MDB_env *env = self->env;
         self->env = NULL;
         DEBUG("Closing env")
-        /* Don't release the GIL here — a reader thread could run
-         * trans_dealloc → trans_clear → mdb_txn_abort on a txn belonging
-         * to this env concurrently with mdb_env_close, which is unsafe.
-         * mdb_env_close is typically fast (flushes and unmaps).
-         * Issue #180. */
+        /* Release the GIL for mdb_env_close since it may msync/fsync
+         * large writemap regions.  Setting self->env = NULL above tells
+         * any concurrent trans_clear (from trans_dealloc in another
+         * thread) to skip its mdb_txn_abort — the txn memory will be
+         * freed by mdb_env_close.  active_ops prevents a concurrent
+         * env_dealloc from freeing this EnvObject while we're still
+         * using it.  Issue #180, #418. */
+        self->active_ops++;
+        Py_BEGIN_ALLOW_THREADS
         mdb_env_close(env);
+        Py_END_ALLOW_THREADS
+        ACTIVE_OPS_DEC(self);
     }
 
     if(self->open_path) {
@@ -3519,8 +3525,14 @@ trans_clear(TransObject *self)
          * invalidate() while iterating the children list, and releasing
          * the GIL would allow other threads to modify the list or free
          * objects we're still using.  The explicit trans_abort() path
-         * releases the GIL for performance.  Issue #180. */
-        mdb_txn_abort(txn);
+         * releases the GIL for performance.  Issue #180.
+         *
+         * Skip the abort if the env's MDB_env* has been NULLed — this
+         * means env_clear is inside mdb_env_close (GIL released) and
+         * the txn's backing memory is being freed.  Issue #418. */
+        if(!self->env || self->env->env) {
+            mdb_txn_abort(txn);
+        }
     }
     MDEBUG("db is/was %p", self->db)
     Py_CLEAR(self->db);
@@ -3544,7 +3556,8 @@ trans_dealloc(TransObject *self)
     }
 
     if(self->env && self->env->pid == getpid()) {
-        if(self->env->valid && txn && self->env && !self->env->spare_txn &&
+        if(self->env->valid && self->env->env && txn &&
+                !self->env->spare_txn &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             mdb_txn_reset(txn);
@@ -3555,12 +3568,17 @@ trans_dealloc(TransObject *self)
              * flushing dirty pages.  Safe here because trans_dealloc is the
              * normal refcount-to-zero path, not called from invalidate()'s
              * child list iteration.  trans_clear will see txn==NULL and skip
-             * the abort.  Issue #180. */
+             * the abort.  Issue #180.
+             *
+             * Skip if env's MDB_env* is NULL — env_clear is inside
+             * mdb_env_close and the txn memory is being freed.  #418. */
             self->txn = NULL;
             if(self->env) {
                 self->env->has_write_txn = 0;
+                if(self->env->env) {
+                    txn_abort(txn);
+                }
             }
-            txn_abort(txn);
         }
         MDEBUG("deleting trans")
         trans_clear(self);
