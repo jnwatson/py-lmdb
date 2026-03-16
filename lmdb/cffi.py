@@ -856,10 +856,39 @@ class Environment(object):
             with self._close_lock:
                 if not self._env:
                     return
+
+                # Phase 1: collect live txn handles and mark all
+                # descendants invalid (no C calls, GIL held).  This
+                # prevents any concurrent __del__ → abort() from
+                # calling mdb_txn_abort during our GIL releases below.
+                # Mirrors cpython.c's INVALIDATE_MARK.  Issue #180.
+                txn_handles = []
                 if self._deps:
                     while self._deps:
-                        self._deps.pop()._invalidate()
+                        dep = self._deps.pop()
+                        # Collect child cursors/txns of this dep
+                        if hasattr(dep, '_deps') and dep._deps:
+                            while dep._deps:
+                                child = dep._deps.pop()
+                                if hasattr(child, '_cur') and child._cur:
+                                    _lib.mdb_cursor_close(child._cur)
+                                    child._cur = _invalid
+                                    child._dbi = _invalid
+                                    child._txn = _invalid
+                        # Collect the txn handle before invalidating
+                        if hasattr(dep, '_txn') and dep._txn:
+                            txn_handles.append(dep._txn)
+                            dep._txn = _invalid
+                        dep._env = _invalid
+                        if hasattr(dep, '_dbi'):
+                            dep._dbi = _invalid
                 self._deps = None
+
+                # Phase 2: abort collected txns and close the env.
+                # Safe because all Python-level handles are already
+                # _invalid, so concurrent __del__ is a no-op.
+                for txn in txn_handles:
+                    _lib.mdb_txn_abort(txn)
 
                 if self._spare_txns:
                     while self._spare_txns:
@@ -871,11 +900,6 @@ class Environment(object):
                 self._dbs = None
                 self._db = None
 
-                # Set _env BEFORE mdb_env_close: during the GIL release
-                # for mdb_env_close, another thread's Transaction.__del__
-                # → abort() will see "not self.env._env" and skip the
-                # mdb_txn_abort, avoiding use-after-free on the freed
-                # env memory.  Issue #180.
                 env = self._env
                 self._env = _invalid
                 _lib.mdb_env_close(env)
