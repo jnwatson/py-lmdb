@@ -95,6 +95,16 @@ if patch_lmdb_source:
         except ImportError:
             raise Exception('Building py-lmdb from source on Windows requires the "patch-ng" python module.')
 
+    # Clean the CFFI verify() cache so it recompiles against the freshly
+    # patched sources.  verify() hashes the cdef/csource strings and compile
+    # args but NOT the content of extra_sources, so a stale .so can persist
+    # even after the LMDB source changes.
+    _cffi_cache = os.path.join('lmdb', '__pycache__')
+    if os.path.isdir(_cffi_cache):
+        for _f in os.listdir(_cffi_cache):
+            if _f.startswith('lmdb_cffi'):
+                os.remove(os.path.join(_cffi_cache, _f))
+
     # Clean out any previously patched files
     dest = 'build' + os.sep + 'lib'
     try:

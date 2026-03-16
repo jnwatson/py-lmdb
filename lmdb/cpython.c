@@ -1289,9 +1289,12 @@ env_clear(EnvObject *self)
         MDB_env *env = self->env;
         self->env = NULL;
         DEBUG("Closing env")
-        Py_BEGIN_ALLOW_THREADS
+        /* Don't release the GIL here — a reader thread could run
+         * trans_dealloc → trans_clear → mdb_txn_abort on a txn belonging
+         * to this env concurrently with mdb_env_close, which is unsafe.
+         * mdb_env_close is typically fast (flushes and unmaps).
+         * Issue #180. */
         mdb_env_close(env);
-        Py_END_ALLOW_THREADS
     }
 
     if(self->open_path) {

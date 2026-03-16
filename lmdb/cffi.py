@@ -1514,12 +1514,15 @@ class Transaction(object):
         # more read-only transactions than there are configured spares.
         spare_txns = self.env._spare_txns
         if spare_txns is not None and self.env._max_spare_txns > 0:
-            # Grab and clear _txn before the C call to prevent a concurrent
-            # close() → _invalidate() → abort() from double-resetting the
-            # same handle.  Issue #180.
-            txn = self._txn
-            self._txn = _invalid
-            _lib.mdb_txn_reset(txn)
+            with self.env._close_lock:
+                # Grab and clear _txn inside the lock so that a concurrent
+                # close() will see _txn as valid and properly abort it
+                # before freeing the env.  Issue #180.
+                txn = self._txn
+                self._txn = _invalid
+                if not self.env._env:
+                    return True
+                _lib.mdb_txn_reset(txn)
             spare_txns.append(txn)
             self.env._max_spare_txns -= 1
             self._invalidate()
@@ -1536,17 +1539,18 @@ class Transaction(object):
         while self._deps:
             self._deps.pop()._invalidate()
         if self._write or not self._cache_spare():
-            # Grab and clear _txn before the C call.  CFFI releases the
-            # GIL during mdb_txn_commit; clearing first prevents a
-            # concurrent abort() from calling mdb_txn_abort on the same
-            # handle.  The _close_lock prevents a parent abort or
-            # env.close from freeing the txn while we're inside the C
-            # call.  Issue #180.
-            txn = self._txn
-            self._txn = _invalid
-            if self._write and not self._parent:
-                self.env._has_write_txn = False
+            # Grab and clear _txn inside the lock so that a concurrent
+            # close() → _invalidate() → abort() will see _txn as valid
+            # and properly abort it before freeing the env.  If the env
+            # was already closed, the txn was freed by _invalidate();
+            # skip the C call.  Issue #180.
             with self.env._close_lock:
+                txn = self._txn
+                self._txn = _invalid
+                if self._write and not self._parent:
+                    self.env._has_write_txn = False
+                if not self.env._env:
+                    raise _error("env has been closed", _lib.EINVAL)
                 rc = _lib.mdb_txn_commit(txn)
             if rc:
                 raise _error("mdb_txn_commit", rc)
@@ -1565,12 +1569,14 @@ class Transaction(object):
             while self._deps:
                 self._deps.pop()._invalidate()
             if self._write or not self._cache_spare():
-                # Grab and clear _txn before the C call.  Issue #180.
-                txn = self._txn
-                self._txn = _invalid
-                if self._write and not self._parent:
-                    self.env._has_write_txn = False
                 with self.env._close_lock:
+                    txn = self._txn
+                    self._txn = _invalid
+                    if self._write and not self._parent:
+                        self.env._has_write_txn = False
+                    if not self.env._env:
+                        self._invalidate()
+                        return
                     _lib.mdb_txn_abort(txn)
             self._invalidate()
 
