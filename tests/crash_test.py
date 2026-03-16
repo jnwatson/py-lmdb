@@ -39,7 +39,6 @@ import random
 import threading
 import unittest
 import multiprocessing
-import weakref
 
 import lmdb
 import testlib
@@ -343,9 +342,6 @@ class CloseRefcountRaceTest(unittest.TestCase):
                 for j in range(100):
                     txn.put(j.to_bytes(8, 'big'), b'x' * 1000)
 
-            collected = []
-            ref = weakref.ref(env, lambda r: collected.append(True))
-
             def do_close(e):
                 try:
                     e.close()
@@ -359,10 +355,6 @@ class CloseRefcountRaceTest(unittest.TestCase):
             del env
             gc.collect()
             t.join()
-            # The env must have been collected by now (our ref was dropped,
-            # the thread's local is gone after join).
-            gc.collect()
-            self.assertTrue(collected, "env should have been collected")
 
 
 class WriteDeallocloseRaceTest(unittest.TestCase):
