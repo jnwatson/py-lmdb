@@ -365,6 +365,44 @@ class CloseRefcountRaceTest(unittest.TestCase):
             self.assertTrue(collected, "env should have been collected")
 
 
+class WriteDeallocloseRaceTest(unittest.TestCase):
+    """Test that trans_dealloc write abort uses active_ops.
+
+    When a write transaction is garbage-collected, trans_dealloc aborts it
+    with the GIL released.  Without active_ops protection, a concurrent
+    env.close() can call mdb_env_close while mdb_txn_abort is still running,
+    freeing the txn memory from under it.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_write_dealloc_close_race(self):
+        for _ in range(100):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, sync=False)
+            # Start a write txn with dirty pages so abort has work to do
+            txn = env.begin(write=True)
+            for j in range(50):
+                txn.put(j.to_bytes(8, 'big'), b'x' * 500)
+
+            def do_close(e):
+                try:
+                    e.close()
+                except lmdb.Error:
+                    pass
+
+            t = threading.Thread(target=do_close, args=(env,))
+            t.start()
+            # Drop the write txn — triggers trans_dealloc which calls
+            # txn_abort with GIL released.  Without active_ops, env_clear
+            # can proceed to mdb_env_close concurrently.
+            del txn
+            t.join()
+            env.close()
+
+
 class ChildCommitRaceTest(unittest.TestCase):
     # https://github.com/jnwatson/py-lmdb/issues/180
     def tearDown(self):

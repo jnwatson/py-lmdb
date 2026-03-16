@@ -3581,12 +3581,17 @@ trans_dealloc(TransObject *self)
              * the abort.  Issue #180.
              *
              * Skip if env's MDB_env* is NULL — env_clear is inside
-             * mdb_env_close and the txn memory is being freed.  #418. */
+             * mdb_env_close and the txn memory is being freed.  #418.
+             *
+             * active_ops keeps env_clear from calling mdb_env_close while
+             * this abort is in flight.  Issue #180. */
             self->txn = NULL;
             if(self->env) {
                 self->env->has_write_txn = 0;
                 if(self->env->env) {
+                    self->env->active_ops++;
                     txn_abort(txn);
+                    ACTIVE_OPS_DEC(self->env);
                 }
             }
         }
