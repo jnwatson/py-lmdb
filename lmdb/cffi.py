@@ -367,7 +367,10 @@ if not lmdb._reading_docs():
         'libraries': []
     }
 
-    _have_patched_lmdb = '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']  # type: ignore
+    _have_patched_lmdb = (
+        _config is not None and
+        '-DHAVE_PATCHED_LMDB=1' in _config.CONFIG['extra_compile_args']  # type: ignore
+    )
 
     if _have_patched_lmdb:
         _CFFI_CDEF += _CFFI_CDEF_PATCHED

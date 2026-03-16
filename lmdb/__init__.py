@@ -30,6 +30,9 @@ import sys
 def _reading_docs():
     # Hack: disable speedups while testing or reading docstrings. Don't check
     # for basename for embedded python - variable 'argv' does not exists there or is empty.
+    if os.environ.get('READTHEDOCS'):
+        return True
+
     if not(hasattr(sys, 'argv')) or not sys.argv:
         return False
 
@@ -37,13 +40,13 @@ def _reading_docs():
     return any(x in basename for x in ('sphinx-build', 'pydoc'))
 
 try:
-    if _reading_docs() or os.getenv('LMDB_FORCE_CFFI') is not None:
+    if os.getenv('LMDB_FORCE_CFFI') is not None:
         raise ImportError
     from lmdb.cpython import *
     from lmdb.cpython import open
     from lmdb.cpython import __all__
 except ImportError:
-    if (not _reading_docs()) and os.getenv('LMDB_FORCE_CPYTHON') is not None:
+    if os.getenv('LMDB_FORCE_CPYTHON') is not None:
         raise
     from lmdb.cffi import *
     from lmdb.cffi import open
