@@ -103,7 +103,10 @@ if patch_lmdb_source:
     if os.path.isdir(_cffi_cache):
         for _f in os.listdir(_cffi_cache):
             if _f.startswith('lmdb_cffi'):
-                os.remove(os.path.join(_cffi_cache, _f))
+                try:
+                    os.remove(os.path.join(_cffi_cache, _f))
+                except OSError:
+                    pass  # On Windows, .pyd may be locked by a running process
 
     # Clean out any previously patched files
     dest = 'build' + os.sep + 'lib'
