@@ -738,6 +738,7 @@ class Environment(object):
         self._deps = set()
         self._creating_db_in_readonly = False
         self._has_write_txn = False
+        self._close_lock = threading.RLock()
 
         self.set_mapsize(map_size)
 
@@ -852,23 +853,26 @@ class Environment(object):
         <http://lmdb.tech/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
-            if self._deps:
-                while self._deps:
-                    self._deps.pop()._invalidate()
-            self._deps = None
+            with self._close_lock:
+                if not self._env:
+                    return
+                if self._deps:
+                    while self._deps:
+                        self._deps.pop()._invalidate()
+                self._deps = None
 
-            if self._spare_txns:
-                while self._spare_txns:
-                    _lib.mdb_txn_abort(self._spare_txns.pop())
-            self._spare_txns = None
+                if self._spare_txns:
+                    while self._spare_txns:
+                        _lib.mdb_txn_abort(self._spare_txns.pop())
+                self._spare_txns = None
 
-            if self._dbs:
-                self._dbs.clear()
-            self._dbs = None
-            self._db = None
+                if self._dbs:
+                    self._dbs.clear()
+                self._dbs = None
+                self._db = None
 
-            _lib.mdb_env_close(self._env)
-            self._env = _invalid
+                _lib.mdb_env_close(self._env)
+                self._env = _invalid
 
             open_path = getattr(self, '_open_path', None)
             if open_path:
@@ -1371,10 +1375,8 @@ class Transaction(object):
     _mutations = 0
 
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
-        env._deps.add(self)
         self.env = env  # hold ref
         self._db = db or env._db
-        self._env = env._env
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
@@ -1383,57 +1385,69 @@ class Transaction(object):
         if parent:
             self._parent = parent
             parent_txn = parent._txn
-            parent._deps.add(self)
         else:
             parent_txn = _ffi.NULL
 
-        if write:
-            if env.readonly:
-                msg = 'Cannot start write transaction with read-only env'
-                raise _error(msg, _lib.EACCES)
+        # Hold _close_lock across the mdb_txn_begin C call to prevent
+        # env.close() from calling mdb_env_close while we're inside
+        # mdb_txn_begin (which releases the GIL).  Issue #180.
+        with env._close_lock:
+            if not env._env:
+                raise _error("env has been closed", _lib.EINVAL)
+            self._env = env._env
+            env._deps.add(self)
+            if parent:
+                parent._deps.add(self)
 
-            if not parent and env._has_write_txn:
-                msg = ('A write transaction is already active on this '
-                       'environment. Only one top-level write transaction '
-                       'is allowed at a time.')
-                raise _error(msg, _lib.EBUSY)
+            if write:
+                if env.readonly:
+                    msg = 'Cannot start write transaction with read-only env'
+                    raise _error(msg, _lib.EACCES)
 
-            if not parent:
-                env._has_write_txn = True
-            txnpp = _ffi.new('MDB_txn **')
-            rc = _lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
-            if rc:
+                if not parent and env._has_write_txn:
+                    msg = ('A write transaction is already active on this '
+                           'environment. Only one top-level write transaction '
+                           'is allowed at a time.')
+                    raise _error(msg, errno.EBUSY)
+
                 if not parent:
-                    env._has_write_txn = False
-                raise _error("mdb_txn_begin", rc)
-            self._txn = txnpp[0]
-            self._write = True
-        else:
-            try:  # Exception catch in order to avoid racy 'if txns:' test
-                if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
-                    raise IndexError
-                self._txn = env._spare_txns.pop()
-                env._max_spare_txns += 1
-                rc = _lib.mdb_txn_renew(self._txn)
-                if rc:
-                    while self._deps:
-                        self._deps.pop()._invalidate()
-                    _lib.mdb_txn_abort(self._txn)
-                    self._txn = _invalid
-                    self._invalidate()
-                    raise _error("mdb_txn_renew", rc)
-            except IndexError:
+                    env._has_write_txn = True
                 txnpp = _ffi.new('MDB_txn **')
-                flags = _lib.MDB_RDONLY
-                rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                rc = _lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
                 if rc:
+                    if not parent:
+                        env._has_write_txn = False
                     raise _error("mdb_txn_begin", rc)
                 self._txn = txnpp[0]
+                self._write = True
+            else:
+                try:  # Exception catch in order to avoid racy 'if txns:' test
+                    if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
+                        raise IndexError
+                    self._txn = env._spare_txns.pop()
+                    env._max_spare_txns += 1
+                    rc = _lib.mdb_txn_renew(self._txn)
+                    if rc:
+                        while self._deps:
+                            self._deps.pop()._invalidate()
+                        _lib.mdb_txn_abort(self._txn)
+                        self._txn = _invalid
+                        self._invalidate()
+                        raise _error("mdb_txn_renew", rc)
+                except IndexError:
+                    txnpp = _ffi.new('MDB_txn **')
+                    flags = _lib.MDB_RDONLY
+                    rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                    if rc:
+                        raise _error("mdb_txn_begin", rc)
+                    self._txn = txnpp[0]
 
     def _invalidate(self):
         if self._txn:
             self.abort()
-        self.env._deps.discard(self)
+        deps = self.env._deps
+        if deps is not None:
+            deps.discard(self)
         self._parent = None
         self._env = _invalid
 
@@ -1447,7 +1461,10 @@ class Transaction(object):
         if exc_type:
             self.abort()
         else:
-            self.commit()
+            # If the txn was already invalidated (e.g. env.close() from
+            # another thread), there's nothing to commit.  Issue #180.
+            if self._txn:
+                self.commit()
 
     def id(self):
         """id()
@@ -1495,11 +1512,16 @@ class Transaction(object):
         # unlikely the race could ever result in a large amount of spare txns,
         # and in any case a correctly configured program should not be opening
         # more read-only transactions than there are configured spares.
-        if self.env._max_spare_txns > 0:
-            _lib.mdb_txn_reset(self._txn)
-            self.env._spare_txns.append(self._txn)
-            self.env._max_spare_txns -= 1
+        spare_txns = self.env._spare_txns
+        if spare_txns is not None and self.env._max_spare_txns > 0:
+            # Grab and clear _txn before the C call to prevent a concurrent
+            # close() → _invalidate() → abort() from double-resetting the
+            # same handle.  Issue #180.
+            txn = self._txn
             self._txn = _invalid
+            _lib.mdb_txn_reset(txn)
+            spare_txns.append(txn)
+            self.env._max_spare_txns -= 1
             self._invalidate()
             return True
 
@@ -1514,10 +1536,18 @@ class Transaction(object):
         while self._deps:
             self._deps.pop()._invalidate()
         if self._write or not self._cache_spare():
-            rc = _lib.mdb_txn_commit(self._txn)
+            # Grab and clear _txn before the C call.  CFFI releases the
+            # GIL during mdb_txn_commit; clearing first prevents a
+            # concurrent abort() from calling mdb_txn_abort on the same
+            # handle.  The _close_lock prevents a parent abort or
+            # env.close from freeing the txn while we're inside the C
+            # call.  Issue #180.
+            txn = self._txn
             self._txn = _invalid
             if self._write and not self._parent:
                 self.env._has_write_txn = False
+            with self.env._close_lock:
+                rc = _lib.mdb_txn_commit(txn)
             if rc:
                 raise _error("mdb_txn_commit", rc)
             self._invalidate()
@@ -1535,12 +1565,13 @@ class Transaction(object):
             while self._deps:
                 self._deps.pop()._invalidate()
             if self._write or not self._cache_spare():
-                rc = _lib.mdb_txn_abort(self._txn)
+                # Grab and clear _txn before the C call.  Issue #180.
+                txn = self._txn
                 self._txn = _invalid
                 if self._write and not self._parent:
                     self.env._has_write_txn = False
-                if rc:
-                    raise _error("mdb_txn_abort", rc)
+                with self.env._close_lock:
+                    _lib.mdb_txn_abort(txn)
             self._invalidate()
 
     def get(self, key, default=None, db=None):
