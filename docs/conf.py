@@ -108,6 +108,7 @@ html_theme = 'classic'
 # documentation.
 html_theme_options = {
     # 'github_repo': 'https://github.com/jnwatson/py-lmdb/'
+    'sidebarwidth': '300px',
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
