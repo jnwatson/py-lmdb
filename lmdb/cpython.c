@@ -3641,6 +3641,13 @@ trans_dealloc(TransObject *self)
     }
     else {
        MDEBUG("In forked process, not deleting trans");
+       /* Can't touch LMDB handles after fork, but still need to
+        * release Python references to avoid leaking env/db. */
+       Py_CLEAR(self->db);
+       if(self->env) {
+           UNLINK_CHILD(self->env, self)
+           Py_CLEAR(self->env);
+       }
     }
 
     PyObject_Del(self);

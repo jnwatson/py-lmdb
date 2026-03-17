@@ -1842,6 +1842,8 @@ class Cursor(object):
         self._cur = None
         rc = _lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
+            db._deps.discard(self)
+            txn._deps.discard(self)
             raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
         # If Transaction.mutations!=last_mutation, must MDB_GET_CURRENT to
@@ -2255,11 +2257,11 @@ class Cursor(object):
 
         """
         if dupfixed_bytes and dupfixed_bytes < 0:
-            raise _error("dupfixed_bytes must be a positive integer.")
+            raise Error("dupfixed_bytes must be a positive integer.")
         elif (dupfixed_bytes or keyfixed) and not dupdata:
-            raise _error("dupdata is required for dupfixed_bytes/key_bytes.")
+            raise Error("dupdata is required for dupfixed_bytes/key_bytes.")
         elif keyfixed and not dupfixed_bytes:
-            raise _error("dupfixed_bytes is required for key_bytes.")
+            raise Error("dupfixed_bytes is required for key_bytes.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
