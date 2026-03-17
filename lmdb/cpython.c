@@ -2447,9 +2447,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                         PyList_Append(pylist, tup);
                         Py_DECREF(tup);
                     } else {
-                        Py_DECREF(key);
-                        Py_DECREF(val);
-                        Py_DECREF(tup);
+                        Py_XDECREF(key);
+                        Py_XDECREF(val);
+                        Py_XDECREF(tup);
+                        goto failiter;
                     }
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
@@ -2495,8 +2496,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                                 PyList_Append(pylist, tup);
                                 Py_DECREF(tup);
                             } else {
-                                Py_DECREF(val);
-                                Py_DECREF(tup);
+                                Py_XDECREF(val);
+                                Py_XDECREF(tup);
+                                Py_DECREF(key);
+                                goto failiter;
                             }
                         }
                     }
@@ -2522,13 +2525,25 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     if (arg.keyfixed){
-        int rc;
-        Py_buffer pybuf;
         size_t newsize = buffer_pos * item_size;
+        PyObject *owner, *mv;
         buffer = realloc(buffer, newsize);
-        rc = PyBuffer_FillInfo(&pybuf, NULL, buffer, newsize, 0, PyBUF_SIMPLE);
-        // FIXME:  check rc
-        return PyMemoryView_FromBuffer(&pybuf);
+        if(! buffer && newsize) {
+            PyErr_NoMemory();
+            goto fail;
+        }
+        /* Wrap the buffer in a bytes object that owns the memory.
+         * PyBytes_FromStringAndSize copies the data, then we free
+         * the original buffer. */
+        owner = PyBytes_FromStringAndSize(buffer, newsize);
+        free(buffer);
+        buffer = NULL;
+        if(! owner) {
+            goto fail;
+        }
+        mv = PyMemoryView_FromObject(owner);
+        Py_DECREF(owner);
+        return mv;
     } else {
         return pylist;
     }
@@ -2537,6 +2552,7 @@ failiter:
     Py_DECREF(item);
     Py_DECREF(iter);
 fail:
+    Py_XDECREF(pylist);
     if (buffer) {
         free(buffer);
     }
