@@ -111,6 +111,7 @@ def isprint(c):
 def xxd(s):
     """Return a vaguely /usr/bin/xxd formatted representation of the bytestring
     `s`."""
+    s = bytes(s)
     sio = StringIO()
     pr = _to_bytes('')
     idx = -1
@@ -526,7 +527,7 @@ def cmd_rewrite(opts, args):
         with target_env.begin(db=dst_db, write=True) as wtxn:
             with ENV.begin(db=src_db, buffers=True) as rtxn:
                 for key, value in rtxn.cursor():
-                    wtxn.put(key, value, append=True)
+                    wtxn.put(bytes(key), bytes(value), append=True)
 
     print('Syncing..')
     target_env.sync(True)
