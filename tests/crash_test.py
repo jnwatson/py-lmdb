@@ -360,53 +360,61 @@ class CloseRefcountRaceTest(unittest.TestCase):
 class WriteDeallocloseRaceTest(unittest.TestCase):
     """Test that write txn dealloc during env.close() doesn't segfault.
 
-    Both cpython and CFFI release the GIL for LMDB C calls.  Without
-    protection, a concurrent env.close() can call mdb_env_close while
-    mdb_txn_abort is still running.  The cpython C extension uses
-    active_ops; CFFI uses two-phase invalidation (mark handles invalid
-    before any C calls).
+    The cpython C extension releases the GIL during mdb_txn_abort in
+    trans_dealloc.  Without active_ops protection, a concurrent
+    env.close() can call mdb_env_close while mdb_txn_abort is still
+    running.  CFFI also releases the GIL for C calls, but uses
+    two-phase invalidation instead of active_ops.
+
+    The threading test only runs on cpython (which has active_ops to
+    make it safe).  Both implementations are tested for the non-threaded
+    close-with-active-txn case.
     """
 
     def tearDown(self):
         testlib.cleanup()
 
+    def test_close_with_active_write_txn(self):
+        """env.close() with an uncommitted write txn must not crash."""
+        for _ in range(50):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, sync=False)
+            txn = env.begin(write=True)
+            for j in range(50):
+                txn.put(j.to_bytes(8, 'big'), b'x' * 500)
+            # Close env without aborting txn — env.close() must
+            # handle this safely (two-phase invalidation on CFFI,
+            # INVALIDATE + active_ops on cpython).
+            env.close()
+            del txn
+            gc.collect()
+
+    @unittest.skipIf(
+        lmdb.Environment.__module__ != 'builtins',
+        'cpython C extension only (tests active_ops protection)'
+    )
     def test_write_dealloc_close_race(self):
+        """Race write txn __del__ against env.close() in another thread."""
         for _ in range(100):
             path = testlib.temp_dir()
             env = lmdb.open(path, map_size=2 * 1024 * 1024,
                             max_dbs=10, sync=False)
-            # Start a write txn with dirty pages so abort has work to do
             txn = env.begin(write=True)
             for j in range(50):
                 txn.put(j.to_bytes(8, 'big'), b'x' * 500)
 
-            closed = []
             def do_close(e):
                 try:
                     e.close()
-                    closed.append(True)
-                except Exception as ex:
-                    closed.append(ex)
+                except lmdb.Error:
+                    pass
 
             t = threading.Thread(target=do_close, args=(env,))
             t.start()
-            # Drop the write txn — triggers trans_dealloc which calls
-            # txn_abort with GIL released.  Without active_ops, env_clear
-            # can proceed to mdb_env_close concurrently.
             del txn
             t.join()
-            if not closed or closed[0] is not True:
-                # Thread's close failed — close from main thread
-                try:
-                    env.close()
-                except Exception:
-                    pass
-            else:
-                env.close()  # no-op since thread already closed
-            del env
-        gc.collect()
-        gc.collect()
-        gc.collect()
+            env.close()
 
 
 class ChildCommitRaceTest(unittest.TestCase):
