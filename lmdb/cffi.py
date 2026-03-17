@@ -857,21 +857,22 @@ class Environment(object):
                 if not self._env:
                     return
 
-                # Phase 1: collect live txn handles and mark all
-                # descendants invalid (no C calls, GIL held).  This
-                # prevents any concurrent __del__ → abort() from
-                # calling mdb_txn_abort during our GIL releases below.
+                # Phase 1: collect live txn handles and mark ALL
+                # descendants invalid.  No C calls here — the GIL
+                # must be held throughout so no concurrent __del__
+                # → abort() can call mdb_txn_abort.
                 # Mirrors cpython.c's INVALIDATE_MARK.  Issue #180.
                 txn_handles = []
                 if self._deps:
                     while self._deps:
                         dep = self._deps.pop()
-                        # Collect child cursors/txns of this dep
+                        # Mark child cursors/txns of this dep invalid
                         if hasattr(dep, '_deps') and dep._deps:
                             while dep._deps:
                                 child = dep._deps.pop()
-                                if hasattr(child, '_cur') and child._cur:
-                                    _lib.mdb_cursor_close(child._cur)
+                                if hasattr(child, '_cur'):
+                                    # Don't call mdb_cursor_close here —
+                                    # mdb_txn_abort frees all cursors.
                                     child._cur = _invalid
                                     child._dbi = _invalid
                                     child._txn = _invalid
@@ -884,9 +885,9 @@ class Environment(object):
                             dep._dbi = _invalid
                 self._deps = None
 
-                # Phase 2: abort collected txns and close the env.
-                # Safe because all Python-level handles are already
-                # _invalid, so concurrent __del__ is a no-op.
+                # Phase 2: abort collected txns and close env.
+                # All Python-level handles are _invalid, so any
+                # concurrent __del__ → abort() is a no-op.
                 for txn in txn_handles:
                     _lib.mdb_txn_abort(txn)
 
