@@ -180,7 +180,7 @@ class MultiCursorDeleteTest(unittest.TestCase):
 
         deleted = 0
         for key in txn.cursor().iternext(values=False):
-            assert txn.delete(key), key
+            assert txn.delete(key), key  # type: ignore[arg-type]
             deleted += 1
 
         assert deleted == len(keys), deleted

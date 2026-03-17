@@ -26,15 +26,9 @@ import gc
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import traceback
 import unittest
-
-try:
-    import __builtin__
-except ImportError:
-    import builtins as __builtin__
 
 import lmdb
 
@@ -61,8 +55,6 @@ def temp_dir(create=True):
     if not create:
         os.rmdir(path)
     _cleanups.append(lambda: shutil.rmtree(path, ignore_errors=True))
-    if hasattr(path, 'decode'):
-        path = path.decode(sys.getfilesystemencoding())
     return path
 
 
@@ -75,8 +67,6 @@ def temp_file(create=True):
     _cleanups.append(lambda: os.path.exists(path) and os.unlink(path))
     pathlock = path + '-lock'
     _cleanups.append(lambda: os.path.exists(pathlock) and os.unlink(pathlock))
-    if hasattr(path, 'decode'):
-        path = path.decode(sys.getfilesystemencoding())
     return path
 
 
@@ -103,20 +93,13 @@ def debug_collect():
             # PyPy doesn't collect objects with __del__ on first attempt.
             gc.collect()
 
-UnicodeType = getattr(__builtin__, 'unicode', str)
-BytesType = getattr(__builtin__, 'bytes', str)
+UnicodeType = str
+BytesType = bytes
 
-try:
-    INT_TYPES = (int, long)
-except NameError:
-    INT_TYPES = (int,)
+INT_TYPES = (int,)
 
 # B(ascii 'string') -> bytes
-try:
-    bytes('')     # Python>=2.6, alias for str().
-    B = lambda s: s
-except TypeError: # Python3.x, requires encoding parameter.
-    B = lambda s: bytes(s, 'ascii')
+B = lambda s: bytes(s, 'ascii')
 
 # BL('s1', 's2') -> ['bytes1', 'bytes2']
 BL = lambda *args: list(map(B, args))
