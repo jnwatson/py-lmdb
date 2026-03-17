@@ -531,6 +531,7 @@ def cmd_rewrite(opts, args):
 
     print('Syncing..')
     target_env.sync(True)
+    target_env.close()
 
 
 def cmd_get(opts, args):
