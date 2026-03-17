@@ -2012,7 +2012,14 @@ class Cursor(object):
         return self._iter(_lib.MDB_PREV_NODUP, keys, values)
 
     def _cursor_get(self, op):
-        rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
+        # Hold _close_lock to prevent concurrent txn.abort() from
+        # calling mdb_txn_abort (which frees cursor memory) while
+        # mdb_cursor_get is running.  Issue #180.
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         self._last_mutation = self.txn._mutations
         if rc:
@@ -2024,8 +2031,12 @@ class Cursor(object):
         return v
 
     def _cursor_get_kv(self, op, k, v):
-        rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
-                                   self._key, self._val, op)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
+                                       self._key, self._val, op)
         self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
@@ -2339,7 +2350,11 @@ class Cursor(object):
         v = self._valid
         if v:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
-            rc = _lib.mdb_cursor_del(self._cur, flags)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.mdb_cursor_del(self._cur, flags)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
@@ -2356,7 +2371,11 @@ class Cursor(object):
         <http://lmdb.tech/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
         """
         countp = _ffi.new('size_t *')
-        rc = _lib.mdb_cursor_count(self._cur, countp)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
@@ -2403,7 +2422,11 @@ class Cursor(object):
             else:
                 flags |= _lib.MDB_APPEND
 
-        rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self.txn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -2456,8 +2479,12 @@ class Cursor(object):
         added = 0
         skipped = 0
         for key, value in items:
-            rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
-                                       value, len(value), flags)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
+                                           value, len(value), flags)
             self.txn._mutations += 1
             added += 1
             if rc:
@@ -2496,7 +2523,11 @@ class Cursor(object):
 
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
         self.txn._mutations += 1
         if not rc:
             return
@@ -2506,7 +2537,11 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         preload(self._val)
         old = _mvstr(self._val)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
         self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
@@ -2527,7 +2562,11 @@ class Cursor(object):
         if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             preload(self._val)
             old = _mvstr(self._val)
-            rc = _lib.mdb_cursor_del(self._cur, 0)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
