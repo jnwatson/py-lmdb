@@ -1,0 +1,11 @@
+{
+    "include": ["lmdb", "tests"],
+    "exclude": [
+        "lmdb/cffi.py",
+        "examples",
+        "docs"
+    ],
+    "pythonVersion": "3.9",
+    "reportMissingImports": "warning",
+    "reportAttributeAccessIssue": "warning"
+}

@@ -49,9 +49,10 @@ class ContextManagerTest(unittest.TestCase):
         path, env = testlib.temp_env()
         txn = env.begin(write=True)
 
+        curs = txn.cursor()
         try:
-            with txn.cursor() as curs:
-                curs.put(123, 123)
+            with curs:
+                curs.put(123, 123)  # type: ignore[arg-type]
         except Exception:
             pass
         self.assertRaises(Exception, lambda: curs.get(B('foo')))
@@ -202,21 +203,21 @@ class CursorTest2(unittest.TestCase):
 
 class PutmultiTest(CursorTestBase):
     def test_empty_seq(self):
-        consumed, added = self.c.putmulti(())
+        consumed, added = self.c.putmulti(())  # type: ignore[arg-type]
         assert consumed == added == 0
 
     def test_2list(self):
         l = [BT('a', ''), BT('a', '')]
-        consumed, added = self.c.putmulti(l)
+        consumed, added = self.c.putmulti(l)  # type: ignore[arg-type]
         assert consumed == added == 2
 
         li = iter(l)
-        consumed, added = self.c.putmulti(li)
+        consumed, added = self.c.putmulti(li)  # type: ignore[arg-type]
         assert consumed == added == 2
 
     def test_2list_preserve(self):
         l = [BT('a', ''), BT('a', '')]
-        consumed, added = self.c.putmulti(l, overwrite=False)
+        consumed, added = self.c.putmulti(l, overwrite=False)  # type: ignore[arg-type]
         assert consumed == 2
         assert added == 1
 
@@ -224,13 +225,13 @@ class PutmultiTest(CursorTestBase):
         assert self.c.delete()
 
         li = iter(l)
-        consumed, added = self.c.putmulti(li, overwrite=False)
+        consumed, added = self.c.putmulti(li, overwrite=False)  # type: ignore[arg-type]
         assert consumed == 2
         assert added == 1
 
     def test_bad_seq1(self):
         self.assertRaises(Exception,
-                          lambda: self.c.putmulti(range(2)))
+                          lambda: self.c.putmulti(range(2)))  # type: ignore[arg-type]
 
     def test_dupsort(self):
         _, env = testlib.temp_env()
@@ -238,7 +239,7 @@ class PutmultiTest(CursorTestBase):
         txn = env.begin(write=True, db=db1)
         with txn.cursor() as c:
             tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
-            assert (3, 3) == c.putmulti(tups)
+            assert (3, 3) == c.putmulti(tups)  # type: ignore[arg-type]
 
     def test_dupsort_putmulti_append(self):
         _, env = testlib.temp_env()
@@ -246,7 +247,7 @@ class PutmultiTest(CursorTestBase):
         txn = env.begin(write=True, db=db1)
         with txn.cursor() as c:
             tups = [BT('a', 'value1'), BT('b', 'value1'), BT('b', 'value2')]
-            assert (3, 3) == c.putmulti(tups, append=True)
+            assert (3, 3) == c.putmulti(tups, append=True)  # type: ignore[arg-type]
 
     def test_dupsort_put_append(self):
         _, env = testlib.temp_env()
@@ -280,8 +281,9 @@ class ContextManagerTest2(CursorTestBase):
             lambda: c.get(B('a')))
 
     def test_exit_failure(self):
+        c = self.txn.cursor()
         try:
-            with self.txn.cursor() as c:
+            with c:
                 c.put(B('a'), B('a'))
             raise ValueError
         except ValueError:
@@ -292,7 +294,7 @@ class ContextManagerTest2(CursorTestBase):
     def test_close(self):
         self.c.close()
         self.assertRaises(Exception,
-            lambda: c.get(B('a')))
+            lambda: self.c.get(B('a')))
 
     def test_double_close(self):
         self.c.close()

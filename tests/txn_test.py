@@ -196,7 +196,7 @@ class ContextManagerTest(unittest.TestCase):
         try:
             with txn as txn_:
                 txn.put(B('foo'), B('123'))
-                txn.put(123, 123)
+                txn.put(123, 123)  # type: ignore[arg-type]
         except:
             pass
 
@@ -264,10 +264,10 @@ class StatTest(unittest.TestCase):
 
         txn.abort()
         self.assertRaises(Exception,
-            lambda: env.stat(db1))
+            lambda: env.stat(db1))  # type: ignore[call-arg]
         env.close()
         self.assertRaises(Exception,
-            lambda: env.stat(db1))
+            lambda: env.stat(db1))  # type: ignore[call-arg]
 
 
 class DropTest(unittest.TestCase):
@@ -569,7 +569,7 @@ class ReplaceTest(unittest.TestCase):
             cur = txn.cursor()
             assert cur.set_key(B('a'))
             assert [B('a'), B('b')] == list(cur.iternext_dup())
-            assert txn.delete(B('a'), None)
+            assert txn.delete(B('a'), None)  # type: ignore[arg-type]
 
     def test_dupdata_no_dupsort(self):
         _, env = testlib.temp_env()

@@ -83,21 +83,14 @@ import string
 import struct
 import sys
 import time
-
-# Python3.x bikeshedded trechery.
-try:
-    from io import BytesIO as StringIO
-except ImportError:
-    try:
-        from cStringIO import StringIO  # type: ignore
-    except ImportError:
-        from StringIO import StringIO  # type: ignore
+from io import BytesIO as StringIO
+from typing import NoReturn
 
 import lmdb
 
 
 BUF_SIZE = 10485760
-ENV = None
+ENV: 'lmdb.Environment | None' = None
 DB = None
 
 # How strings get encoded to and decoded from DB
@@ -105,9 +98,8 @@ ENCODING = 'utf-8'
 
 
 def _to_bytes(s):
-    """Given either a Python 2.x or 3.x str, return either a str (Python 2.x)
-    or a bytes instance (Python 3.x)."""
-    return globals().get('unicode', str)(s).encode(ENCODING)
+    """Given a str, return a bytes instance."""
+    return str(s).encode(ENCODING)
 
 
 def isprint(c):
@@ -121,9 +113,9 @@ def xxd(s):
     `s`."""
     sio = StringIO()
     pr = _to_bytes('')
+    idx = -1
     for idx, ch in enumerate(s):
-        if sys.version_info[0] >= 3:
-            ch = chr(ch)
+        ch = chr(ch)
         if not (idx % 16):
             if idx:
                 sio.write(_to_bytes('  '))
@@ -136,7 +128,7 @@ def xxd(s):
         sio.write(_to_bytes('%02x' % (ord(ch),)))
         pr += _to_bytes(ch) if isprint(ch) else _to_bytes('.')
 
-    if idx % 16:
+    if idx >= 0 and idx % 16:
         need = 15 - (idx % 16)
         # fill remainder of last line.
         sio.write(_to_bytes('  ') * need)
@@ -151,7 +143,7 @@ def xxd(s):
 def make_parser():
     parser = optparse.OptionParser()
     parser.prog = 'python -mlmdb'
-    parser.usage = '%prog [options] <command>\n' + __doc__.rstrip()
+    parser.usage = '%prog [options] <command>\n' + (__doc__ or '').rstrip()
     parser.add_option('-e', '--env', help='Environment file to open')
     parser.add_option('-d', '--db', help='Database to open (default: main)')
     parser.add_option('-r', '--read', help='Open environment read-only')
@@ -197,7 +189,7 @@ def make_parser():
     return parser
 
 
-def die(fmt, *args):
+def die(fmt, *args) -> NoReturn:
     if args:
         fmt %= args
     sys.stderr.write('lmdb.tool: %s\n' % (fmt,))
@@ -215,6 +207,7 @@ def dump_cursor_to_fp(cursor, fp):
 
 
 def db_map_from_args(args):
+    assert ENV is not None
     db_map = {}
 
     for arg in args:
@@ -234,6 +227,7 @@ def db_map_from_args(args):
 
 
 def cmd_copy(opts, args):
+    assert ENV is not None
     if len(args) != 1:
         die('Please specify output directory (see --help)')
 
@@ -247,6 +241,7 @@ def cmd_copy(opts, args):
 
 
 def cmd_copyfd(opts, args):
+    assert ENV is not None
     if args:
         die('"copyfd" command takes no arguments (see --help)')
 
@@ -260,6 +255,7 @@ def cmd_copyfd(opts, args):
 
 
 def cmd_dump(opts, args):
+    assert ENV is not None
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
         for dbname, (db, path) in db_map.items():
@@ -307,6 +303,7 @@ def restore_cursor_from_fp(txn, fp, db):
 
 
 def cmd_drop(opts, args):
+    assert ENV is not None
     if not args:
         die('Must specify at least one sub-database (see --help)')
 
@@ -321,12 +318,14 @@ def cmd_drop(opts, args):
 
 
 def cmd_readers(opts, args):
+    assert ENV is not None
     if opts.clean:
         print('Cleaned %d stale entries.' % (ENV.reader_check(),))
     print(ENV.readers())
 
 
 def cmd_restore(opts, args):
+    assert ENV is not None
     db_map = db_map_from_args(args)
     with ENV.begin(buffers=True, write=True) as txn:
         for dbname, (db, path) in db_map.items():
@@ -383,6 +382,9 @@ class DiskStatter(object):
         'total_ms'
     )
 
+    sectors_read: int
+    sectors_written: int
+
     def __init__(self, path):
         self.fp = open(path)
         self.refresh()
@@ -394,8 +396,9 @@ class DiskStatter(object):
 
 
 def cmd_watch(opts, args):
-    info = None
-    stat = None
+    assert ENV is not None
+    info = {}  # type: dict
+    stat = {}  # type: dict
 
     def window(func):
         history = collections.deque()
@@ -459,7 +462,7 @@ def cmd_watch(opts, args):
                 widths[i] = max(widths[i], len(val))
 
             if opts.csv:
-                writer.writerow(vals)
+                writer.writerow(vals)  # pyright: ignore[reportPossiblyUnboundVariable]
             else:
                 if term_width != _TERM_WIDTH or not (cnt % (_TERM_HEIGHT - 2)):
                     for i, (fmt, head, func) in enumerate(cols):
@@ -477,6 +480,7 @@ def cmd_watch(opts, args):
 
 
 def cmd_warm(opts, args):
+    assert ENV is not None
     stat = ENV.stat()
     info = ENV.info()
 
@@ -496,6 +500,7 @@ def cmd_warm(opts, args):
 
 
 def cmd_rewrite(opts, args):
+    assert ENV is not None
     if not opts.target_env:
         die('Must specify target environment path with -E')
 
@@ -528,6 +533,7 @@ def cmd_rewrite(opts, args):
 
 
 def cmd_get(opts, args):
+    assert ENV is not None
     print_header = len(args) > 1
 
     with ENV.begin(buffers=True, db=DB) as txn:
@@ -545,6 +551,7 @@ def cmd_get(opts, args):
 
 
 def cmd_edit(opts, args):
+    assert ENV is not None
     if args:
         die('Edit command only takes options, not arguments (see --help)')
 
@@ -579,6 +586,7 @@ def cmd_shell(opts, args):
 
 
 def cmd_stat(opts, args):
+    assert ENV is not None
     pprint.pprint(ENV.stat())
     pprint.pprint(ENV.info())
 
@@ -587,7 +595,7 @@ def _get_term_width(default=(80, 25)):
     try:
         import fcntl    # No fcntl on win32
         import termios  # No termios on win32
-        s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')
+        s = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'1234')
         height, width = struct.unpack('hh', s)
         return width, height
     except Exception:
