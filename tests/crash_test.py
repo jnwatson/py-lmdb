@@ -417,6 +417,69 @@ class WriteDeallocloseRaceTest(unittest.TestCase):
             env.close()
 
 
+class TxnAbortDuringOpTest(unittest.TestCase):
+    """Test that abort() during an in-flight txn/cursor op doesn't crash.
+
+    ENV_UNLOCKED evaluates the env pointer once (GIL held) and saves
+    it to a local.  Without this, a concurrent abort could NULL the
+    pointer chain (e.g. self->trans->env) during the GIL release,
+    causing a NULL dereference in ACTIVE_OPS_DEC.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_abort_during_get(self):
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            for i in range(100):
+                txn.put(i.to_bytes(8, 'big'), b'x' * 200)
+
+        for _ in range(200):
+            try:
+                txn = env.begin()
+                def do_abort(t):
+                    try:
+                        t.abort()
+                    except lmdb.Error:
+                        pass
+                t = threading.Thread(target=do_abort, args=(txn,))
+                t.start()
+                try:
+                    txn.get(b'\x00' * 8)
+                except (lmdb.Error, TypeError):
+                    pass
+                t.join()
+            except (lmdb.Error, TypeError):
+                pass
+
+    def test_abort_during_cursor_op(self):
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            for i in range(100):
+                txn.put(i.to_bytes(8, 'big'), b'x' * 200)
+
+        for _ in range(200):
+            try:
+                txn = env.begin()
+                cur = txn.cursor()
+                def do_abort(t):
+                    try:
+                        t.abort()
+                    except lmdb.Error:
+                        pass
+                t = threading.Thread(target=do_abort, args=(txn,))
+                t.start()
+                try:
+                    cur.first()
+                    cur.next()
+                except (lmdb.Error, TypeError):
+                    pass
+                t.join()
+            except lmdb.Error:
+                pass
+
+
 class ChildCommitRaceTest(unittest.TestCase):
     # https://github.com/jnwatson/py-lmdb/issues/180
     def tearDown(self):

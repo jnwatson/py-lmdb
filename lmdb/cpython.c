@@ -683,13 +683,19 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
  * counter is incremented while the GIL is still held (so env_clear can't
  * start between our valid-check and the increment), and decremented after
  * we reacquire the GIL.  See issue #180. */
+/* ENV_UNLOCKED: release GIL for an LMDB call.  The _env expression is
+ * evaluated once while the GIL is held and saved to a local, so pointer
+ * chains like self->trans->env remain valid for ACTIVE_OPS_DEC even if
+ * another thread NULLs an intermediate pointer during the GIL release.
+ * Issue #180. */
 #define ENV_UNLOCKED(_env, out, e) \
     do { \
-        (_env)->active_ops++; \
+        EnvObject *_saved_env = (_env); \
+        _saved_env->active_ops++; \
         Py_BEGIN_ALLOW_THREADS \
         out = (e); \
         Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_env); \
+        ACTIVE_OPS_DEC(_saved_env); \
     } while(0)
 
 #define PRELOAD_UNLOCKED(_rc, _data, _size) \
@@ -699,11 +705,12 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 
 #define ENV_PRELOAD_UNLOCKED(_env, _rc, _data, _size) \
     do { \
-        (_env)->active_ops++; \
+        EnvObject *_saved_env = (_env); \
+        _saved_env->active_ops++; \
         Py_BEGIN_ALLOW_THREADS \
         preload(_rc, _data, _size); \
         Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_env); \
+        ACTIVE_OPS_DEC(_saved_env); \
     } while(0)
 
 /* ---------------- */
