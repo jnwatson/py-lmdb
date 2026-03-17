@@ -519,6 +519,16 @@ py_bool(int pred)
     return obj;
 }
 
+/** Set a boolean value in a dict, handling the reference from py_bool. */
+static int
+dict_set_bool(PyObject *dict, const char *key, int pred)
+{
+    PyObject *val = py_bool(pred);
+    int rc = PyDict_SetItemString(dict, key, val);
+    Py_DECREF(val);
+    return rc;
+}
+
 /**
  * Convert the structure `o` described by `fields` to a dict and return the new
  * dict.
@@ -1190,11 +1200,11 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 
     dct = PyDict_New();
     f = self->flags;
-    PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
-    PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
-    PyDict_SetItemString(dct, "integerkey", py_bool(f & MDB_INTEGERKEY));
-    PyDict_SetItemString(dct, "integerdup", py_bool(f & MDB_INTEGERDUP));
-    PyDict_SetItemString(dct, "dupfixed", py_bool(f & MDB_DUPFIXED));
+    dict_set_bool(dct, "reverse_key", f & MDB_REVERSEKEY);
+    dict_set_bool(dct, "dupsort", f & MDB_DUPSORT);
+    dict_set_bool(dct, "integerkey", f & MDB_INTEGERKEY);
+    dict_set_bool(dct, "integerdup", f & MDB_INTEGERDUP);
+    dict_set_bool(dct, "dupfixed", f & MDB_DUPFIXED);
     return dct;
 }
 
@@ -1558,6 +1568,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             goto fail;
         }
         DEBUG("EnvObject '%s' opened at %p", fspath, self)
+        Py_DECREF(fspath_obj);
         return (PyObject *) self;
     }
 
@@ -1636,6 +1647,7 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     if (arg.txn) {
         txn = arg.txn->txn;
         if (!arg.compact) {
+            Py_DECREF(fspath_obj);
             return type_error("txn argument only compatible with compact=True");
         }
     }
@@ -1644,6 +1656,7 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 #else
     if (arg.txn) {
+        Py_DECREF(fspath_obj);
         return type_error("Non-patched LMDB doesn't support transaction with env.copy");
     }
 #endif
@@ -1795,15 +1808,15 @@ env_flags(EnvObject *self, PyObject *Py_UNUSED(ignored))
     }
 
     dct = PyDict_New();
-    PyDict_SetItemString(dct, "subdir", py_bool(!(flags & MDB_NOSUBDIR)));
-    PyDict_SetItemString(dct, "readonly", py_bool(flags & MDB_RDONLY));
-    PyDict_SetItemString(dct, "metasync", py_bool(!(flags & MDB_NOMETASYNC)));
-    PyDict_SetItemString(dct, "sync", py_bool(!(flags & MDB_NOSYNC)));
-    PyDict_SetItemString(dct, "map_async", py_bool(flags & MDB_MAPASYNC));
-    PyDict_SetItemString(dct, "readahead", py_bool(!(flags & MDB_NORDAHEAD)));
-    PyDict_SetItemString(dct, "writemap", py_bool(flags & MDB_WRITEMAP));
-    PyDict_SetItemString(dct, "meminit", py_bool(!(flags & MDB_NOMEMINIT)));
-    PyDict_SetItemString(dct, "lock", py_bool(!(flags & MDB_NOLOCK)));
+    dict_set_bool(dct, "subdir", !(flags & MDB_NOSUBDIR));
+    dict_set_bool(dct, "readonly", flags & MDB_RDONLY);
+    dict_set_bool(dct, "metasync", !(flags & MDB_NOMETASYNC));
+    dict_set_bool(dct, "sync", !(flags & MDB_NOSYNC));
+    dict_set_bool(dct, "map_async", flags & MDB_MAPASYNC);
+    dict_set_bool(dct, "readahead", !(flags & MDB_NORDAHEAD));
+    dict_set_bool(dct, "writemap", flags & MDB_WRITEMAP);
+    dict_set_bool(dct, "meminit", !(flags & MDB_NOMEMINIT));
+    dict_set_bool(dct, "lock", !(flags & MDB_NOLOCK));
     return dct;
 }
 
@@ -1972,6 +1985,7 @@ static int env_readers_callback(const char *msg, void *str_)
         return -1;
     }
     new = PyUnicode_Concat(*str, s);
+    Py_DECREF(s);
     Py_CLEAR(*str);
     *str = new;
     if(! new) {
