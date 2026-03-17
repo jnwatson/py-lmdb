@@ -856,10 +856,47 @@ class Environment(object):
             with self._close_lock:
                 if not self._env:
                     return
+
+                # Phase 1: collect live txn handles and mark ALL
+                # descendants invalid.  No C calls here — the GIL
+                # must be held throughout so no concurrent __del__
+                # → abort() can call mdb_txn_abort.
+                # Mirrors cpython.c's INVALIDATE_MARK.  Issue #180.
+                #
+                # IMPORTANT: invalidate _txn BEFORE removing from the
+                # set.  Removing may drop the last reference, firing
+                # __del__ → abort() which would call mdb_txn_abort
+                # (releasing the GIL) if _txn is still valid.
+                txn_handles = []
                 if self._deps:
-                    while self._deps:
-                        self._deps.pop()._invalidate()
+                    # First pass: invalidate all handles (no removals,
+                    # no refcount changes, no __del__ triggers).
+                    for dep in self._deps:
+                        if hasattr(dep, '_deps') and dep._deps:
+                            for child in dep._deps:
+                                if hasattr(child, '_cur'):
+                                    child._cur = _invalid
+                                    child._dbi = _invalid
+                                    child._txn = _invalid
+                        if hasattr(dep, '_txn') and dep._txn:
+                            txn_handles.append(dep._txn)
+                            dep._txn = _invalid
+                        dep._env = _invalid
+                        if hasattr(dep, '_dbi'):
+                            dep._dbi = _invalid
+                    # Second pass: clear sets.  Any __del__ triggered
+                    # by refcount drops will see _invalid handles.
+                    for dep in list(self._deps):
+                        if hasattr(dep, '_deps') and dep._deps:
+                            dep._deps.clear()
+                    self._deps.clear()
                 self._deps = None
+
+                # Phase 2: abort collected txns and close env.
+                # All Python-level handles are _invalid, so any
+                # concurrent __del__ → abort() is a no-op.
+                for txn in txn_handles:
+                    _lib.mdb_txn_abort(txn)
 
                 if self._spare_txns:
                     while self._spare_txns:
@@ -871,8 +908,9 @@ class Environment(object):
                 self._dbs = None
                 self._db = None
 
-                _lib.mdb_env_close(self._env)
+                env = self._env
                 self._env = _invalid
+                _lib.mdb_env_close(env)
 
             open_path = getattr(self, '_open_path', None)
             if open_path:
@@ -1523,8 +1561,10 @@ class Transaction(object):
                 if not self.env._env:
                     return True
                 _lib.mdb_txn_reset(txn)
-            spare_txns.append(txn)
-            self.env._max_spare_txns -= 1
+                # Append inside the lock so env.close() can't miss this
+                # handle between our unlock and the append.
+                spare_txns.append(txn)
+                self.env._max_spare_txns -= 1
             self._invalidate()
             return True
 
@@ -1802,6 +1842,8 @@ class Cursor(object):
         self._cur = None
         rc = _lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
+            db._deps.discard(self)
+            txn._deps.discard(self)
             raise _error("mdb_cursor_open", rc)
         self._cur = curpp[0]
         # If Transaction.mutations!=last_mutation, must MDB_GET_CURRENT to
@@ -1974,7 +2016,14 @@ class Cursor(object):
         return self._iter(_lib.MDB_PREV_NODUP, keys, values)
 
     def _cursor_get(self, op):
-        rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
+        # Hold _close_lock to prevent concurrent txn.abort() from
+        # calling mdb_txn_abort (which frees cursor memory) while
+        # mdb_cursor_get is running.  Issue #180.
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         self._last_mutation = self.txn._mutations
         if rc:
@@ -1986,8 +2035,12 @@ class Cursor(object):
         return v
 
     def _cursor_get_kv(self, op, k, v):
-        rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
-                                   self._key, self._val, op)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
+                                       self._key, self._val, op)
         self._valid = v = not rc
         if rc:
             self._key.mv_size = 0
@@ -2204,11 +2257,11 @@ class Cursor(object):
 
         """
         if dupfixed_bytes and dupfixed_bytes < 0:
-            raise _error("dupfixed_bytes must be a positive integer.")
+            raise Error("dupfixed_bytes must be a positive integer.")
         elif (dupfixed_bytes or keyfixed) and not dupdata:
-            raise _error("dupdata is required for dupfixed_bytes/key_bytes.")
+            raise Error("dupdata is required for dupfixed_bytes/key_bytes.")
         elif keyfixed and not dupfixed_bytes:
-            raise _error("dupfixed_bytes is required for key_bytes.")
+            raise Error("dupfixed_bytes is required for key_bytes.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
@@ -2301,7 +2354,11 @@ class Cursor(object):
         v = self._valid
         if v:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
-            rc = _lib.mdb_cursor_del(self._cur, flags)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.mdb_cursor_del(self._cur, flags)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
@@ -2318,7 +2375,11 @@ class Cursor(object):
         <http://lmdb.tech/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
         """
         countp = _ffi.new('size_t *')
-        rc = _lib.mdb_cursor_count(self._cur, countp)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
@@ -2365,7 +2426,11 @@ class Cursor(object):
             else:
                 flags |= _lib.MDB_APPEND
 
-        rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self.txn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -2418,8 +2483,12 @@ class Cursor(object):
         added = 0
         skipped = 0
         for key, value in items:
-            rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
-                                       value, len(value), flags)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
+                                           value, len(value), flags)
             self.txn._mutations += 1
             added += 1
             if rc:
@@ -2458,7 +2527,11 @@ class Cursor(object):
 
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
         self.txn._mutations += 1
         if not rc:
             return
@@ -2468,7 +2541,11 @@ class Cursor(object):
         self._cursor_get(_lib.MDB_GET_CURRENT)
         preload(self._val)
         old = _mvstr(self._val)
-        rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+        with self.txn.env._close_lock:
+            if not self._cur:
+                raise _error("Attempt to operate on closed cursor",
+                              _lib.EINVAL)
+            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
         self.txn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
@@ -2489,7 +2566,11 @@ class Cursor(object):
         if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             preload(self._val)
             old = _mvstr(self._val)
-            rc = _lib.mdb_cursor_del(self._cur, 0)
+            with self.txn.env._close_lock:
+                if not self._cur:
+                    raise _error("Attempt to operate on closed cursor",
+                                  _lib.EINVAL)
+                rc = _lib.mdb_cursor_del(self._cur, 0)
             self.txn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)

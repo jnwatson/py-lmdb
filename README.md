@@ -7,8 +7,8 @@ See [the documentation](https://lmdb.readthedocs.io) for more information.
 
 # Python Version Support Statement
 
-This project has been around for a while.  Previously, it supported all the 
-way back to before Python 2.5.  Currently, py-lmdb supports Python >= 3.5 
+This project has been around for a while.  Previously, it supported all the
+way back to before Python 2.5.  Currently, py-lmdb supports Python >= 3.9
 and pypy.
 
 The last version of py-lmdb that supported Python 2.7 was 1.4.1.

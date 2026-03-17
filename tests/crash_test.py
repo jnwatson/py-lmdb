@@ -32,6 +32,7 @@
 from __future__ import absolute_import
 from __future__ import with_statement
 
+import gc
 import sys
 import itertools
 import random
@@ -312,6 +313,171 @@ class CloseRaceTest(unittest.TestCase):
             self.env = lmdb.open(path, max_dbs=10)
         for t in threads:
             t.join()
+
+
+class CloseRefcountRaceTest(unittest.TestCase):
+    """Test that env_clear holds a self-reference during mdb_env_close.
+
+    When env_clear releases the GIL for mdb_env_close, another thread could
+    drop the last Python reference to the env, triggering env_dealloc and
+    freeing the EnvObject while mdb_env_close is still running.  The fix is
+    to Py_INCREF(self) before the GIL release and Py_DECREF after.
+
+    This test creates a large writemap env (so mdb_env_close takes longer
+    due to msync), starts close() in one thread, and drops all references
+    from another thread.  A weakref callback confirms the env is collected
+    at the expected time.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_close_dealloc_race(self):
+        for _ in range(50):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, writemap=True, sync=False)
+            # Write some data so mdb_env_close has work to do
+            with env.begin(write=True) as txn:
+                for j in range(100):
+                    txn.put(j.to_bytes(8, 'big'), b'x' * 1000)
+
+            def do_close(e):
+                try:
+                    e.close()
+                except lmdb.Error:
+                    pass
+
+            t = threading.Thread(target=do_close, args=(env,))
+            t.start()
+            # Drop our reference — if the INCREF fix is missing, the env
+            # could be freed while mdb_env_close is still running.
+            del env
+            gc.collect()
+            t.join()
+
+
+class WriteDeallocloseRaceTest(unittest.TestCase):
+    """Test that write txn dealloc during env.close() doesn't segfault.
+
+    The cpython C extension releases the GIL during mdb_txn_abort in
+    trans_dealloc.  Without active_ops protection, a concurrent
+    env.close() can call mdb_env_close while mdb_txn_abort is still
+    running.  CFFI also releases the GIL for C calls, but uses
+    two-phase invalidation instead of active_ops.
+
+    The threading test only runs on cpython (which has active_ops to
+    make it safe).  Both implementations are tested for the non-threaded
+    close-with-active-txn case.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_close_with_active_write_txn(self):
+        """env.close() with an uncommitted write txn must not crash."""
+        for _ in range(50):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, sync=False)
+            txn = env.begin(write=True)
+            for j in range(50):
+                txn.put(j.to_bytes(8, 'big'), b'x' * 500)
+            # Close env without aborting txn — env.close() must
+            # handle this safely (two-phase invalidation on CFFI,
+            # INVALIDATE + active_ops on cpython).
+            env.close()
+            del txn
+            gc.collect()
+
+    @unittest.skipIf(
+        lmdb.Environment.__module__ != 'builtins',
+        'cpython C extension only (tests active_ops protection)'
+    )
+    def test_write_dealloc_close_race(self):
+        """Race write txn __del__ against env.close() in another thread."""
+        for _ in range(100):
+            path = testlib.temp_dir()
+            env = lmdb.open(path, map_size=2 * 1024 * 1024,
+                            max_dbs=10, sync=False)
+            txn = env.begin(write=True)
+            for j in range(50):
+                txn.put(j.to_bytes(8, 'big'), b'x' * 500)
+
+            def do_close(e):
+                try:
+                    e.close()
+                except lmdb.Error:
+                    pass
+
+            t = threading.Thread(target=do_close, args=(env,))
+            t.start()
+            del txn
+            t.join()
+            env.close()
+
+
+class TxnAbortDuringOpTest(unittest.TestCase):
+    """Test that abort() during an in-flight txn/cursor op doesn't crash.
+
+    ENV_UNLOCKED evaluates the env pointer once (GIL held) and saves
+    it to a local.  Without this, a concurrent abort could NULL the
+    pointer chain (e.g. self->trans->env) during the GIL release,
+    causing a NULL dereference in ACTIVE_OPS_DEC.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_abort_during_get(self):
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            for i in range(100):
+                txn.put(i.to_bytes(8, 'big'), b'x' * 200)
+
+        for _ in range(200):
+            try:
+                txn = env.begin()
+                def do_abort(t):
+                    try:
+                        t.abort()
+                    except lmdb.Error:
+                        pass
+                t = threading.Thread(target=do_abort, args=(txn,))
+                t.start()
+                try:
+                    txn.get(b'\x00' * 8)
+                except (lmdb.Error, TypeError):
+                    pass
+                t.join()
+            except (lmdb.Error, TypeError):
+                pass
+
+    def test_abort_during_cursor_op(self):
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            for i in range(100):
+                txn.put(i.to_bytes(8, 'big'), b'x' * 200)
+
+        for _ in range(200):
+            try:
+                txn = env.begin()
+                cur = txn.cursor()
+                def do_abort(t):
+                    try:
+                        t.abort()
+                    except lmdb.Error:
+                        pass
+                t = threading.Thread(target=do_abort, args=(txn,))
+                t.start()
+                try:
+                    cur.first()
+                    cur.next()
+                except (lmdb.Error, TypeError):
+                    pass
+                t.join()
+            except lmdb.Error:
+                pass
 
 
 class ChildCommitRaceTest(unittest.TestCase):

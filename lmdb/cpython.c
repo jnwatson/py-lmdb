@@ -519,6 +519,16 @@ py_bool(int pred)
     return obj;
 }
 
+/** Set a boolean value in a dict, handling the reference from py_bool. */
+static int
+dict_set_bool(PyObject *dict, const char *key, int pred)
+{
+    PyObject *val = py_bool(pred);
+    int rc = PyDict_SetItemString(dict, key, val);
+    Py_DECREF(val);
+    return rc;
+}
+
 /**
  * Convert the structure `o` described by `fields` to a dict and return the new
  * dict.
@@ -683,13 +693,19 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
  * counter is incremented while the GIL is still held (so env_clear can't
  * start between our valid-check and the increment), and decremented after
  * we reacquire the GIL.  See issue #180. */
+/* ENV_UNLOCKED: release GIL for an LMDB call.  The _env expression is
+ * evaluated once while the GIL is held and saved to a local, so pointer
+ * chains like self->trans->env remain valid for ACTIVE_OPS_DEC even if
+ * another thread NULLs an intermediate pointer during the GIL release.
+ * Issue #180. */
 #define ENV_UNLOCKED(_env, out, e) \
     do { \
-        (_env)->active_ops++; \
+        EnvObject *_saved_env = (_env); \
+        _saved_env->active_ops++; \
         Py_BEGIN_ALLOW_THREADS \
         out = (e); \
         Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_env); \
+        ACTIVE_OPS_DEC(_saved_env); \
     } while(0)
 
 #define PRELOAD_UNLOCKED(_rc, _data, _size) \
@@ -699,11 +715,12 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 
 #define ENV_PRELOAD_UNLOCKED(_env, _rc, _data, _size) \
     do { \
-        (_env)->active_ops++; \
+        EnvObject *_saved_env = (_env); \
+        _saved_env->active_ops++; \
         Py_BEGIN_ALLOW_THREADS \
         preload(_rc, _data, _size); \
         Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_env); \
+        ACTIVE_OPS_DEC(_saved_env); \
     } while(0)
 
 /* ---------------- */
@@ -832,8 +849,12 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
         PyObject *key = PyUnicode_InternFromString(spec->string);
         PyObject *val = MAKE_ID(i);
         if((! (key && val)) || PyDict_SetItem(*cache, key, val)) {
+            Py_XDECREF(key);
+            Py_XDECREF(val);
+            Py_CLEAR(*cache);
             return -1;
         }
+        Py_DECREF(key);
         Py_DECREF(val);
     }
     return 0;
@@ -1140,9 +1161,9 @@ txn_db_from_name(EnvObject *env, const char *name,
     }
 
     if(! ((dbo = db_from_name(env, txn, name, flags)))) {
-        Py_BEGIN_ALLOW_THREADS
-        mdb_txn_abort(txn);
-        Py_END_ALLOW_THREADS
+        int ignored;
+        ENV_UNLOCKED(env, ignored, (mdb_txn_abort(txn), 0));
+        (void)ignored;
         return NULL;
     }
 
@@ -1183,11 +1204,11 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
 
     dct = PyDict_New();
     f = self->flags;
-    PyDict_SetItemString(dct, "reverse_key", py_bool(f & MDB_REVERSEKEY));
-    PyDict_SetItemString(dct, "dupsort", py_bool(f & MDB_DUPSORT));
-    PyDict_SetItemString(dct, "integerkey", py_bool(f & MDB_INTEGERKEY));
-    PyDict_SetItemString(dct, "integerdup", py_bool(f & MDB_INTEGERDUP));
-    PyDict_SetItemString(dct, "dupfixed", py_bool(f & MDB_DUPFIXED));
+    dict_set_bool(dct, "reverse_key", f & MDB_REVERSEKEY);
+    dict_set_bool(dct, "dupsort", f & MDB_DUPSORT);
+    dict_set_bool(dct, "integerkey", f & MDB_INTEGERKEY);
+    dict_set_bool(dct, "integerdup", f & MDB_INTEGERDUP);
+    dict_set_bool(dct, "dupfixed", f & MDB_DUPFIXED);
     return dct;
 }
 
@@ -1293,14 +1314,18 @@ env_clear(EnvObject *self)
          * large writemap regions.  Setting self->env = NULL above tells
          * any concurrent trans_clear (from trans_dealloc in another
          * thread) to skip its mdb_txn_abort — the txn memory will be
-         * freed by mdb_env_close.  active_ops prevents a concurrent
-         * env_dealloc from freeing this EnvObject while we're still
-         * using it.  Issue #180, #418. */
+         * freed by mdb_env_close.
+         *
+         * Py_INCREF prevents another thread from dropping the last
+         * reference and freeing the EnvObject while mdb_env_close is
+         * still running.  Issue #180, #418. */
+        Py_INCREF((PyObject *)self);
         self->active_ops++;
         Py_BEGIN_ALLOW_THREADS
         mdb_env_close(env);
         Py_END_ALLOW_THREADS
         ACTIVE_OPS_DEC(self);
+        Py_DECREF((PyObject *)self);
     }
 
     if(self->open_path) {
@@ -1321,6 +1346,12 @@ env_dealloc(EnvObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
+    /* Prevent re-entrant dealloc: env_clear Py_INCREFs self before
+     * releasing the GIL for mdb_env_close, then Py_DECREFs after.
+     * Without this, the DECREF would see refcount 0 and re-enter
+     * env_dealloc.  Setting refcount to 1 ensures the DECREF in
+     * env_clear drops it to 1, not 0. */
+    Py_SET_REFCNT((PyObject *)self, 1);
     env_clear(self);
     if(self->active_ops_lock) {
         PyThread_free_lock(self->active_ops_lock);
@@ -1541,6 +1572,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             goto fail;
         }
         DEBUG("EnvObject '%s' opened at %p", fspath, self)
+        Py_DECREF(fspath_obj);
         return (PyObject *) self;
     }
 
@@ -1619,6 +1651,7 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     if (arg.txn) {
         txn = arg.txn->txn;
         if (!arg.compact) {
+            Py_DECREF(fspath_obj);
             return type_error("txn argument only compatible with compact=True");
         }
     }
@@ -1627,6 +1660,7 @@ env_copy(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 #else
     if (arg.txn) {
+        Py_DECREF(fspath_obj);
         return type_error("Non-patched LMDB doesn't support transaction with env.copy");
     }
 #endif
@@ -1778,15 +1812,15 @@ env_flags(EnvObject *self, PyObject *Py_UNUSED(ignored))
     }
 
     dct = PyDict_New();
-    PyDict_SetItemString(dct, "subdir", py_bool(!(flags & MDB_NOSUBDIR)));
-    PyDict_SetItemString(dct, "readonly", py_bool(flags & MDB_RDONLY));
-    PyDict_SetItemString(dct, "metasync", py_bool(!(flags & MDB_NOMETASYNC)));
-    PyDict_SetItemString(dct, "sync", py_bool(!(flags & MDB_NOSYNC)));
-    PyDict_SetItemString(dct, "map_async", py_bool(flags & MDB_MAPASYNC));
-    PyDict_SetItemString(dct, "readahead", py_bool(!(flags & MDB_NORDAHEAD)));
-    PyDict_SetItemString(dct, "writemap", py_bool(flags & MDB_WRITEMAP));
-    PyDict_SetItemString(dct, "meminit", py_bool(!(flags & MDB_NOMEMINIT)));
-    PyDict_SetItemString(dct, "lock", py_bool(!(flags & MDB_NOLOCK)));
+    dict_set_bool(dct, "subdir", !(flags & MDB_NOSUBDIR));
+    dict_set_bool(dct, "readonly", flags & MDB_RDONLY);
+    dict_set_bool(dct, "metasync", !(flags & MDB_NOMETASYNC));
+    dict_set_bool(dct, "sync", !(flags & MDB_NOSYNC));
+    dict_set_bool(dct, "map_async", flags & MDB_MAPASYNC);
+    dict_set_bool(dct, "readahead", !(flags & MDB_NORDAHEAD));
+    dict_set_bool(dct, "writemap", flags & MDB_WRITEMAP);
+    dict_set_bool(dct, "meminit", !(flags & MDB_NOMEMINIT));
+    dict_set_bool(dct, "lock", !(flags & MDB_NOLOCK));
     return dct;
 }
 
@@ -1955,6 +1989,7 @@ static int env_readers_callback(const char *msg, void *str_)
         return -1;
     }
     new = PyUnicode_Concat(*str, s);
+    Py_DECREF(s);
     Py_CLEAR(*str);
     *str = new;
     if(! new) {
@@ -2430,9 +2465,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                         PyList_Append(pylist, tup);
                         Py_DECREF(tup);
                     } else {
-                        Py_DECREF(key);
-                        Py_DECREF(val);
-                        Py_DECREF(tup);
+                        Py_XDECREF(key);
+                        Py_XDECREF(val);
+                        Py_XDECREF(tup);
+                        goto failiter;
                     }
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
@@ -2478,8 +2514,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                                 PyList_Append(pylist, tup);
                                 Py_DECREF(tup);
                             } else {
-                                Py_DECREF(val);
-                                Py_DECREF(tup);
+                                Py_XDECREF(val);
+                                Py_XDECREF(tup);
+                                Py_DECREF(key);
+                                goto failiter;
                             }
                         }
                     }
@@ -2505,13 +2543,25 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     if (arg.keyfixed){
-        int rc;
-        Py_buffer pybuf;
         size_t newsize = buffer_pos * item_size;
+        PyObject *owner, *mv;
         buffer = realloc(buffer, newsize);
-        rc = PyBuffer_FillInfo(&pybuf, NULL, buffer, newsize, 0, PyBUF_SIMPLE);
-        // FIXME:  check rc
-        return PyMemoryView_FromBuffer(&pybuf);
+        if(! buffer && newsize) {
+            PyErr_NoMemory();
+            goto fail;
+        }
+        /* Wrap the buffer in a bytes object that owns the memory.
+         * PyBytes_FromStringAndSize copies the data, then we free
+         * the original buffer. */
+        owner = PyBytes_FromStringAndSize(buffer, newsize);
+        free(buffer);
+        buffer = NULL;
+        if(! owner) {
+            goto fail;
+        }
+        mv = PyMemoryView_FromObject(owner);
+        Py_DECREF(owner);
+        return mv;
     } else {
         return pylist;
     }
@@ -2520,6 +2570,7 @@ failiter:
     Py_DECREF(item);
     Py_DECREF(iter);
 fail:
+    Py_XDECREF(pylist);
     if (buffer) {
         free(buffer);
     }
@@ -3571,12 +3622,17 @@ trans_dealloc(TransObject *self)
              * the abort.  Issue #180.
              *
              * Skip if env's MDB_env* is NULL — env_clear is inside
-             * mdb_env_close and the txn memory is being freed.  #418. */
+             * mdb_env_close and the txn memory is being freed.  #418.
+             *
+             * active_ops keeps env_clear from calling mdb_env_close while
+             * this abort is in flight.  Issue #180. */
             self->txn = NULL;
             if(self->env) {
                 self->env->has_write_txn = 0;
                 if(self->env->env) {
+                    self->env->active_ops++;
                     txn_abort(txn);
+                    ACTIVE_OPS_DEC(self->env);
                 }
             }
         }
@@ -3585,6 +3641,13 @@ trans_dealloc(TransObject *self)
     }
     else {
        MDEBUG("In forked process, not deleting trans");
+       /* Can't touch LMDB handles after fork, but still need to
+        * release Python references to avoid leaking env/db. */
+       Py_CLEAR(self->db);
+       if(self->env) {
+           UNLINK_CHILD(self->env, self)
+           Py_CLEAR(self->env);
+       }
     }
 
     PyObject_Del(self);

@@ -17,11 +17,9 @@ jobs:
       matrix:
         include:
           # Linux - all Python versions, both impls, patched
-          - {os: ubuntu-24.04, python-version: '3.8', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.11', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.13', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: patched}
-          - {os: ubuntu-24.04, python-version: '3.8', impl: cffi, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.11', impl: cffi, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.13', impl: cffi, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: patched}
@@ -76,7 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-latest, macos-latest]
-        python-version: ['3.8', '3.11', '3.13', '3.14']
+        python-version: ['3.11', '3.13', '3.14']
         impl: [cpython, cffi]
         purity: [patched, pure]
         include:
