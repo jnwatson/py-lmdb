@@ -359,7 +359,6 @@ class CmdCopyTest(ToolTestBase):
 
 
 class CmdCopyfdTest(ToolTestBase):
-    @unittest.skip('cmd_copyfd uses os.fdopen(fd, "w", 0) which fails on Python 3')
     def test_copyfd(self):
         self.env.close()
         outpath = os.path.join(testlib.temp_dir(), 'data.mdb')

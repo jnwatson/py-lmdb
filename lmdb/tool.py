@@ -247,7 +247,7 @@ def cmd_copyfd(opts, args):
         die('"copyfd" command takes no arguments (see --help)')
 
     try:
-        os.fdopen(opts.out_fd, 'w', 0)
+        os.fstat(opts.out_fd)
     except OSError:
         e = sys.exc_info()[1]
         die('Bad --out-fd %d: %s', opts.out_fd, e)
