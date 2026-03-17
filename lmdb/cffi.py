@@ -1852,10 +1852,23 @@ class Cursor(object):
 
     def _invalidate(self):
         if self._cur:
-            _lib.mdb_cursor_close(self._cur)
+            # Hold _close_lock so mdb_cursor_close waits for any
+            # in-flight cursor ops (which also hold _close_lock)
+            # before freeing cursor memory.  Issue #180.
+            try:
+                lock = self.txn.env._close_lock
+            except (AttributeError, TypeError):
+                lock = None
+            cur = self._cur
+            self._cur = _invalid
+            if cur:
+                if lock:
+                    with lock:
+                        _lib.mdb_cursor_close(cur)
+                else:
+                    _lib.mdb_cursor_close(cur)
             self.db._deps.discard(self)
             self.txn._deps.discard(self)
-            self._cur = _invalid
             self._dbi = _invalid
             self._txn = _invalid
 
