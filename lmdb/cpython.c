@@ -849,8 +849,12 @@ make_arg_cache(int specsize, const struct argspec *argspec, PyObject **cache)
         PyObject *key = PyUnicode_InternFromString(spec->string);
         PyObject *val = MAKE_ID(i);
         if((! (key && val)) || PyDict_SetItem(*cache, key, val)) {
+            Py_XDECREF(key);
+            Py_XDECREF(val);
+            Py_CLEAR(*cache);
             return -1;
         }
+        Py_DECREF(key);
         Py_DECREF(val);
     }
     return 0;
@@ -1157,9 +1161,9 @@ txn_db_from_name(EnvObject *env, const char *name,
     }
 
     if(! ((dbo = db_from_name(env, txn, name, flags)))) {
-        Py_BEGIN_ALLOW_THREADS
-        mdb_txn_abort(txn);
-        Py_END_ALLOW_THREADS
+        int ignored;
+        ENV_UNLOCKED(env, ignored, (mdb_txn_abort(txn), 0));
+        (void)ignored;
         return NULL;
     }
 

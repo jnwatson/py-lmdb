@@ -1561,8 +1561,10 @@ class Transaction(object):
                 if not self.env._env:
                     return True
                 _lib.mdb_txn_reset(txn)
-            spare_txns.append(txn)
-            self.env._max_spare_txns -= 1
+                # Append inside the lock so env.close() can't miss this
+                # handle between our unlock and the append.
+                spare_txns.append(txn)
+                self.env._max_spare_txns -= 1
             self._invalidate()
             return True
 
