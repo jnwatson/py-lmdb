@@ -862,27 +862,34 @@ class Environment(object):
                 # must be held throughout so no concurrent __del__
                 # → abort() can call mdb_txn_abort.
                 # Mirrors cpython.c's INVALIDATE_MARK.  Issue #180.
+                #
+                # IMPORTANT: invalidate _txn BEFORE removing from the
+                # set.  Removing may drop the last reference, firing
+                # __del__ → abort() which would call mdb_txn_abort
+                # (releasing the GIL) if _txn is still valid.
                 txn_handles = []
                 if self._deps:
-                    while self._deps:
-                        dep = self._deps.pop()
-                        # Mark child cursors/txns of this dep invalid
+                    # First pass: invalidate all handles (no removals,
+                    # no refcount changes, no __del__ triggers).
+                    for dep in self._deps:
                         if hasattr(dep, '_deps') and dep._deps:
-                            while dep._deps:
-                                child = dep._deps.pop()
+                            for child in dep._deps:
                                 if hasattr(child, '_cur'):
-                                    # Don't call mdb_cursor_close here —
-                                    # mdb_txn_abort frees all cursors.
                                     child._cur = _invalid
                                     child._dbi = _invalid
                                     child._txn = _invalid
-                        # Collect the txn handle before invalidating
                         if hasattr(dep, '_txn') and dep._txn:
                             txn_handles.append(dep._txn)
                             dep._txn = _invalid
                         dep._env = _invalid
                         if hasattr(dep, '_dbi'):
                             dep._dbi = _invalid
+                    # Second pass: clear sets.  Any __del__ triggered
+                    # by refcount drops will see _invalid handles.
+                    for dep in list(self._deps):
+                        if hasattr(dep, '_deps') and dep._deps:
+                            dep._deps.clear()
+                    self._deps.clear()
                 self._deps = None
 
                 # Phase 2: abort collected txns and close env.
