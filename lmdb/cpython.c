@@ -53,6 +53,10 @@
 #include <windows.h> /* HANDLE */
 #endif
 
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 #include "lmdb.h"
 #include "preload.h"
 
@@ -99,6 +103,8 @@ static PyObject *py_size_max;
 static PyObject *Error;
 /** Global set of canonical paths for open environments. */
 static PyObject *open_env_paths;
+/** Cached process ID, updated after fork via pthread_atfork. */
+static pid_t _cached_pid;
 
 /** Typedefs and forward declarations. */
 static PyTypeObject PyDatabase_Type;
@@ -1441,7 +1447,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->spare_txn = NULL;
     self->open_path = NULL;
     self->max_spare_txns = arg.max_spare_txns;
-    self->pid = getpid();
+    self->pid = _cached_pid;
     self->has_write_txn = 0;
     self->active_ops = 0;
     self->active_ops_waiter = 0;
@@ -3606,7 +3612,7 @@ trans_dealloc(TransObject *self)
         PyObject_ClearWeakRefs((PyObject *) self);
     }
 
-    if(self->env && self->env->pid == getpid()) {
+    if(self->env && self->env->pid == _cached_pid) {
         if(self->env->valid && self->env->env && txn &&
                 !self->env->spare_txn &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
@@ -4448,6 +4454,17 @@ static int init_errors(PyObject *mod, PyObject *__all__)
 }
 
 /**
+ * Update cached PID in the child process after fork().
+ */
+#ifndef _WIN32
+static void
+_atfork_child(void)
+{
+    _cached_pid = getpid();
+}
+#endif
+
+/**
  * Do all required to initialize the lmdb.cpython module.
  */
 PyMODINIT_FUNC
@@ -4466,6 +4483,15 @@ MODINIT_NAME(void)
     if(! ((open_env_paths = PySet_New(NULL)))) {
         MOD_RETURN(NULL);
     }
+
+    _cached_pid = getpid();
+#ifndef _WIN32
+    if(pthread_atfork(NULL, NULL, _atfork_child)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "lmdb: pthread_atfork() failed");
+        MOD_RETURN(NULL);
+    }
+#endif
 
     if(init_types(mod, __all__)) {
         MOD_RETURN(NULL);
