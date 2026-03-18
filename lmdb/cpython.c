@@ -1416,7 +1416,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->spare_txn = NULL;
     self->open_path = NULL;
     self->max_spare_txns = arg.max_spare_txns;
-    self->pid = getpid();
+    self->pid = _cached_pid;
     self->has_write_txn = 0;
     self->active_ops = 0;
     self->active_ops_waiter = 0;
@@ -4423,7 +4423,11 @@ MODINIT_NAME(void)
 
     _cached_pid = getpid();
 #ifndef _WIN32
-    pthread_atfork(NULL, NULL, _atfork_child);
+    if(pthread_atfork(NULL, NULL, _atfork_child)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "lmdb: pthread_atfork() failed");
+        MOD_RETURN(NULL);
+    }
 #endif
 
     if(init_types(mod, __all__)) {
