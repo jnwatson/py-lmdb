@@ -1,3 +1,66 @@
+## 2026-03-17 2.0.0
+
+This is the largest py-lmdb release in years, made possible by a new coding
+partner: Claude (Anthropic). Nearly every change below was co-authored by
+Claude, turning months of backlogged issues into a week of focused work.
+
+### Potentially breaking changes
+
+- **Thread-safety overhaul (#180).** Environment.close(), Transaction.abort(),
+    Transaction.commit(), and cursor operations are now serialized with locks
+    to prevent use-after-free and double-free crashes when called concurrently.
+    Code that previously "worked" by luck with racy close/abort patterns may
+    now block where it previously crashed or silently corrupted memory. If you
+    relied on the old undefined behavior, review your threading model.
+
+- **Duplicate environment path rejection (#230).** Opening the same LMDB path
+    twice in one process now raises lmdb.Error instead of silently proceeding
+    to a likely segfault. This will surface latent bugs in code that
+    accidentally opened the same environment twice.
+
+- **Minimum Python version is now 3.9.** Python 2.7 and 3.5-3.8 are no longer
+    supported. Python 2 compatibility shims have been removed from the
+    codebase.
+
+### New features
+
+- PEP 561 type stubs (py.typed) are now shipped (#257). IDEs and type
+    checkers will pick up lmdb's types automatically.
+
+- Cache getpid() result to avoid a syscall on every transaction dealloc.
+    Since glibc 2.25, getpid() is no longer cached in userspace; this showed
+    up in profiles for workloads with many short-lived transactions.
+    Contributed by @ltfish (#421).
+
+### Bug fixes
+
+- Fix memory safety issues across cpython and CFFI implementations (#420):
+    multiple reference count leaks in cpython.c (env_readers_callback,
+    db_flags, env_flags, env_copy, env_new, make_arg_cache, cursor_get_multi),
+    a getmulti validation bug in cffi.py, and a cursor leak on
+    mdb_cursor_open failure.
+
+- Fix unsafe buffer protocol usage in cpython.c that could read freed memory
+    (#372).
+
+- Fix cmd_copyfd fd validation to use os.fstat() instead of os.fdopen(),
+    which consumed the fd.
+
+- Add fork detection to CFFI implementation. Previously, Transaction.__del__
+    and Environment.__del__ would call mdb_txn_abort / mdb_env_close in forked
+    child processes, risking corruption of the parent's environment.
+
+- Release GIL during mdb_env_close (#418) so the event loop isn't blocked
+    while msync/fsync runs on large writemap databases.
+
+### Other
+
+- Comprehensive test suite for lmdb.tool (#148).
+
+- Fix ReadTheDocs build (#414, #172).
+
+- Fix pyright errors and remove Python 2 compat code.
+
 ## 2026-03-12 1.8.1
 
 - CI Fix

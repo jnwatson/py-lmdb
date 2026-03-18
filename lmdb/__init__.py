@@ -53,4 +53,4 @@ except ImportError:
     from lmdb.cffi import __all__
     from lmdb.cffi import __doc__
 
-__version__ = '1.8.1'
+__version__ = '2.0.0'
