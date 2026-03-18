@@ -133,7 +133,7 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.2.1
         env:
-          CIBW_BUILD: "cp*"
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux_*"
           LMDB_FORCE_CPYTHON: 1
           CIBW_TEST_COMMAND: ""
