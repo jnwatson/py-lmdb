@@ -103,6 +103,16 @@ O_0111 = int('0111', 8)
 EMPTY_BYTES = UnicodeType().encode()
 
 
+# Cached process ID for fork detection, mirroring cpython.c.
+_cached_pid = os.getpid()
+
+def _update_pid_after_fork():
+    global _cached_pid
+    _cached_pid = os.getpid()
+
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_update_pid_after_fork)
+
 # Used to track context across CFFI callbacks.
 _callbacks = threading.local()
 
@@ -804,6 +814,7 @@ class Environment(object):
             )
 
         self._dbs = {None: self._db}
+        self._pid = _cached_pid
         _open_env_paths.add(self._open_path)
 
     def __enter__(self):
@@ -813,6 +824,8 @@ class Environment(object):
         self.close()
 
     def __del__(self):
+        if getattr(self, '_pid', None) != _cached_pid:
+            return
         self.close()
 
     _env = None
@@ -1490,6 +1503,8 @@ class Transaction(object):
         self._env = _invalid
 
     def __del__(self):
+        if _cached_pid != self.env._pid:
+            return
         self.abort()
 
     def __enter__(self):
