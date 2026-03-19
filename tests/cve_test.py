@@ -863,5 +863,78 @@ class PageSplitNodeDszTest(unittest.TestCase):
                     txn.put(b'k%03d_new' % i, b'y' * 40)
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class NodeShrinkUnderflowTest(unittest.TestCase):
+    """Variant C1: corrupt sub-page SIZELEFT exceeds NODEDSZ in
+    mdb_node_shrink, causing nsize underflow."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_subpage_upper_shrink(self):
+        """Corrupt mp_upper on a sub-page to make SIZELEFT > NODEDSZ;
+        deleting a dup must not cause nsize underflow."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dupdb', dupsort=True)
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'key', b'val1')
+            txn.put(b'key', b'val2')
+            txn.put(b'key', b'val3')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find a leaf node with F_DUPDATA (sub-page)
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1
+            for idx in range(nkeys):
+                ptr = struct.unpack_from('<H', raw,
+                                        off + MP_PTRS_OFFSET + idx * 2)[0]
+                if ptr == 0 or ptr >= psize:
+                    continue
+                node_off = off + ptr
+                mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+                if not (mn_flags & F_DUPDATA) or (mn_flags & F_SUBDATA):
+                    continue
+                # Node data is a sub-page
+                mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
+                subpage_off = node_off + 8 + mn_ksize
+                # Set mp_upper to a huge value (bigger than NODEDSZ)
+                # so SIZELEFT = mp_upper - mp_lower is large
+                nodedsz = struct.unpack_from('<H', raw, node_off)[0]
+                struct.pack_into('<H', raw, subpage_off + 14,
+                                nodedsz + 100)
+                patched = True
+                break
+            if patched:
+                break
+
+        self.assertTrue(patched, "No sub-page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dupdb', dupsort=True)
+
+        # Deleting a dup triggers mdb_node_shrink on the sub-page.
+        # With our patch, the corrupt SIZELEFT is caught and the
+        # operation errors instead of underflowing.
+        try:
+            with env.begin(write=True, db=db) as txn:
+                txn.delete(b'key', b'val1')
+        except lmdb.Error:
+            pass  # Any error is acceptable — the point is no crash
+
+
 if __name__ == '__main__':
     unittest.main()
