@@ -1,0 +1,26 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5792,6 +5792,8 @@
+ 					if (BAD_DB_FLAGS(flags))
+ 						return MDB_INVALID;
+ 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
++					if (mc->mc_db->md_depth > CURSOR_STACK)
++						return MDB_CORRUPTED;
+ 				}
+ 				*mc->mc_dbflag &= ~DB_STALE;
+ 		}
+@@ -10151,6 +10153,12 @@
+ 			txn->mt_dbxs[slot].md_name.mv_data = NULL;
+ 			txn->mt_dbxs[slot].md_name.mv_size = 0;
+ 			return MDB_INVALID;
+ 		}
++		if (txn->mt_dbs[slot].md_depth > CURSOR_STACK) {
++			free(namedup);
++			txn->mt_dbxs[slot].md_name.mv_data = NULL;
++			txn->mt_dbxs[slot].md_name.mv_size = 0;
++			return MDB_CORRUPTED;
++		}
+ 		*dbi = slot;
+ 		mdb_default_cmp(txn, slot);
+ 		if (!unused) {

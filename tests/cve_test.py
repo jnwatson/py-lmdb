@@ -1039,5 +1039,70 @@ class CursorPutNodeDszTest(unittest.TestCase):
                 txn.put(b'2', b'new_value')
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class MdDepthTest(unittest.TestCase):
+    """Variant F3: md_depth > CURSOR_STACK causes OOB access to
+    mc_pg[] and mc_ki[]."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_md_depth(self):
+        """Set md_depth to 100 (> CURSOR_STACK=32) on a named DB;
+        operations must raise error."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'testdb')
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'key', b'val')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find the named DB node ('testdb') and corrupt md_depth
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1
+            for idx in range(nkeys):
+                ptr = struct.unpack_from('<H', raw,
+                                        off + MP_PTRS_OFFSET + idx * 2)[0]
+                if ptr == 0 or ptr >= psize:
+                    continue
+                node_off = off + ptr
+                mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+                mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
+                # Check if this is the F_SUBDATA node for our named DB
+                if not (mn_flags & F_SUBDATA):
+                    continue
+                key_data = raw[node_off + 8:node_off + 8 + mn_ksize]
+                if key_data != b'testdb':
+                    continue
+                # md_depth is at offset 6 within MDB_db data
+                data_off = node_off + 8 + mn_ksize
+                # Corrupt md_depth on all copies
+                struct.pack_into('<H', raw, data_off + 6, 100)
+                patched = True
+                # Don't break — corrupt all copies
+
+        self.assertTrue(patched, "Could not find named DB node")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            db = env.open_db(b'testdb')
+            with env.begin(db=db) as txn:
+                txn.get(b'key')
+
+
 if __name__ == '__main__':
     unittest.main()
