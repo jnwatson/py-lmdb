@@ -610,7 +610,7 @@ class DoubleWriteTxnTest(unittest.TestCase):
         testlib.cleanup()
 
     def test_double_write_txn_raises(self):
-        '''Issue #394: two concurrent write txns must be rejected.'''
+        '''Same-thread double write txn must be rejected to prevent deadlock.'''
         _, env = testlib.temp_env()
         txn1 = env.begin(write=True)
         self.assertRaises(lmdb.Error,
@@ -654,6 +654,34 @@ class DoubleWriteTxnTest(unittest.TestCase):
             pass
         txn2 = env.begin(write=True)
         txn2.abort()
+
+    @unittest.skipIf(lmdb.Environment.__module__ == 'lmdb.cffi',
+                     "CFFI cannot release GIL for cross-thread blocking")
+    def test_cross_thread_write_txn_blocks(self):
+        '''Issue #427: cross-thread write txns should block, not error.'''
+        import threading
+        _, env = testlib.temp_env()
+        results = []
+
+        def writer():
+            with env.begin(write=True) as txn:
+                txn.put(B('from_thread'), B('val'))
+            results.append('ok')
+
+        # Hold write txn on main thread, start writer thread
+        txn1 = env.begin(write=True)
+        txn1.put(B('from_main'), B('val'))
+        t = threading.Thread(target=writer)
+        t.start()
+        # Give the thread a moment to block on the write lock
+        t.join(timeout=0.1)
+        self.assertTrue(t.is_alive(),
+            "Writer thread should be blocking, not finished")
+        # Release main txn — thread should unblock and complete
+        txn1.commit()
+        t.join(timeout=5)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(results, ['ok'])
 
 
 class LeakTest(unittest.TestCase):
