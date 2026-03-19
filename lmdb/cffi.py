@@ -2252,7 +2252,8 @@ class Cursor(object):
             return self.value()
         return default
 
-    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, keyfixed=False):
+    def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, keyfixed=False,
+                 values=True):
         """Returns an iterable of `(key, value)` 2-tuples containing results
         for each key in the iterable `keys`.
 
@@ -2283,6 +2284,12 @@ class Cursor(object):
                         cur.getmulti(keys, dupdata=True, dupfixed_bytes=val_bytes, keyfixed=True)
                     )
 
+            `values`:
+                If ``False``, return a flat list of keys that exist in the
+                database instead of ``(key, value)`` tuples.  Value data is
+                never touched, avoiding page faults on large values.
+                Incompatible with ``dupdata=True``.
+
         """
         if dupfixed_bytes and dupfixed_bytes < 0:
             raise Error("dupfixed_bytes must be a positive integer.")
@@ -2290,6 +2297,8 @@ class Cursor(object):
             raise Error("dupdata is required for dupfixed_bytes/key_bytes.")
         elif keyfixed and not dupfixed_bytes:
             raise Error("dupfixed_bytes is required for key_bytes.")
+        elif not values and dupdata:
+            raise Error("values=False is incompatible with dupdata.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
@@ -2302,6 +2311,9 @@ class Cursor(object):
         lst = list()
         for key in keys:
             if self.set_key(key):
+                if not values:
+                    lst.append(self._to_py(self._key))
+                    continue
                 while self._valid:
                     self._cursor_get(get_op)
                     preload(self._val)

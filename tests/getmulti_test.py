@@ -42,6 +42,32 @@ class GetMultiTestNoDupsortNoDupfixed(GetMultiTestBase):
         self.assertEqual(self.matchList(test_list, self.ITEMS2_MULTI_NODUP), True)
 
 
+class GetMultiTestValuesOff(GetMultiTestBase):
+    """Test getmulti(values=False) returns flat list of found keys."""
+
+    dupsort = False
+    dupfixed = False
+
+    def testValuesOff(self):
+        test_list = self.c.getmulti(KEYSFIXED, values=False)  # type: ignore[arg-type]
+        self.assertIsInstance(test_list, list)
+        self.assertEqual(len(test_list), len(KEYSFIXED))
+        for k in test_list:
+            self.assertIsInstance(k, bytes)
+            self.assertIn(k, KEYSFIXED)
+
+    def testValuesOffMissing(self):
+        """Missing keys are skipped."""
+        search_keys = list(KEYSFIXED) + [b'zzz_missing']
+        test_list = self.c.getmulti(search_keys, values=False)
+        self.assertEqual(len(test_list), len(KEYSFIXED))
+
+    def testValuesOffEmpty(self):
+        """Empty key list returns empty list."""
+        test_list = self.c.getmulti([], values=False)
+        self.assertEqual(test_list, [])
+
+
 class GetMultiTestDupsortNoDupfixed(GetMultiTestBase):
 
     dupsort = True
@@ -50,6 +76,17 @@ class GetMultiTestDupsortNoDupfixed(GetMultiTestBase):
     def testGetMulti(self):
         test_list = self.c.getmulti(KEYSFIXED, dupdata=True)  # type: ignore[arg-type]
         self.assertEqual(self.matchList(test_list, ITEMS_MULTI_FIXEDKEY), True)
+
+    def testValuesOffNoDupdata(self):
+        """values=False works on dupsort DB when dupdata=False."""
+        test_list = self.c.getmulti(KEYSFIXED, values=False)  # type: ignore[arg-type]
+        self.assertIsInstance(test_list, list)
+        self.assertEqual(len(test_list), len(KEYSFIXED))
+
+    def testValuesOffDupdataRaises(self):
+        """values=False with dupdata=True raises."""
+        self.assertRaises(Exception, self.c.getmulti,
+                          KEYSFIXED, dupdata=True, values=False)
 
 
 class GetMultiTestDupsortDupfixed(GetMultiTestBase):
