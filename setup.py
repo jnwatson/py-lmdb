@@ -121,74 +121,45 @@ if patch_lmdb_source:
         pass
     shutil.copytree('lib', dest)
 
-    # Copy away the lmdb source then patch it
-    if sys.platform.startswith('win'):
+    # Copy away the lmdb source then patch it.
+    # Patches are applied in order; each patch's line numbers must
+    # reflect the state after all preceding patches.
+    patch_names = [
+        'env-copy-txn',
+        'cursor-next-prev-uninitialized',
+        'cve-2019-16224-validate-db-flags',
+        'cve-2019-16225-reject-dirty-pages',
+        'cve-2019-16226-validate-node-del-size',
+        'cve-2019-16227-guard-xcursor-null',
+        'cve-2019-16228-validate-psize',
+        'validate-page-bounds',
+        'validate-node-read-size',
+        'validate-subpage-bounds',
+        'validate-xcursor-nodedsz',
+        'validate-leaf2-keysize',
+        'guard-xcursor-null-d3d4',
+        'validate-nodedsz-page-split',
+        'validate-node-shrink-delta',
+        'validate-overflow-pages',
+        'validate-nodedsz-cursor-put',
+        'validate-md-depth',
+        'validate-md-root',
+    ]
 
-        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch', 'lib\\py-lmdb\\cursor-next-prev-uninitialized.patch', 'lib\\py-lmdb\\cve-2019-16224-validate-db-flags.patch', 'lib\\py-lmdb\\cve-2019-16225-reject-dirty-pages.patch', 'lib\\py-lmdb\\cve-2019-16226-validate-node-del-size.patch', 'lib\\py-lmdb\\cve-2019-16227-guard-xcursor-null.patch', 'lib\\py-lmdb\\cve-2019-16228-validate-psize.patch', 'lib\\py-lmdb\\validate-page-bounds.patch', 'lib\\py-lmdb\\validate-node-read-size.patch', 'lib\\py-lmdb\\validate-subpage-bounds.patch', 'lib\\py-lmdb\\validate-xcursor-nodedsz.patch', 'lib\\py-lmdb\\validate-leaf2-keysize.patch', 'lib\\py-lmdb\\guard-xcursor-null-d3d4.patch', 'lib\\py-lmdb\\validate-nodedsz-page-split.patch', 'lib\\py-lmdb\\validate-node-shrink-delta.patch', 'lib\\py-lmdb\\validate-overflow-pages.patch', 'lib\\py-lmdb\\validate-nodedsz-cursor-put.patch', 'lib\\py-lmdb\\validate-md-depth.patch', 'lib\\py-lmdb\\validate-md-root.patch']:
+    if sys.platform.startswith('win'):
+        for name in patch_names:
+            patchfile = 'lib\\py-lmdb\\' + name + '.patch'
             patchset = patch.fromfile(patchfile)
             if not patchset:
                 raise Exception('Parsing patch failed: ' + patchfile)
-            rv = patchset.apply(2, root=dest)
-            if not rv:
+            if not patchset.apply(2, root=dest):
                 raise Exception('Applying patch failed: ' + patchfile)
     else:
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/env-copy-txn.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cursor-next-prev-uninitialized.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cve-2019-16224-validate-db-flags.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cve-2019-16225-reject-dirty-pages.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cve-2019-16226-validate-node-del-size.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cve-2019-16227-guard-xcursor-null.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/cve-2019-16228-validate-psize.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-page-bounds.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-node-read-size.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-subpage-bounds.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-xcursor-nodedsz.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-leaf2-keysize.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/guard-xcursor-null-d3d4.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-nodedsz-page-split.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-node-shrink-delta.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-overflow-pages.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-nodedsz-cursor-put.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-md-depth.patch')
-        if rv:
-            raise Exception('Applying patch failed')
-        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-md-root.patch')
-        if rv:
-            raise Exception('Applying patch failed')
+        for name in patch_names:
+            patchfile = 'lib/py-lmdb/' + name + '.patch'
+            rv = os.system('patch -N -p3 -d build/lib < ' + patchfile)
+            if rv:
+                raise Exception('Applying patch failed: ' + patchfile)
 
 # distutils perplexingly forces NDEBUG for package code!
 extra_compile_args += ['-UNDEBUG']
