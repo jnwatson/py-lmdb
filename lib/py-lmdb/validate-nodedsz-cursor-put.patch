@@ -1,12 +1,14 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -6897,6 +6897,15 @@
+@@ -6897,6 +6897,17 @@
  		leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
  		olddata.mv_size = NODEDSZ(leaf);
  		olddata.mv_data = NODEDATA(leaf);
-+		/* Validate node data does not extend past the page. */
-+		{
++		/* Validate node data does not extend past the page.
++		 * Skip for F_BIGDATA: NODEDSZ is the logical size stored on
++		 * overflow pages, not the on-page size (which is just a pgno). */
++		if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
 +			MDB_page *pg = mc->mc_pg[mc->mc_top];
 +			if ((char *)olddata.mv_data + olddata.mv_size >
 +				(char *)pg + env->me_psize) {

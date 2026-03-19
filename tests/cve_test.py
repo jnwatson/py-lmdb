@@ -1043,6 +1043,19 @@ class CursorPutNodeDszTest(unittest.TestCase):
                 txn.put(b'1', b'new_value')
                 txn.put(b'2', b'new_value')
 
+    def test_overwrite_bigdata_not_rejected(self):
+        """Overwriting a value stored on overflow pages must not be
+        rejected by the NODEDSZ bounds check.  Regression test for #431:
+        F_BIGDATA nodes store the logical data size in NODEDSZ but only
+        a pgno on the page."""
+        path, env = testlib.temp_env(map_size=10*1024*1024)
+        with env.begin(write=True) as txn:
+            txn.put(b'big', b'x' * 32000)
+        with env.begin(write=True) as txn:
+            txn.put(b'big', b'y' * 32000, overwrite=True)
+        with env.begin() as txn:
+            self.assertEqual(txn.get(b'big'), b'y' * 32000)
+
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
 class MdDepthTest(unittest.TestCase):
