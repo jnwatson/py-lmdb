@@ -1,0 +1,19 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -6897,6 +6897,15 @@
+ 		leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
+ 		olddata.mv_size = NODEDSZ(leaf);
+ 		olddata.mv_data = NODEDATA(leaf);
++		/* Validate node data does not extend past the page. */
++		{
++			MDB_page *pg = mc->mc_pg[mc->mc_top];
++			if ((char *)olddata.mv_data + olddata.mv_size >
++				(char *)pg + env->me_psize) {
++				mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++				return MDB_CORRUPTED;
++			}
++		}
+
+ 		/* DB has dups? */
+ 		if (F_ISSET(mc->mc_db->md_flags, MDB_DUPSORT)) {

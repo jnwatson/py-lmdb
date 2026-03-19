@@ -988,5 +988,56 @@ class OverflowPagesTest(unittest.TestCase):
                 txn.put(b'big', b'z' * 8000)
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class CursorPutNodeDszTest(unittest.TestCase):
+    """Variant A3: corrupt NODEDSZ in mdb_cursor_put olddata causes
+    heap overflow via memcpy into env->me_pbuf."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_nodedsz_put_overwrite(self):
+        """Corrupt mn_hi, then overwrite the key; put must raise error."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
+            if ptr0 == 0 or ptr0 >= psize:
+                continue
+            node_off = off + ptr0
+            mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
+            if mn_hi == 0:
+                struct.pack_into('<H', raw, node_off + 2, 0x0100)
+                patched = True
+                break
+
+        self.assertTrue(patched, "Could not find node to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.BadTxnError,
+                                lmdb.Error)):
+            with env.begin(write=True) as txn:
+                txn.put(b'1', b'new_value')
+                txn.put(b'2', b'new_value')
+
+
 if __name__ == '__main__':
     unittest.main()
