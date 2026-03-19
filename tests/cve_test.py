@@ -803,5 +803,65 @@ class XcursorNullD3D4Test(unittest.TestCase):
                 cur.delete()
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class PageSplitNodeDszTest(unittest.TestCase):
+    """Variant A2: corrupt NODEDSZ in mdb_page_split causes OOB memcpy
+    via mdb_node_add."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_nodedsz_triggers_split_error(self):
+        """Corrupt mn_hi on a node, then force a page split; must raise
+        error instead of OOB copy."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            # Fill a single leaf page close to capacity with large values
+            for i in range(80):
+                txn.put(b'k%03d' % i, b'x' * 40)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Corrupt mn_hi on a node of each leaf page
+        patched = 0
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1
+            # Corrupt a middle node's mn_hi
+            mid = nkeys // 2
+            if mid >= nkeys:
+                continue
+            ptr = struct.unpack_from('<H', raw,
+                                    off + MP_PTRS_OFFSET + mid * 2)[0]
+            if ptr == 0 or ptr >= psize:
+                continue
+            node_off = off + ptr
+            struct.pack_into('<H', raw, node_off + 2, 0x0100)
+            patched += 1
+
+        self.assertGreater(patched, 0, "Could not find node to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, map_size=10*1024*1024)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.BadTxnError,
+                                lmdb.Error)):
+            with env.begin(write=True) as txn:
+                # Insert keys that interleave with existing ones to
+                # force splits of the corrupted pages
+                for i in range(200):
+                    txn.put(b'k%03d_new' % i, b'y' * 40)
+
+
 if __name__ == '__main__':
     unittest.main()
