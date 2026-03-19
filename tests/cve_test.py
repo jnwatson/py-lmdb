@@ -163,5 +163,61 @@ class CVE_2019_16225_Test(unittest.TestCase):
                 txn.put(b'3', b'ddd')
 
 
+class CVE_2019_16226_Test(unittest.TestCase):
+    """CVE-2019-16226: corrupt mn_hi in a node causes NODEDSZ() to return
+    a huge value, leading to an out-of-bounds memmove in mdb_node_del."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_node_mn_hi(self):
+        """Corrupt mn_hi on a leaf node; delete must not crash."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+            txn.put(b'3', b'ccc')
+        env.close()
+
+        # Corrupt mn_hi of first node on a leaf page.
+        # MDB_node layout: mn_lo(2) + mn_hi(2) + mn_flags(2) + mn_ksize(2)
+        # mn_hi is at offset 2 within the node.
+        db_path = os.path.join(path, 'data.mdb')
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(PAGE_SIZE * 2, len(raw), PAGE_SIZE):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            # Get first node pointer
+            ptr0 = struct.unpack_from('<H', raw, off + 16)[0]
+            if ptr0 == 0 or ptr0 >= PAGE_SIZE:
+                continue
+            node_off = off + ptr0
+            mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
+            if mn_hi == 0:
+                struct.pack_into('<H', raw, node_off + 2, 0x0100)
+                patched = True
+                break
+
+        self.assertTrue(patched, "Could not find node to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        # The delete triggers mdb_node_del with the corrupt node size.
+        # With the fix, the txn gets MDB_TXN_ERROR and subsequent ops
+        # fail with BadTxnError instead of crashing.
+        with self.assertRaises((lmdb.BadTxnError, lmdb.Error)):
+            with env.begin(write=True) as txn:
+                txn.delete(b'1')
+                txn.put(b'3', b'ddd')
+
+
 if __name__ == '__main__':
     unittest.main()
