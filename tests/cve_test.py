@@ -219,5 +219,58 @@ class CVE_2019_16226_Test(unittest.TestCase):
                 txn.put(b'3', b'ddd')
 
 
+class CVE_2019_16227_Test(unittest.TestCase):
+    """CVE-2019-16227: F_DUPDATA set on a node in a non-DUPSORT DB causes
+    NULL dereference of mc_xcursor in mdb_xcursor_init1."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_node_dupdata_flag(self):
+        """Set F_DUPDATA on a node in a non-DUPSORT DB; operations must
+        return an error instead of crashing."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+            txn.put(b'3', b'ccc')
+        env.close()
+
+        # Corrupt mn_flags of first node: set F_DUPDATA (0x04).
+        # MDB_node: mn_lo(2) + mn_hi(2) + mn_flags(2) + mn_ksize(2)
+        # mn_flags is at offset 4 within the node.
+        db_path = os.path.join(path, 'data.mdb')
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(PAGE_SIZE * 2, len(raw), PAGE_SIZE):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            ptr0 = struct.unpack_from('<H', raw, off + 16)[0]
+            if ptr0 == 0 or ptr0 >= PAGE_SIZE:
+                continue
+            node_off = off + ptr0
+            mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+            if not (mn_flags & 0x04):  # Not already F_DUPDATA
+                struct.pack_into('<H', raw, node_off + 4, mn_flags | 0x04)
+                patched = True
+                break
+
+        self.assertTrue(patched, "Could not find node to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(write=True) as txn:
+                txn.delete(b'1')
+                txn.put(b'3', b'ddd')
+
+
 if __name__ == '__main__':
     unittest.main()
