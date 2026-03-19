@@ -1,0 +1,16 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5803,6 +5803,12 @@
+ 		}
+ 	}
+
++	/* Reject meta page numbers as B-tree roots.
++	 * md_root comes from disk and could point to pages 0 or 1. */
++	if (root < 2) {
++		mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++		return MDB_CORRUPTED;
++	}
+ 	mdb_cassert(mc, root > 1);
+ 	if (!mc->mc_pg[0] || mc->mc_pg[0]->mp_pgno != root)
+ 		if ((rc = mdb_page_get(mc, root, &mc->mc_pg[0], NULL)) != 0)

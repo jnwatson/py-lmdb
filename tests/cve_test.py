@@ -1104,5 +1104,67 @@ class MdDepthTest(unittest.TestCase):
                 txn.get(b'key')
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class MdRootMetaTest(unittest.TestCase):
+    """Variant A7: md_root pointing to meta pages (0 or 1) causes
+    reading meta pages as B-tree pages."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_md_root_to_meta_page(self):
+        """Set md_root to 0 (meta page); operations must raise error."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'testdb')
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'key', b'val')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find 'testdb' nodes and corrupt md_root to 0
+        # md_root is at offset 40 within MDB_db (last field, pgno_t = 8 bytes)
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1
+            for idx in range(nkeys):
+                ptr = struct.unpack_from('<H', raw,
+                                        off + MP_PTRS_OFFSET + idx * 2)[0]
+                if ptr == 0 or ptr >= psize:
+                    continue
+                node_off = off + ptr
+                mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+                mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
+                if not (mn_flags & F_SUBDATA):
+                    continue
+                key_data = raw[node_off + 8:node_off + 8 + mn_ksize]
+                if key_data != b'testdb':
+                    continue
+                data_off = node_off + 8 + mn_ksize
+                # md_root is at offset 40 in MDB_db (pgno_t, 8 bytes)
+                struct.pack_into('<Q', raw, data_off + 40, 0)
+                patched = True
+
+        self.assertTrue(patched, "Could not find named DB node")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            db = env.open_db(b'testdb')
+            with env.begin(db=db) as txn:
+                txn.get(b'key')
+
+
 if __name__ == '__main__':
     unittest.main()

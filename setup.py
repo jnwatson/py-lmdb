@@ -124,7 +124,7 @@ if patch_lmdb_source:
     # Copy away the lmdb source then patch it
     if sys.platform.startswith('win'):
 
-        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch', 'lib\\py-lmdb\\cursor-next-prev-uninitialized.patch', 'lib\\py-lmdb\\cve-2019-16224-validate-db-flags.patch', 'lib\\py-lmdb\\cve-2019-16225-reject-dirty-pages.patch', 'lib\\py-lmdb\\cve-2019-16226-validate-node-del-size.patch', 'lib\\py-lmdb\\cve-2019-16227-guard-xcursor-null.patch', 'lib\\py-lmdb\\cve-2019-16228-validate-psize.patch', 'lib\\py-lmdb\\validate-page-bounds.patch', 'lib\\py-lmdb\\validate-node-read-size.patch', 'lib\\py-lmdb\\validate-subpage-bounds.patch', 'lib\\py-lmdb\\validate-xcursor-nodedsz.patch', 'lib\\py-lmdb\\validate-leaf2-keysize.patch', 'lib\\py-lmdb\\guard-xcursor-null-d3d4.patch', 'lib\\py-lmdb\\validate-nodedsz-page-split.patch', 'lib\\py-lmdb\\validate-node-shrink-delta.patch', 'lib\\py-lmdb\\validate-overflow-pages.patch', 'lib\\py-lmdb\\validate-nodedsz-cursor-put.patch', 'lib\\py-lmdb\\validate-md-depth.patch']:
+        for patchfile in ['lib\\py-lmdb\\env-copy-txn.patch', 'lib\\py-lmdb\\cursor-next-prev-uninitialized.patch', 'lib\\py-lmdb\\cve-2019-16224-validate-db-flags.patch', 'lib\\py-lmdb\\cve-2019-16225-reject-dirty-pages.patch', 'lib\\py-lmdb\\cve-2019-16226-validate-node-del-size.patch', 'lib\\py-lmdb\\cve-2019-16227-guard-xcursor-null.patch', 'lib\\py-lmdb\\cve-2019-16228-validate-psize.patch', 'lib\\py-lmdb\\validate-page-bounds.patch', 'lib\\py-lmdb\\validate-node-read-size.patch', 'lib\\py-lmdb\\validate-subpage-bounds.patch', 'lib\\py-lmdb\\validate-xcursor-nodedsz.patch', 'lib\\py-lmdb\\validate-leaf2-keysize.patch', 'lib\\py-lmdb\\guard-xcursor-null-d3d4.patch', 'lib\\py-lmdb\\validate-nodedsz-page-split.patch', 'lib\\py-lmdb\\validate-node-shrink-delta.patch', 'lib\\py-lmdb\\validate-overflow-pages.patch', 'lib\\py-lmdb\\validate-nodedsz-cursor-put.patch', 'lib\\py-lmdb\\validate-md-depth.patch', 'lib\\py-lmdb\\validate-md-root.patch']:
             patchset = patch.fromfile(patchfile)
             rv = patchset.apply(2, root=dest)
             if not rv:
@@ -182,6 +182,9 @@ if patch_lmdb_source:
         if rv:
             raise Exception('Applying patch failed')
         rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-md-depth.patch')
+        if rv:
+            raise Exception('Applying patch failed')
+        rv = os.system('patch -N -p3 -d build/lib < lib/py-lmdb/validate-md-root.patch')
         if rv:
             raise Exception('Applying patch failed')
 
