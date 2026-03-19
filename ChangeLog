@@ -1,3 +1,69 @@
+## 2026-03-19 2.1.0
+
+**Security release.** All users who open LMDB databases from untrusted or
+potentially-tampered sources should upgrade immediately. Applications that only
+open databases they created themselves are not at risk, but upgrading is still
+recommended for defense-in-depth.
+
+### Security fixes
+
+The bundled LMDB 0.9.35 trusts many on-disk fields without validation. A
+crafted `data.mdb` file can exploit this to crash the process, read arbitrary
+memory, or corrupt the heap. These are all upstream LMDB bugs; py-lmdb ships
+patches to address them.
+
+- **CVE-2019-16224**: heap buffer overflow via `MDB_DUPFIXED` without
+    `MDB_DUPSORT` in on-disk `md_flags`. (#429)
+
+- **CVE-2019-16225**: `SIGSEGV` from `P_DIRTY` flag set on mmap'd disk pages,
+    causing `mdb_page_touch()` to skip copy-on-write. (#429)
+
+- **CVE-2019-16226**: out-of-bounds `memmove` in `mdb_node_del` via corrupt
+    `mn_hi` making `NODEDSZ()` huge. (#429)
+
+- **CVE-2019-16227**: NULL pointer dereference of `mc_xcursor` when
+    `F_DUPDATA` is set on a node in a non-DUPSORT database. (#429)
+
+- **CVE-2019-16228**: divide-by-zero from zero `mm_psize` in meta page
+    header. (#429)
+
+- **13 additional hardening patches** from variant analysis of the same code
+    (#430), including:
+
+    - Validate `mp_lower`/`mp_upper` bounds on every page fetch — prevents
+      `NUMKEYS()` unsigned wrap and `SIZELEFT()` underflow.
+    - Bounds-check `NODEDSZ()` in `mdb_node_read`, `mdb_cursor_put`, and
+      `mdb_page_split` — prevents OOB reads and heap overflows from corrupt
+      node sizes.
+    - Validate DUPSORT sub-page headers before copying — prevents `memcpy`
+      size underflow (unsigned wrap to huge value).
+    - Check `NODEDSZ >= sizeof(MDB_db)` before `memcpy` in
+      `mdb_xcursor_init1` — prevents read past node boundary.
+    - Validate LEAF2 `mp_pad` (key size) — zero or huge values cause OOB
+      via `LEAF2KEY()`.
+    - Guard `mc_xcursor` NULL in `MDB_GET_CURRENT` and `_mdb_cursor_del` —
+      two call sites missed by the CVE-2019-16227 fix.
+    - Guard `nsize` underflow in `mdb_node_shrink`.
+    - Validate overflow page extent (`pgno + mp_pages`) stays within the
+      database.
+    - Reject meta page numbers (0, 1) as B-tree roots.
+    - Validate `md_depth <= CURSOR_STACK` to prevent stack buffer overrun.
+
+### Bug fixes
+
+- Cross-thread write transactions now block instead of raising
+    `lmdb.Error("Attempt to operate on closed/deleted/dropped object.")`.
+    The check added in 1.8.0 was overly strict: it rejected all concurrent
+    write transactions, but only same-thread re-entrance is actually
+    incorrect. The cpython implementation now releases the GIL during
+    `mdb_txn_begin` for write transactions, allowing another thread to
+    block until the first commits. (#427, #428)
+
+### Other
+
+- Refactored `setup.py` patch application into a single loop with a shared
+    patch list, replacing duplicated `os.system()` blocks.
+
 ## 2026-03-17 2.0.0
 
 This is the largest py-lmdb release in years, made possible by a new coding
