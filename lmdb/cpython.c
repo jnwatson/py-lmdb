@@ -2387,7 +2387,8 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         int dupdata;
         size_t dupfixed_bytes;
         int keyfixed;
-    } arg = {Py_None, 0, 0, 0};
+        int values;
+    } arg = {Py_None, 0, 0, 0, 1};
 
     int i, as_buffer;
     PyObject *iter, *item, *tup, *key, *val;
@@ -2399,7 +2400,8 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         {"keys", ARG_OBJ, OFFSET(cursor_get, keys)},
         {"dupdata", ARG_BOOL, OFFSET(cursor_get, dupdata)},
         {"dupfixed_bytes", ARG_SIZE, OFFSET(cursor_get, dupfixed_bytes)},
-        {"keyfixed", ARG_BOOL, OFFSET(cursor_get, keyfixed)}
+        {"keyfixed", ARG_BOOL, OFFSET(cursor_get, keyfixed)},
+        {"values", ARG_BOOL, OFFSET(cursor_get, values)}
     };
 
     size_t buffer_pos = 0, buffer_size = 8;
@@ -2417,6 +2419,8 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         return type_error("dupdata is required for dupfixed_bytes/keyfixed.");
     }else if (arg.keyfixed && !arg.dupfixed_bytes){
         return type_error("dupfixed_bytes is required for keyfixed.");
+    }else if (!arg.values && arg.dupdata) {
+        return type_error("values=False is incompatible with dupdata.");
     }
 
     if(! ((iter = PyObject_GetIter(arg.keys)))) {
@@ -2454,6 +2458,21 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
             goto failiter;
         }
         bufviewlist_release(&bvl);
+
+        if(!arg.values) {
+            /* values=False: append key only if it was found. */
+            if(self->positioned) {
+                key = obj_from_val(&self->key, as_buffer);
+                if(key) {
+                    PyList_Append(pylist, key);
+                    Py_DECREF(key);
+                } else {
+                    goto failiter;
+                }
+            }
+            Py_DECREF(item);
+            continue;
+        }
 
         done = false;
         while (!done) {
