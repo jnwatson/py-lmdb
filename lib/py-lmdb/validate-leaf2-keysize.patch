@@ -1,0 +1,18 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5615,6 +5615,14 @@
+ 			txn->mt_flags |= MDB_TXN_ERROR;
+ 			return MDB_CORRUPTED;
+ 		}
++		/* Validate mp_pad (LEAF2 key size).  Zero causes division by
++		 * zero or infinite loops, and too-large values produce OOB
++		 * pointers via LEAF2KEY(). */
++		if (IS_LEAF2(p) &&
++			(MP_PAD(p) == 0 || MP_PAD(p) > psize - PAGEHDRSZ)) {
++			txn->mt_flags |= MDB_TXN_ERROR;
++			return MDB_CORRUPTED;
++		}
+ 	}
+
+ 	*ret = p;

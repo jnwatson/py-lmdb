@@ -640,5 +640,96 @@ class XcursorNodeDszTest(unittest.TestCase):
                     pass
 
 
+P_LEAF2 = 0x20
+MP_PAD_OFFSET = 8  # uint16: mp_pad (after pgno(8))
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class Leaf2KeySizeTest(unittest.TestCase):
+    """Variant A6+G1: corrupt md_pad/mp_pad (LEAF2 key size) causes
+    OOB access via LEAF2KEY macro."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_mp_pad_zero(self):
+        """Set mp_pad to 0 on a LEAF2 page; operations must raise
+        CorruptedError."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+        with env.begin(write=True, db=db) as txn:
+            for i in range(500):
+                txn.put(b'key', b'v%06d' % i)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_LEAF2:
+                # Set mp_pad to 0
+                struct.pack_into('<H', raw, off + MP_PAD_OFFSET, 0)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No LEAF2 page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.first()
+                list(cur.iternext_dup())
+
+    def test_corrupt_mp_pad_huge(self):
+        """Set mp_pad to a huge value on a LEAF2 page; operations must
+        raise CorruptedError."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+        with env.begin(write=True, db=db) as txn:
+            for i in range(500):
+                txn.put(b'key', b'v%06d' % i)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_LEAF2:
+                # Set mp_pad to psize (way too large)
+                struct.pack_into('<H', raw, off + MP_PAD_OFFSET, psize)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No LEAF2 page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.first()
+                list(cur.iternext_dup())
+
+
 if __name__ == '__main__':
     unittest.main()
