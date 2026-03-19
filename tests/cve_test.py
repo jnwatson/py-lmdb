@@ -442,5 +442,60 @@ class PageBoundsTest(unittest.TestCase):
                 txn.get(b'1')
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class NodeReadSizeTest(unittest.TestCase):
+    """Variant A1: corrupt NODEDSZ in mdb_node_read exposes arbitrary
+    memory via mdb_get / mdb_cursor_get."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_mn_hi_read(self):
+        """Corrupt mn_hi on a leaf node; mdb_get must return
+        CorruptedError instead of exposing memory."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+            txn.put(b'3', b'ccc')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
+            if ptr0 == 0 or ptr0 >= psize:
+                continue
+            node_off = off + ptr0
+            # mn_hi is at offset 2 within the MDB_node struct
+            mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
+            if mn_hi == 0:
+                # Set mn_hi to make NODEDSZ huge (extends past page)
+                struct.pack_into('<H', raw, node_off + 2, 0x0100)
+                patched = True
+                break
+
+        self.assertTrue(patched, "Could not find node to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin() as txn:
+                txn.get(b'1')
+                txn.get(b'2')
+                txn.get(b'3')
+
+
 if __name__ == '__main__':
     unittest.main()

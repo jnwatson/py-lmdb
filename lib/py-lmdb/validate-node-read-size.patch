@@ -1,0 +1,21 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5909,6 +5909,18 @@
+ 	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
+ 		data->mv_size = NODEDSZ(leaf);
+ 		data->mv_data = NODEDATA(leaf);
++		/* Validate that the node data does not extend past the page.
++		 * A corrupt mn_hi/mn_lo can produce a huge NODEDSZ, exposing
++		 * arbitrary memory to the caller via mdb_get/mdb_cursor_get. */
++		{
++			MDB_page *mp = mc->mc_pg[mc->mc_top];
++			unsigned psize = mc->mc_txn->mt_env->me_psize;
++			if ((char *)data->mv_data + data->mv_size >
++				(char *)mp + psize) {
++				mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++				return MDB_CORRUPTED;
++			}
++		}
+ 		return MDB_SUCCESS;
+ 	}
