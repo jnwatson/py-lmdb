@@ -13,7 +13,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 
  			/* Is the ov page large enough? */
  			if (ovpages >= dpages) {
-@@ -10233,6 +10238,10 @@
+@@ -10236,6 +10241,10 @@
  						if (rc != 0)
  							goto done;
  						mdb_cassert(mc, IS_OVERFLOW(omp));
