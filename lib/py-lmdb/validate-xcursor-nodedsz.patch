@@ -1,0 +1,17 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -7754,6 +7754,13 @@
+ 	 * database, where mc_xcursor is NULL.  Callers must check for
+ 	 * mc_xcursor==NULL before calling this function.  CVE-2019-16227. */
+ 	if (node->mn_flags & F_SUBDATA) {
++		/* Validate node data is large enough to hold an MDB_db.
++		 * A corrupt mn_ksize can shift NODEDATA past the node,
++		 * or the data area may simply be too small. */
++		if (NODEDSZ(node) < sizeof(MDB_db)) {
++			mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++			return;
++		}
+ 		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
+ 		mx->mx_cursor.mc_pg[0] = 0;
+ 		mx->mx_cursor.mc_snum = 0;

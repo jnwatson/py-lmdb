@@ -1,0 +1,15 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -7692,6 +7692,11 @@
+ 	node = NODEPTR(mp, indx);
+ 	sp = (MDB_page *)NODEDATA(node);
+ 	delta = SIZELEFT(sp);
++	/* Validate delta does not exceed node data size.
++	 * Corrupt mp_upper/mp_lower on the sub-page makes SIZELEFT
++	 * larger than NODEDSZ, causing nsize to underflow. */
++	if (delta > NODEDSZ(node))
++		return;
+ 	nsize = NODEDSZ(node) - delta;
+
+ 	/* Prepare to shift upward, set len = length(subpage part to shift) */

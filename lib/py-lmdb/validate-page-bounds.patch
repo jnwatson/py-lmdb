@@ -1,0 +1,25 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5602,6 +5602,21 @@
+ 	}
+
+ done:
++	/* Validate mp_lower and mp_upper on B-tree pages.
++	 * Corrupt mp_lower can wrap NUMKEYS() to a huge value (unsigned
++	 * underflow when mp_lower < PAGEHDRSZ), and corrupt mp_upper
++	 * causes SIZELEFT() underflow and out-of-bounds node access.
++	 * Overflow and meta pages use mp_pages instead, so skip those. */
++	if (MP_FLAGS(p) & (P_BRANCH|P_LEAF|P_LEAF2)) {
++		unsigned psize = env->me_psize;
++		if (MP_LOWER(p) < PAGEHDRSZ-PAGEBASE ||
++			MP_UPPER(p) > psize-PAGEBASE ||
++			MP_LOWER(p) > MP_UPPER(p)) {
++			txn->mt_flags |= MDB_TXN_ERROR;
++			return MDB_CORRUPTED;
++		}
++	}
++
+ 	*ret = p;
+ 	if (lvl)
+ 		*lvl = level;
