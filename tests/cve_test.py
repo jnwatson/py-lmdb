@@ -58,6 +58,9 @@ FLAGS_MAIN_OFFSET = 92  # uint16: mm_dbs[MAIN_DBI].md_flags
 MP_FLAGS_OFFSET = 10    # uint16: mp_flags (after pgno(8) + pad(2))
 MP_PTRS_OFFSET = 16     # first mp_ptrs entry (after 16-byte page header)
 
+MP_LOWER_OFFSET = 12    # uint16: mp_lower (after pgno(8) + pad(2) + flags(2))
+MP_UPPER_OFFSET = 14    # uint16: mp_upper
+
 P_LEAF = 0x02
 P_DIRTY = 0x10
 
@@ -319,6 +322,124 @@ class CVE_2019_16228_Test(unittest.TestCase):
             _patch_file(db_path, off, struct.pack('<I', 4000))
 
         self.assertRaises(lmdb.InvalidError, lmdb.open, path)
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class PageBoundsTest(unittest.TestCase):
+    """Variant F1+F2: corrupt mp_lower / mp_upper causes NUMKEYS() wrap
+    and SIZELEFT() underflow, leading to OOB access."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_mp_lower_underflow(self):
+        """Set mp_lower to 0 on a leaf page; NUMKEYS wraps to a huge
+        value.  Operations must raise CorruptedError."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+            txn.put(b'3', b'ccc')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_LEAF:
+                # Set mp_lower to 0, which is < PAGEHDRSZ (16)
+                struct.pack_into('<H', raw, off + MP_LOWER_OFFSET, 0)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No leaf page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises(lmdb.CorruptedError):
+            with env.begin() as txn:
+                txn.get(b'1')
+
+    def test_corrupt_mp_upper_overflow(self):
+        """Set mp_upper beyond page size; operations must raise
+        CorruptedError."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_LEAF:
+                # Set mp_upper beyond the page size
+                struct.pack_into('<H', raw, off + MP_UPPER_OFFSET,
+                                psize + 100)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No leaf page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises(lmdb.CorruptedError):
+            with env.begin() as txn:
+                txn.get(b'1')
+
+    def test_corrupt_mp_lower_gt_upper(self):
+        """Set mp_lower > mp_upper; operations must raise
+        CorruptedError."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_LEAF:
+                upper = struct.unpack_from('<H', raw,
+                                          off + MP_UPPER_OFFSET)[0]
+                # Set mp_lower to upper + 10 (still valid range but > upper)
+                struct.pack_into('<H', raw, off + MP_LOWER_OFFSET,
+                                upper + 10)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No leaf page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises(lmdb.CorruptedError):
+            with env.begin() as txn:
+                txn.get(b'1')
 
 
 if __name__ == '__main__':
