@@ -568,5 +568,77 @@ class SubpageBoundsTest(unittest.TestCase):
                 txn.put(b'key', b'val4')
 
 
+F_SUBDATA = 0x02  # node flag: data is a sub-DB (MDB_db struct)
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class XcursorNodeDszTest(unittest.TestCase):
+    """Variant A5: memcpy sizeof(MDB_db) from NODEDATA in
+    mdb_xcursor_init1 without checking node data size."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_subdata_node_size(self):
+        """Corrupt mn_lo on a F_SUBDATA node to make NODEDSZ < sizeof(MDB_db);
+        operations must raise an error instead of reading past the node."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dupdb', dupsort=True)
+        with env.begin(write=True, db=db) as txn:
+            # Add enough dups to force sub-DB (not sub-page)
+            for i in range(200):
+                txn.put(b'key', b'val%04d' % i)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find a leaf node with F_SUBDATA flag
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1
+            for idx in range(nkeys):
+                ptr = struct.unpack_from('<H', raw,
+                                        off + MP_PTRS_OFFSET + idx * 2)[0]
+                if ptr == 0 or ptr >= psize:
+                    continue
+                node_off = off + ptr
+                mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+                if (mn_flags & F_SUBDATA) and (mn_flags & F_DUPDATA):
+                    # Set mn_lo to 1 (NODEDSZ = 1, which < sizeof(MDB_db)=48)
+                    struct.pack_into('<H', raw, node_off, 1)
+                    # Clear mn_hi too
+                    struct.pack_into('<H', raw, node_off + 2, 0)
+                    patched = True
+                    break
+            if patched:
+                break
+
+        self.assertTrue(patched, "No F_SUBDATA node found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dupdb', dupsort=True)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.BadTxnError,
+                                lmdb.Error)):
+            with env.begin(db=db) as txn:
+                # Navigate to the key to trigger mdb_xcursor_init1
+                txn.get(b'key')
+                # Also try cursor iteration to cover more code paths
+                cur = txn.cursor()
+                for key, val in cur:
+                    pass
+
+
 if __name__ == '__main__':
     unittest.main()
