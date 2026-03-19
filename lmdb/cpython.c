@@ -181,8 +181,8 @@ struct EnvObject {
     int max_spare_txns;
     /** Process ID of the process this Environment was opened in. */
     pid_t pid;
-    /** 1 if a write transaction is active on this environment. */
-    int has_write_txn;
+    /** Thread ID of the thread holding the write transaction, or 0. */
+    unsigned long write_txn_tid;
     /** Resolved path used to track this env in open_env_paths. */
     PyObject *open_path;
     /** Count of in-flight LMDB operations (GIL released).  env_clear waits
@@ -995,10 +995,11 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         return err_set(msg, EACCES);
     }
 
-    if(write && !parent && env->has_write_txn) {
+    if(write && !parent &&
+       env->write_txn_tid == PyThread_get_thread_ident()) {
         const char *msg =
-            "A write transaction is already active on this environment. "
-            "Only one top-level write transaction is allowed at a time.";
+            "Attempt to start a write transaction while another write "
+            "transaction is active on the same thread. This would deadlock.";
         return err_set(msg, EBUSY);
     }
 
@@ -1018,24 +1019,30 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
     else {
         flags = write ? 0 : MDB_RDONLY;
         if(write && !parent) {
-            env->has_write_txn = 1;
-        }
-        /* Hold GIL during mdb_txn_begin to prevent race with env_clear:
-         * env->valid check above must be atomic with the LMDB operation.
-         * See https://github.com/jnwatson/py-lmdb/issues/180 */
-        rc = mdb_txn_begin(env->env, parent_txn, flags, &txn);
-        if(rc) {
-            if(write && !parent) {
-                env->has_write_txn = 0;
+            /* Release GIL so another thread's write txn can block on the
+             * LMDB mutex instead of deadlocking on the GIL.  Use active_ops
+             * to prevent env_clear from closing the env underneath us.
+             * Issues #180, #427. */
+            ENV_UNLOCKED(env, rc,
+                mdb_txn_begin(env->env, parent_txn, flags, &txn));
+            if(rc) {
+                return err_set("mdb_txn_begin", rc);
             }
-            return err_set("mdb_txn_begin", rc);
+            env->write_txn_tid = PyThread_get_thread_ident();
+        } else {
+            /* Read txns and child txns: hold GIL during mdb_txn_begin to
+             * prevent race with env_clear.  Issue #180. */
+            rc = mdb_txn_begin(env->env, parent_txn, flags, &txn);
+            if(rc) {
+                return err_set("mdb_txn_begin", rc);
+            }
         }
     }
 
     if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
         mdb_txn_abort(txn);
         if(write && !parent) {
-            env->has_write_txn = 0;
+            env->write_txn_tid = 0;
         }
         return NULL;
     }
@@ -1448,7 +1455,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->open_path = NULL;
     self->max_spare_txns = arg.max_spare_txns;
     self->pid = _cached_pid;
-    self->has_write_txn = 0;
+    self->write_txn_tid = 0;
     self->active_ops = 0;
     self->active_ops_waiter = 0;
     self->active_ops_lock = PyThread_allocate_lock();
@@ -3576,7 +3583,7 @@ trans_clear(TransObject *self)
         self->txn = NULL;  /* Prevent double-abort from concurrent
                             * trans_clear calls (issue #180). */
         if(self->env && !(self->flags & TRANS_RDONLY)) {
-            self->env->has_write_txn = 0;
+            self->env->write_txn_tid = 0;
         }
         /* Don't release the GIL here — trans_clear is called from
          * invalidate() while iterating the children list, and releasing
@@ -3634,7 +3641,7 @@ trans_dealloc(TransObject *self)
              * this abort is in flight.  Issue #180. */
             self->txn = NULL;
             if(self->env) {
-                self->env->has_write_txn = 0;
+                self->env->write_txn_tid = 0;
                 if(self->env->env) {
                     self->env->active_ops++;
                     txn_abort(txn);
@@ -3720,7 +3727,7 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
             self->flags |= TRANS_SPARE;
         } else {
             if(env) {
-                env->has_write_txn = 0;
+                env->write_txn_tid = 0;
             }
             if(txn && env) {
                 DEBUG("aborting")
@@ -3780,7 +3787,7 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         EnvObject *env = self->env;
         self->txn = NULL;
         Py_INCREF((PyObject *) env);
-        env->has_write_txn = 0;
+        env->write_txn_tid = 0;
         DEBUG("committing")
         env->active_ops++;
         Py_BEGIN_ALLOW_THREADS
