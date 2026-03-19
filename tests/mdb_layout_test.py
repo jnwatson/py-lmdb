@@ -569,15 +569,19 @@ class BranchPageTest(testlib.LmdbTest):
     """Targets: page bounds validation, root page validation — force a
     deep B-tree (depth >= 3)."""
 
-    def _build_deep_tree(self, env, count=50000):
-        """Insert enough entries to guarantee depth >= 3."""
+    def _build_deep_tree(self, env):
+        """Insert enough entries to guarantee depth >= 3.
+        On 16K pages (macOS) each branch/leaf page holds ~200 entries,
+        so we need > 200^2 = 40K entries to exceed depth 2.  Use 100K
+        to be safe on all page sizes."""
+        count = 100000
         with env.begin(write=True) as txn:
             for i in range(count):
                 txn.put(_make_key('br', i), _make_val(64))
         return count
 
     def test_deep_tree(self):
-        _, env = testlib.temp_env(map_size=1048576 * 256)
+        _, env = testlib.temp_env(map_size=1048576 * 1024)
         n = self._build_deep_tree(env)
         with env.begin() as txn:
             stat = txn.stat(env.open_db())
@@ -585,7 +589,7 @@ class BranchPageTest(testlib.LmdbTest):
             self.assertEqual(stat['entries'], n)
 
     def test_deep_tree_full_traversal(self):
-        _, env = testlib.temp_env(map_size=1048576 * 256)
+        _, env = testlib.temp_env(map_size=1048576 * 1024)
         n = self._build_deep_tree(env)
         with env.begin() as txn:
             cur = txn.cursor()
@@ -594,7 +598,7 @@ class BranchPageTest(testlib.LmdbTest):
 
     def test_deep_tree_delete_and_merge(self):
         """Delete half the entries, then traverse remainder."""
-        _, env = testlib.temp_env(map_size=1048576 * 256)
+        _, env = testlib.temp_env(map_size=1048576 * 1024)
         n = self._build_deep_tree(env)
         with env.begin(write=True) as txn:
             for i in range(0, n, 2):
@@ -606,7 +610,7 @@ class BranchPageTest(testlib.LmdbTest):
 
     def test_deep_tree_set_range(self):
         """set_range into the middle of a deep tree."""
-        _, env = testlib.temp_env(map_size=1048576 * 256)
+        _, env = testlib.temp_env(map_size=1048576 * 1024)
         n = self._build_deep_tree(env)
         target = _make_key('br', n // 2)
         with env.begin() as txn:
