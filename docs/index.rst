@@ -349,6 +349,55 @@ used concurrently from multiple threads.
 any thread except the thread that currently owns its associated
 :py:class:`Transaction`.
 
+Asyncio
++++++++
+
+LMDB is fundamentally synchronous (memory-mapped file I/O), but py-lmdb's C
+extension releases the GIL during all database operations, making it safe to
+offload calls to a thread pool via :func:`asyncio.loop.run_in_executor`.
+
+The :mod:`lmdb.aio` module provides thin async wrappers that do this
+automatically.  The synchronous code path is completely unaffected — this is
+an opt-in import.
+
+.. code-block:: python
+
+    import lmdb
+    import lmdb.aio
+
+    env = lmdb.open('/tmp/mydb')
+    aenv = lmdb.aio.wrap(env)
+
+    # async context managers work naturally:
+    async with aenv.begin(write=True) as txn:
+        await txn.put(b'key', b'value')
+
+    async with aenv.begin() as txn:
+        val = await txn.get(b'key')
+
+        async with txn.cursor() as cur:
+            await cur.first()
+            items = await cur.iternext()
+
+Low-overhead accessors like ``key()``, ``value()``, ``item()``, ``id()``,
+``path()``, and ``max_key_size()`` are called directly without dispatching to
+the executor.
+
+Iterators (``iternext()``, ``iterprev()``, etc.) are consumed in the executor
+and returned as a list.
+
+By default, the event loop's default :class:`~concurrent.futures.ThreadPoolExecutor`
+is used.  To use a dedicated pool::
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool = ThreadPoolExecutor(max_workers=2)
+    aenv = lmdb.aio.wrap(env, executor=pool)
+
+All objects support ``async with`` for lifetime management.  Write transactions
+are committed on clean exit and aborted on exception, matching the synchronous
+behavior.
+
 Limitations running on 32-bit Processes
 +++++++++++++++++++++++++++++++++++++++
 32-bit processes (for example 32-bit builds of Python on Windows) are severely
