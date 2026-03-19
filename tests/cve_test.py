@@ -497,5 +497,76 @@ class NodeReadSizeTest(unittest.TestCase):
                 txn.get(b'3')
 
 
+F_DUPDATA = 0x04  # node flag: data is a sub-page or sub-DB
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class SubpageBoundsTest(unittest.TestCase):
+    """Variant G3: corrupt mp_upper on an on-disk sub-page causes
+    memcpy size underflow (unsigned wrap) in mdb_cursor_put."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_subpage_mp_upper(self):
+        """Corrupt mp_upper on a DUPSORT sub-page; put must raise
+        CorruptedError instead of heap overflow."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dupdb', dupsort=True)
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'key', b'val1')
+            txn.put(b'key', b'val2')
+            txn.put(b'key', b'val3')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find a leaf node with F_DUPDATA flag — its data is a sub-page
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - 16) >> 1  # PAGEHDRSZ=16, PAGEBASE=0
+            for idx in range(nkeys):
+                ptr = struct.unpack_from('<H', raw,
+                                        off + MP_PTRS_OFFSET + idx * 2)[0]
+                if ptr == 0 or ptr >= psize:
+                    continue
+                node_off = off + ptr
+                mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+                if not (mn_flags & F_DUPDATA):
+                    continue
+                # Node data is a sub-page.  Skip node header + key.
+                mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
+                subpage_off = node_off + 8 + mn_ksize  # NODESIZE=8
+                # Sub-page header: pgno(8) + pad(2) + flags(2) + lower(2)
+                #                  + upper(2)
+                sp_upper_off = subpage_off + 14
+                # Set mp_upper to 0 so size expression underflows
+                struct.pack_into('<H', raw, sp_upper_off, 0)
+                patched = True
+                break
+            if patched:
+                break
+
+        self.assertTrue(patched, "No sub-page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dupdb', dupsort=True)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(write=True, db=db) as txn:
+                txn.put(b'key', b'val4')
+
+
 if __name__ == '__main__':
     unittest.main()

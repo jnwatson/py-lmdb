@@ -1,0 +1,20 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -6996,6 +6996,16 @@
+ 					sub_root = mp;
+ 			}
+ 			if (mp != fp) {
++				/* Validate sub-page bounds before copying.
++				 * fp is an on-disk sub-page whose mp_lower/mp_upper
++				 * may be corrupt.  A bad MP_UPPER(fp) causes the
++				 * memcpy size to underflow (unsigned wrap -> huge). */
++				if (MP_LOWER(fp) < PAGEHDRSZ-PAGEBASE ||
++					MP_UPPER(fp) + PAGEBASE > olddata.mv_size ||
++					MP_LOWER(fp) > MP_UPPER(fp)) {
++					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++					return MDB_CORRUPTED;
++				}
+ 				MP_FLAGS(mp) = fp_flags | P_DIRTY;
+ 				MP_PAD(mp)   = MP_PAD(fp);
+ 				MP_LOWER(mp) = MP_LOWER(fp);
