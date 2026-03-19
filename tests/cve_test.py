@@ -731,5 +731,77 @@ class Leaf2KeySizeTest(unittest.TestCase):
                 list(cur.iternext_dup())
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class XcursorNullD3D4Test(unittest.TestCase):
+    """Variants D3+D4: F_DUPDATA on a node in non-DUPSORT DB causes
+    NULL mc_xcursor dereference in MDB_GET_CURRENT and _mdb_cursor_del.
+    These are gaps missed by the CVE-2019-16227 patch."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def _corrupt_first_node_dupdata(self):
+        """Create a DB, set F_DUPDATA on the first leaf node, return path."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'1', b'aaa')
+            txn.put(b'2', b'bbb')
+            txn.put(b'3', b'ccc')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if not (flags & P_LEAF):
+                continue
+            ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
+            if ptr0 == 0 or ptr0 >= psize:
+                continue
+            node_off = off + ptr0
+            mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+            if not (mn_flags & F_DUPDATA):
+                struct.pack_into('<H', raw, node_off + 4, mn_flags | F_DUPDATA)
+                patched = True
+                break
+
+        assert patched, "Could not find node to corrupt"
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+        return path
+
+    def test_get_current_xcursor_null(self):
+        """MDB_GET_CURRENT with F_DUPDATA on non-DUPSORT node must
+        raise error, not crash (D3)."""
+        path = self._corrupt_first_node_dupdata()
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin() as txn:
+                cur = txn.cursor()
+                cur.first()
+                # MDB_GET_CURRENT triggers the F_DUPDATA path
+                cur.item()
+
+    def test_cursor_del_xcursor_null(self):
+        """cursor.delete() with F_DUPDATA on non-DUPSORT node must
+        raise error, not crash (D4)."""
+        path = self._corrupt_first_node_dupdata()
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(write=True) as txn:
+                cur = txn.cursor()
+                cur.first()
+                cur.delete()
+
+
 if __name__ == '__main__':
     unittest.main()
