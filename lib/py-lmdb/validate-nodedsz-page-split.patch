@@ -1,12 +1,15 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9132,6 +9132,12 @@
+@@ -9132,6 +9132,15 @@
  				if (IS_LEAF(mp)) {
  					xdata.mv_data = NODEDATA(node);
  					xdata.mv_size = NODEDSZ(node);
-+					/* Validate NODEDSZ does not exceed page bounds. */
-+					if ((char *)xdata.mv_data + xdata.mv_size >
++					/* Validate NODEDSZ does not exceed page bounds.
++					 * Skip for F_BIGDATA: NODEDSZ is the logical size
++					 * stored on overflow pages, not the on-page size. */
++					if (!F_ISSET(node->mn_flags, F_BIGDATA) &&
++						(char *)xdata.mv_data + xdata.mv_size >
 +						(char *)mp + mc->mc_txn->mt_env->me_psize) {
 +						rc = MDB_CORRUPTED;
 +						goto done;
