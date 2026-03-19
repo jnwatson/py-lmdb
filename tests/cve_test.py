@@ -936,5 +936,57 @@ class NodeShrinkUnderflowTest(unittest.TestCase):
             pass  # Any error is acceptable — the point is no crash
 
 
+P_OVERFLOW = 0x04
+MP_PAGES_OFFSET = 12  # uint32: mp_pages (same offset as mp_lower+mp_upper union)
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class OverflowPagesTest(unittest.TestCase):
+    """Variant G4: corrupt mp_pages on overflow page causes reading
+    past the mmap end."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_corrupt_overflow_mp_pages(self):
+        """Set mp_pages to a huge value on an overflow page; writing
+        must raise CorruptedError."""
+        path, env = testlib.temp_env(map_size=10*1024*1024)
+        with env.begin(write=True) as txn:
+            # Create an overflow page by writing a value > page size
+            txn.put(b'big', b'x' * 8000)
+            txn.put(b'small', b'y')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        # Find an overflow page and corrupt mp_pages
+        patched = False
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_OVERFLOW:
+                # Set mp_pages to a huge value
+                struct.pack_into('<I', raw, off + MP_PAGES_OFFSET, 0xFFFF)
+                patched = True
+                break
+
+        self.assertTrue(patched, "No overflow page found to corrupt")
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, map_size=10*1024*1024)
+        testlib._cleanups.append(env.close)
+
+        with self.assertRaises((lmdb.CorruptedError, lmdb.Error)):
+            with env.begin(write=True) as txn:
+                # Re-writing the big value triggers the overflow page
+                # code path in mdb_cursor_put
+                txn.put(b'big', b'z' * 8000)
+
+
 if __name__ == '__main__':
     unittest.main()
