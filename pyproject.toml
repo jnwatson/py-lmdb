@@ -2,6 +2,10 @@
 requires = ["setuptools", "wheel", "cffi>=0.8", "patch-ng"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+markers = ["mdb_layout: low-level LMDB data layout validation tests"]
+addopts = "-m 'not mdb_layout'"
+
 [tool.cibuildwheel]
 build-verbosity = 1
 skip = "*-musllinux_*"
