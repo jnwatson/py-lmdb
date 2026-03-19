@@ -1,3 +1,10 @@
+## 2026-03-19 2.1.1
+
+- Fix false `MDB_CORRUPTED` error when overwriting values larger than the page
+    size (overflow/bigdata values) with `txn.put(key, value, overwrite=True)`.
+    Two hardening checks from 2.1.0 did not account for `F_BIGDATA` nodes where
+    `NODEDSZ()` returns the logical data size, not the on-page size. (#431)
+
 ## 2026-03-19 2.1.0
 
 **Security release.** All users who open LMDB databases from untrusted or
