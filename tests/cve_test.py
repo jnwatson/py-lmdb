@@ -272,5 +272,40 @@ class CVE_2019_16227_Test(unittest.TestCase):
                 txn.put(b'3', b'ddd')
 
 
+class CVE_2019_16228_Test(unittest.TestCase):
+    """CVE-2019-16228: zero mm_psize causes divide-by-zero in
+    mdb_env_open2."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_zero_page_size(self):
+        """Zero mm_psize in meta pages; open must raise InvalidError."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'k', b'v')
+        env.close()
+
+        # mm_psize = mm_dbs[FREE_DBI].md_pad, uint32 at offset 40
+        db_path = os.path.join(path, 'data.mdb')
+        for off in (40, PAGE_SIZE + 40):
+            _patch_file(db_path, off, struct.pack('<I', 0))
+
+        self.assertRaises(lmdb.InvalidError, lmdb.open, path)
+
+    def test_non_power_of_2_page_size(self):
+        """Non-power-of-2 mm_psize; open must raise InvalidError."""
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(b'k', b'v')
+        env.close()
+
+        db_path = os.path.join(path, 'data.mdb')
+        for off in (40, PAGE_SIZE + 40):
+            _patch_file(db_path, off, struct.pack('<I', 4000))
+
+        self.assertRaises(lmdb.InvalidError, lmdb.open, path)
+
+
 if __name__ == '__main__':
     unittest.main()
