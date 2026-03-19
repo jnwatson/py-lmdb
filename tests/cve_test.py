@@ -585,8 +585,9 @@ class XcursorNodeDszTest(unittest.TestCase):
         path, env = testlib.temp_env()
         db = env.open_db(b'dupdb', dupsort=True)
         with env.begin(write=True, db=db) as txn:
-            # Add enough dups to force sub-DB (not sub-page)
-            for i in range(200):
+            # Add enough dups to force sub-DB (not sub-page).
+            # Need ~1000 on 16K-page platforms (Apple Silicon).
+            for i in range(1000):
                 txn.put(b'key', b'val%04d' % i)
         env.close()
 
@@ -658,7 +659,8 @@ class Leaf2KeySizeTest(unittest.TestCase):
         path, env = testlib.temp_env()
         db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
         with env.begin(write=True, db=db) as txn:
-            for i in range(500):
+            # Need ~2000 on 16K-page platforms (Apple Silicon)
+            for i in range(2000):
                 txn.put(b'key', b'v%06d' % i)
         env.close()
 
@@ -697,7 +699,8 @@ class Leaf2KeySizeTest(unittest.TestCase):
         path, env = testlib.temp_env()
         db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
         with env.begin(write=True, db=db) as txn:
-            for i in range(500):
+            # Need ~2000 on 16K-page platforms (Apple Silicon)
+            for i in range(2000):
                 txn.put(b'key', b'v%06d' % i)
         env.close()
 
@@ -816,9 +819,10 @@ class PageSplitNodeDszTest(unittest.TestCase):
         error instead of OOB copy."""
         path, env = testlib.temp_env()
         with env.begin(write=True) as txn:
-            # Fill a single leaf page close to capacity with large values
-            for i in range(80):
-                txn.put(b'k%03d' % i, b'x' * 40)
+            # Fill leaf pages close to capacity with large values.
+            # Need ~300 on 16K-page platforms (Apple Silicon).
+            for i in range(300):
+                txn.put(b'k%04d' % i, b'x' * 40)
         env.close()
 
         db_path = _db_path(path)
@@ -860,7 +864,7 @@ class PageSplitNodeDszTest(unittest.TestCase):
                 # Insert keys that interleave with existing ones to
                 # force splits of the corrupted pages
                 for i in range(200):
-                    txn.put(b'k%03d_new' % i, b'y' * 40)
+                    txn.put(b'k%04d_new' % i, b'y' * 40)
 
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
@@ -953,8 +957,9 @@ class OverflowPagesTest(unittest.TestCase):
         must raise CorruptedError."""
         path, env = testlib.temp_env(map_size=10*1024*1024)
         with env.begin(write=True) as txn:
-            # Create an overflow page by writing a value > page size
-            txn.put(b'big', b'x' * 8000)
+            # Create an overflow page by writing a value > page size.
+            # Must exceed 16K for Apple Silicon (16384-byte pages).
+            txn.put(b'big', b'x' * 32000)
             txn.put(b'small', b'y')
         env.close()
 
@@ -985,7 +990,7 @@ class OverflowPagesTest(unittest.TestCase):
             with env.begin(write=True) as txn:
                 # Re-writing the big value triggers the overflow page
                 # code path in mdb_cursor_put
-                txn.put(b'big', b'z' * 8000)
+                txn.put(b'big', b'z' * 32000)
 
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")

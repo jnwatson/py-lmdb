@@ -19,3 +19,4 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 +		}
  		return MDB_SUCCESS;
  	}
+
