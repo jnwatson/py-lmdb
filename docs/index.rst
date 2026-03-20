@@ -11,8 +11,9 @@ lmdb
 This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://lmdb.tech/>`_. Two variants are provided and automatically selected
 during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
-that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=3.5,
-and a C extension that supports >= 3.5. Both variants provide the same interface.
+that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=3.9,
+and a C extension that supports CPython >=3.9. Both variants provide the same
+interface.
 
 LMDB is a tiny database with some excellent properties:
 
@@ -26,7 +27,7 @@ LMDB is a tiny database with some excellent properties:
 * Multiple named databases may be created with transactions covering all
   named databases.
 * Memory mapped, allowing for zero copy lookup and iteration. This is
-  optionally exposed to Python using the :py:func:`buffer` interface.
+  optionally exposed to Python using the :py:func:`memoryview` interface.
 * Maintenance requires no external process or background threads.
 * No application-level caching is required: LMDB fully exploits the operating
   system's buffer cache.
@@ -35,16 +36,15 @@ LMDB is a tiny database with some excellent properties:
 Installation: Windows
 +++++++++++++++++++++
 
-Binary eggs and wheels are published via PyPI for Windows, allowing the binding
-to be installed via pip and easy_install without the need for a compiler to be
-present. The binary releases statically link against the bundled version of
-LMDB.
+Binary wheels are published via PyPI for Windows, allowing the binding to be
+installed via pip without the need for a compiler to be present. The binary
+releases statically link against the bundled version of LMDB.
 
-To install, use a command like:
+To install:
 
     ::
 
-        C:\Python27\python -mpip install lmdb
+        pip install lmdb
 
 
 Installation: UNIX
@@ -55,10 +55,10 @@ built statically by default. If your system distribution includes LMDB, set the
 ``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
 and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
 
-By default, the LMDB library is patched before building.  This patch (located
-at ``lib/py-lmdb/env-copy-txn.patch``) provides a minor feature:  the ability
-to copy/backup an environment under a particular transaction.   If you prefer
-to bypass the patch, set the environment variable ``LMDB_PURE``.
+By default, the bundled LMDB library is patched before building.  The patches
+(located in ``lib/py-lmdb/``) provide security hardening, bug fixes, and the
+ability to copy/backup an environment under a particular transaction.  If you
+prefer to build without patches, set the environment variable ``LMDB_PURE``.
 
 The CFFI variant depends on CFFI, which in turn depends on ``libffi``, which
 may need to be installed from a package. On CPython, both variants additionally
@@ -66,7 +66,7 @@ depend on the CPython development headers. On Debian/Ubuntu:
 
     ::
 
-        apt-get install libffi-dev python-dev build-essential
+        apt-get install libffi-dev python3-dev build-essential
 
 To install the C extension, ensure a C compiler and `pip` are
 available and type:
@@ -95,14 +95,8 @@ Before getting in contact, please ensure you have thoroughly reviewed this
 documentation, and if applicable, the associated
 `official Doxygen documentation <http://lmdb.tech/doc/>`_.
 
-If you have found a bug, please report it on the `GitHub issue tracker
-<https://github.com/dw/py-lmdb/issues>`_, or mail it to the list below if
-you're allergic to GitHub.
-
-For all other problems and related discussion, please direct it to
-`the py-lmdb@freelists.org mailing list <http://www.freelists.org/list/py-lmdb>`_.
-You must be subscribed to post. The `list archives
-<http://www.freelists.org/archive/py-lmdb/>`_ are also available.
+If you have found a bug or have a question, please report it on the
+`GitHub issue tracker <https://github.com/jnwatson/py-lmdb/issues>`_.
 
 
 Named Databases
@@ -182,54 +176,49 @@ written the dirty pages to disk.
 Bytestrings
 +++++++++++
 
-This documentation uses `bytestring` to mean the Python>=3.0 :py:func:`bytes`
-type.
-
-This documentation uses :py:func:`bytes` in examples. In Python 3.x this is a
-distinct type.
+This documentation uses `bytestring` to mean the :py:func:`bytes` type.
+All keys and values must be :py:func:`bytes` (not :py:func:`str`).
 
 Buffers
 +++++++
 
 Since LMDB is memory mapped it is possible to access record data without keys
 or values ever being copied by the kernel, database library, or application. To
-exploit this the library can be instructed to return :py:func:`buffer` objects
-instead of bytestrings by passing `buffers=True` to
+exploit this the library can be instructed to return :py:func:`memoryview`
+objects instead of bytestrings by passing `buffers=True` to
 :py:meth:`Environment.begin` or :py:class:`Transaction`.
 
-In Python :py:func:`buffer` objects can be used in many places where
-bytestrings are expected. In every way they act like a regular sequence: they
-support slicing, indexing, iteration, and taking their length. Many Python APIs
-will automatically convert them to bytestrings as necessary:
+:py:func:`memoryview` objects can be used in many places where bytestrings are
+expected. They support slicing, indexing, iteration, and taking their length.
+Many Python APIs will automatically convert them to bytestrings as necessary:
 
     ::
 
         >>> txn = env.begin(buffers=True)
-        >>> buf = txn.get('somekey')
+        >>> buf = txn.get(b'somekey')
         >>> buf
-        <read-only buffer ptr 0x12e266010, size 4096 at 0x10d93b970>
+        <memory at 0x10d93b970>
 
         >>> len(buf)
         4096
         >>> buf[0]
-        'a'
-        >>> buf[:2]
-        'ab'
+        97
+        >>> bytes(buf[:2])
+        b'ab'
         >>> value = bytes(buf)
         >>> len(value)
         4096
         >>> type(value)
-        <type 'bytes'>
+        <class 'bytes'>
 
 It is also possible to pass buffers directly to many native APIs, for example
 :py:meth:`file.write`, :py:meth:`socket.send`, :py:meth:`zlib.decompress` and
-so on. A buffer may be sliced without copying by passing it to
-:py:func:`buffer`:
+so on. A buffer may be sliced without copying:
 
     ::
 
         >>> # Extract bytes 10 through 210:
-        >>> sub_buf = buffer(buf, 10, 200)
+        >>> sub_buf = buf[10:210]
         >>> len(sub_buf)
         200
 
@@ -240,10 +229,10 @@ buffer's contents, copy it using :py:func:`bytes`:
     .. code-block:: python
 
         with env.begin(write=True, buffers=True) as txn:
-            buf = txn.get('foo')           # only valid until the next write.
+            buf = txn.get(b'foo')          # only valid until the next write.
             buf_copy = bytes(buf)          # valid forever
-            txn.delete('foo')              # this is a write!
-            txn.put('foo2', 'bar2')        # this is also a write!
+            txn.delete(b'foo')             # this is a write!
+            txn.put(b'foo2', b'bar2')      # this is also a write!
 
             print('foo: %r' % (buf,))      # ERROR! invalidated by write
             print('foo: %r' % (buf_copy,)) # OK
@@ -285,7 +274,7 @@ the case of exceptions.
     with env.begin() as txn:
         with txn.cursor() as curs:
             # do stuff
-            print 'key is:', curs.get('key')
+            print('key is:', curs.get(b'key'))
 
 On CFFI it is important to use the :py:class:`Cursor` context manager, or
 explicitly call :py:meth:`Cursor.close` if many cursors are created within a
@@ -317,7 +306,7 @@ a ``with`` statement somewhere on the stack:
 
     # Even if this crashes, txn will be correctly finalized.
     with env.begin() as txn:
-        if txn.get('foo'):
+        if txn.get(b'foo'):
             function_that_stashes_away_txn_ref(txn)
             function_that_leaks_txn_refs(txn)
             crash()
@@ -647,7 +636,7 @@ Deviations from LMDB API
 
     In all cases where `mdb_set_compare()` might be useful, use of a special
     key encoding that encodes your custom order is usually desirable. See
-    `issue #79 <https://github.com/dw/py-lmdb/issues/79>`_ for example
+    `issue #79 <https://github.com/jnwatson/py-lmdb/issues/79>`_ for example
     approaches.
 
     The answer is not so clear for `mdb_set_dupsort()`, since a custom encoding
