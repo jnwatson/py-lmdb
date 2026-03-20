@@ -295,6 +295,18 @@ class StatTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.stat(db1))  # type: ignore[call-arg]
 
+    def test_stat_default_db(self):
+        """txn.stat() without db arg uses the transaction's default db."""
+        _, env = testlib.temp_env()
+        txn = lmdb.Transaction(env, write=True)
+        txn.put(B('a'), B('b'))
+        txn.commit()
+
+        txn = lmdb.Transaction(env)
+        stat = txn.stat()
+        assert stat['entries'] == 1
+        txn.abort()
+
 
 class DropTest(unittest.TestCase):
     def tearDown(self):
