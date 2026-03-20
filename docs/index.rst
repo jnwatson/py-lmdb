@@ -375,17 +375,21 @@ the executor.
 Iterators (``iternext()``, ``iterprev()``, etc.) are consumed in the executor
 and returned as a list.
 
-By default, the event loop's default :class:`~concurrent.futures.ThreadPoolExecutor`
-is used.  To use a dedicated pool::
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    pool = ThreadPoolExecutor(max_workers=2)
-    aenv = lmdb.aio.wrap(env, executor=pool)
-
 All objects support ``async with`` for lifetime management.  Write transactions
 are committed on clean exit and aborted on exception, matching the synchronous
 behavior.
+
+Because LMDB transactions are not thread-safe, each
+:class:`AsyncTransaction` holds an :class:`asyncio.Lock` that serializes all
+operations dispatched through it (including operations on its cursors).  This
+means :func:`asyncio.gather` and other forms of concurrency are safe on the
+same transaction — calls are automatically queued.
+
+.. caution::
+
+    Do not mix synchronous and async access to the same
+    :py:class:`Environment`.  Once an environment is wrapped with
+    :func:`lmdb.aio.wrap`, all access should go through the async wrapper.
 
 Limitations running on 32-bit Processes
 +++++++++++++++++++++++++++++++++++++++
