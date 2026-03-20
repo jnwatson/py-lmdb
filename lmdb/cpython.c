@@ -1940,6 +1940,122 @@ env_open_db(EnvObject *self, PyObject *args, PyObject *kwds)
 }
 
 /**
+ * Environment.dbs() -> list of bytes
+ */
+static PyObject *
+env_dbs(EnvObject *self, PyObject *args, PyObject *kwds)
+{
+    struct env_dbs {
+        TransObject *txn;
+    } arg = {NULL};
+
+    static const struct argspec argspec[] = {
+        {"txn", ARG_TRANS, OFFSET(env_dbs, txn)},
+    };
+
+    MDB_txn *txn;
+    MDB_cursor *cursor;
+    MDB_val key, data;
+    MDB_dbi dbi;
+    int rc;
+    int own_txn = 0;
+    PyObject *list;
+    char *name;
+
+    static PyObject *cache = NULL;
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
+        return NULL;
+    }
+
+    if(arg.txn) {
+        txn = arg.txn->txn;
+    } else {
+        if(self->spare_txn) {
+            txn = self->spare_txn;
+            self->spare_txn = NULL;
+            rc = mdb_txn_renew(txn);
+            if(rc) {
+                mdb_txn_abort(txn);
+                return err_set("mdb_txn_renew", rc);
+            }
+        } else {
+            rc = mdb_txn_begin(self->env, NULL, MDB_RDONLY, &txn);
+            if(rc) {
+                return err_set("mdb_txn_begin", rc);
+            }
+        }
+        own_txn = 1;
+    }
+
+    rc = mdb_cursor_open(txn, self->main_db->dbi, &cursor);
+    if(rc) {
+        if(own_txn) {
+            mdb_txn_reset(txn);
+            self->spare_txn = txn;
+        }
+        return err_set("mdb_cursor_open", rc);
+    }
+
+    list = PyList_New(0);
+    if(! list) {
+        mdb_cursor_close(cursor);
+        if(own_txn) {
+            mdb_txn_reset(txn);
+            self->spare_txn = txn;
+        }
+        return NULL;
+    }
+
+    while((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
+        name = malloc(key.mv_size + 1);
+        if(! name) {
+            Py_DECREF(list);
+            mdb_cursor_close(cursor);
+            if(own_txn) {
+                mdb_txn_reset(txn);
+                self->spare_txn = txn;
+            }
+            return PyErr_NoMemory();
+        }
+        memcpy(name, key.mv_data, key.mv_size);
+        name[key.mv_size] = '\0';
+
+        rc = mdb_dbi_open(txn, name, 0, &dbi);
+        free(name);
+
+        if(rc == 0) {
+            PyObject *keyobj = PyBytes_FromStringAndSize(key.mv_data,
+                                                         key.mv_size);
+            if(! keyobj || PyList_Append(list, keyobj)) {
+                Py_XDECREF(keyobj);
+                Py_DECREF(list);
+                mdb_cursor_close(cursor);
+                if(own_txn) {
+                    mdb_txn_reset(txn);
+                    self->spare_txn = txn;
+                }
+                return NULL;
+            }
+            Py_DECREF(keyobj);
+        }
+        /* MDB_INCOMPATIBLE means it's a regular key, not a DB. Skip it. */
+    }
+
+    mdb_cursor_close(cursor);
+    if(own_txn) {
+        mdb_txn_reset(txn);
+        self->spare_txn = txn;
+    }
+
+    if(rc != MDB_NOTFOUND) {
+        Py_DECREF(list);
+        return err_set("mdb_cursor_get", rc);
+    }
+
+    return list;
+}
+
+/**
  * Environment.path() -> Unicode
  */
 static PyObject *
@@ -2130,6 +2246,7 @@ static struct PyMethodDef env_methods[] = {
     {"begin", (PyCFunction)env_begin, METH_VARARGS|METH_KEYWORDS},
     {"close", (PyCFunction)env_close, METH_NOARGS},
     {"copy", (PyCFunction)env_copy, METH_VARARGS|METH_KEYWORDS},
+    {"dbs", (PyCFunction)env_dbs, METH_VARARGS|METH_KEYWORDS},
     {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS|METH_KEYWORDS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"flags", (PyCFunction)env_flags, METH_NOARGS},

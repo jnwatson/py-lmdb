@@ -109,6 +109,12 @@ first process or thread opening the environment.
 Once a correctly configured :py:class:`Environment` is created, new named
 databases may be created via :py:meth:`Environment.open_db`.
 
+Existing named databases can be listed with :py:meth:`Environment.dbs`.  This
+works by iterating the main database and attempting to open each key as a named
+database.  It only returns reliable results when the main database is **not**
+also used to store regular key-value pairs — do not mix named databases with
+application keys in the main database.
+
 
 Storage efficiency & limits
 +++++++++++++++++++++++++++
