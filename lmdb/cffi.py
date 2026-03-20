@@ -1564,12 +1564,15 @@ class Transaction(object):
         """
         return _lib.mdb_txn_id(self._txn)
 
-    def stat(self, db):
-        """stat(db)
+    def stat(self, db=None):
+        """stat(db=None)
 
         Return statistics like :py:meth:`Environment.stat`, except for a single
         DBI. `db` must be a database handle returned by :py:meth:`open_db`.
+        If `db` is ``None``, the transaction's default database is used.
         """
+        if db is None:
+            db = self._db
         st = _ffi.new('MDB_stat *')
         rc = _lib.mdb_stat(self._txn, db._dbi, st)
         if rc:
