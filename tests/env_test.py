@@ -839,6 +839,41 @@ class OpenDbTest(unittest.TestCase):
         env.close()
 
 
+class DbsTest(unittest.TestCase):
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_empty(self):
+        _, env = testlib.temp_env()
+        assert env.dbs() == []
+
+    def test_named(self):
+        _, env = testlib.temp_env()
+        env.open_db(B('db1'))
+        env.open_db(B('db2'))
+        env.open_db(B('db3'))
+        assert sorted(env.dbs()) == [B('db1'), B('db2'), B('db3')]
+
+    def test_with_txn(self):
+        _, env = testlib.temp_env()
+        env.open_db(B('mydb'))
+        with env.begin() as txn:
+            assert env.dbs(txn=txn) == [B('mydb')]
+
+    def test_mixed_main_db(self):
+        """Named dbs are returned even when main db has regular keys."""
+        _, env = testlib.temp_env()
+        env.open_db(B('mydb'))
+        with env.begin(write=True) as txn:
+            txn.put(B('regular_key'), B('regular_value'))
+        assert env.dbs() == [B('mydb')]
+
+    def test_closed(self):
+        _, env = testlib.temp_env()
+        env.close()
+        self.assertRaises(Exception, env.dbs)
+
+
 reader_count = lambda env: env.readers().count('\n') - 1
 
 class SpareTxnTest(unittest.TestCase):

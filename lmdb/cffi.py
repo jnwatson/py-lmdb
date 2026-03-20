@@ -1298,6 +1298,40 @@ class Environment(object):
         self._dbs[key] = db
         return db
 
+    def dbs(self, txn=None):
+        """Return a list of named databases in the environment, as a list
+        of bytestrings.
+
+        This works by iterating the main database and attempting to open
+        each key as a named database.  It only returns reliable results
+        when the main database is not used to store regular key-value
+        pairs.
+
+            `txn`:
+                Read-only or read-write :py:class:`Transaction` to use.  If
+                ``None``, a temporary read-only transaction is created and
+                released automatically.
+        """
+        own_txn = txn is None
+        if own_txn:
+            txn = self.begin()
+        try:
+            result = []
+            cursor = txn.cursor()
+            try:
+                for key in cursor.iternext(keys=True, values=False):
+                    try:
+                        self.open_db(key, txn=txn, create=False)
+                        result.append(key)
+                    except Error:
+                        pass
+            finally:
+                cursor.close()
+            return result
+        finally:
+            if own_txn:
+                txn.abort()
+
     def begin(self, db=None, parent=None, write=False, buffers=False):
         """Shortcut for :py:class:`lmdb.Transaction`"""
         return Transaction(self, db, parent, write, buffers)
