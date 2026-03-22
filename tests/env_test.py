@@ -275,6 +275,83 @@ class SetMapSizeTest(unittest.TestCase):
         env.set_mapsize(PAGE_SIZE * 16)
         assert env.info()['map_size'] == PAGE_SIZE * 16
 
+    def test_data_survives(self):
+        """Data written before set_mapsize is readable after."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        with env.begin(write=True) as txn:
+            txn.put(b'key1', b'val1')
+            txn.put(b'key2', b'val2')
+
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        with env.begin() as txn:
+            assert txn.get(b'key1') == b'val1'
+            assert txn.get(b'key2') == b'val2'
+
+    def test_write_after_resize(self):
+        """Writes succeed after set_mapsize."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        with env.begin(write=True) as txn:
+            txn.put(b'key', b'value')
+        with env.begin() as txn:
+            assert txn.get(b'key') == b'value'
+
+    def test_invalidates_txn(self):
+        """Open read transactions are invalidated by set_mapsize."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        txn = env.begin()
+        txn.get(b'key')  # use the txn
+
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        self.assertRaises(Exception, lambda: txn.get(b'key'))
+
+    def test_invalidates_cursor(self):
+        """Open cursors are invalidated by set_mapsize."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        txn = env.begin()
+        cursor = txn.cursor()
+
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        self.assertRaises(Exception, lambda: cursor.first())
+
+    def test_rejects_with_write_txn(self):
+        """set_mapsize raises if a write transaction is active."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        txn = env.begin(write=True)
+        self.assertRaises(Exception,
+            lambda: env.set_mapsize(PAGE_SIZE * 16))
+        txn.abort()
+
+    def test_named_dbs_after_resize(self):
+        """Named databases are accessible after set_mapsize."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8, max_dbs=4)
+        db = env.open_db(b'mydb')
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'k', b'v')
+
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        db2 = env.open_db(b'mydb')
+        with env.begin(db=db2) as txn:
+            assert txn.get(b'k') == b'v'
+
+    def test_multiple_resizes(self):
+        """Multiple consecutive set_mapsize calls work."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        with env.begin(write=True) as txn:
+            txn.put(b'key', b'val')
+
+        env.set_mapsize(PAGE_SIZE * 16)
+        env.set_mapsize(PAGE_SIZE * 32)
+
+        with env.begin() as txn:
+            assert txn.get(b'key') == b'val'
+        assert env.info()['map_size'] == PAGE_SIZE * 32
+
 
 class CloseTest(unittest.TestCase):
     def tearDown(self):

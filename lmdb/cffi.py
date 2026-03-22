@@ -834,29 +834,95 @@ class Environment(object):
     _dbs = None
 
     def set_mapsize(self, map_size):
-        """Change the maximum size of the map file. This function will fail if
-        any transactions are active in the current process.
+        """Change the maximum size of the map file.
+
+        All open transactions, cursors, and iterators on this environment are
+        invalidated, and the memory map is replaced.  A write transaction must
+        not be active.
 
         `map_size`:
             The new size in bytes.
 
         Equivalent to `mdb_env_set_mapsize()
         <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
-
-        Warning:
-        There's a data race in the underlying library that may cause
-        catastrophic loss of data if you use this method.
-
-        You are safe if one of the following are true:
-            * Only one process accessing a particular LMDB file ever calls
-              this method.
-
-            * You use locking external to this library to ensure that only one
-              process accessing the current LMDB file can be inside this function.
         """
-        rc = _lib.mdb_env_set_mapsize(self._env, map_size)
-        if rc:
-            raise _error("mdb_env_set_mapsize", rc)
+        # Pre-open path: env created but not yet opened (called from __init__
+        # before mdb_env_open).  No mmap exists yet, just set the size.
+        if self._dbs is None:
+            rc = _lib.mdb_env_set_mapsize(self._env, map_size)
+            if rc:
+                raise _error("mdb_env_set_mapsize", rc)
+            return
+
+        if self._env is _invalid:
+            raise Error("environment is closed")
+
+        if self._write_txn_tid:
+            raise Error("Cannot set_mapsize while a write transaction is active")
+
+        with self._close_lock:
+            if self._env is _invalid:
+                raise Error("environment is closed")
+
+            # Phase 1: invalidate all child handles (txns, cursors).
+            # Mirrors close()'s Phase 1 but leaves _env valid.
+            txn_handles = []
+            if self._deps:
+                for dep in self._deps:
+                    if hasattr(dep, '_deps') and dep._deps:
+                        for child in dep._deps:
+                            if hasattr(child, '_cur'):
+                                child._cur = _invalid
+                                child._dbi = _invalid
+                                child._txn = _invalid
+                    if hasattr(dep, '_txn') and dep._txn:
+                        txn_handles.append(dep._txn)
+                        dep._txn = _invalid
+                    dep._env = _invalid
+                    if hasattr(dep, '_dbi'):
+                        dep._dbi = _invalid
+                for dep in list(self._deps):
+                    if hasattr(dep, '_deps') and dep._deps:
+                        dep._deps.clear()
+                self._deps.clear()
+
+            # Phase 2: abort collected txns.
+            for txn in txn_handles:
+                _lib.mdb_txn_abort(txn)
+
+            # Abort spare transactions.
+            if self._spare_txns:
+                while self._spare_txns:
+                    _lib.mdb_txn_abort(self._spare_txns.pop())
+
+            # Clear cached DB handles — they reference the old mapping.
+            if self._dbs:
+                self._dbs.clear()
+            self._db = None
+
+            # Now safe to remap.
+            rc = _lib.mdb_env_set_mapsize(self._env, map_size)
+            if rc:
+                # Remap failed — env is unusable.
+                self._env = _invalid
+                raise _error("mdb_env_set_mapsize", rc)
+
+            # Re-initialize deps tracking and re-open the main DB handle.
+            self._deps = set()
+            with self.begin(db=object()) as txn:
+                self._db = _Database(
+                    env=self,
+                    txn=txn,
+                    name=None,
+                    reverse_key=False,
+                    dupsort=False,
+                    create=True,
+                    integerkey=False,
+                    integerdup=False,
+                    dupfixed=False
+                )
+            self._dbs = {None: self._db}
+            self._spare_txns = []
 
     def close(self):
         """Close the environment, invalidating any open iterators, cursors, and
