@@ -344,6 +344,57 @@ used concurrently from multiple threads.
 any thread except the thread that currently owns its associated
 :py:class:`Transaction`.
 
+Forking & multiprocessing
++++++++++++++++++++++++++
+
+LMDB environments must not be used across a ``fork()`` call.  The memory map,
+lock table, and file descriptors are not valid in the child process.  Attempting
+to use an inherited :py:class:`Environment` in the child will corrupt the
+database or crash.
+
+py-lmdb detects ``fork()`` via a cached process ID and skips cleanup of
+inherited transactions in the child, preventing the child from corrupting the
+parent's state.  However, inherited :py:class:`Environment` objects are **not
+usable** in the child — they must be discarded and re-opened.
+
+The safe patterns for multiprocessing are:
+
+1. **Open after fork**: Open a fresh :py:class:`Environment` in each child
+   process.  The children can safely share the same database path.
+
+2. **Use spawn**: Use ``multiprocessing.get_context('spawn')`` instead of the
+   default ``fork`` context.  ``spawn`` starts a new Python interpreter,
+   avoiding the problem entirely.  This is already the default on Windows and
+   macOS (Python 3.14+).
+
+.. code-block:: python
+
+    import multiprocessing
+
+    def worker(path):
+        env = lmdb.open(path)          # open fresh in child
+        with env.begin() as txn:
+            print(txn.get(b'key'))
+        env.close()
+
+    env = lmdb.open('/tmp/mydb')
+    with env.begin(write=True) as txn:
+        txn.put(b'key', b'value')
+    env.close()                        # close before forking
+
+    p = multiprocessing.Process(target=worker, args=('/tmp/mydb',))
+    p.start()
+    p.join()
+
+.. caution::
+
+    If the process will be forked while an :py:class:`Environment` is open,
+    set ``max_spare_txns=0`` when opening the environment.  Cached read-only
+    transactions hold a slot in the LMDB reader lock table; after ``fork()``,
+    the child inherits these stale slots that it cannot clean up, which can
+    exhaust the reader table.
+
+
 Asyncio
 +++++++
 
