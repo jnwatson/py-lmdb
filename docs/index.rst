@@ -457,6 +457,29 @@ Cursor class
 .. autoclass:: lmdb.Cursor
     :members:
 
+Async classes
+#############
+
+.. autofunction:: lmdb.aio.wrap
+
+.. autoclass:: lmdb.aio.AsyncEnvironment
+    :members: begin
+
+    All other :py:class:`Environment` methods are available as coroutines via
+    ``__getattr__`` proxy.
+
+.. autoclass:: lmdb.aio.AsyncTransaction
+    :members: cursor
+
+    All other :py:class:`Transaction` methods are available as coroutines via
+    ``__getattr__`` proxy.
+
+.. autoclass:: lmdb.aio.AsyncCursor
+    :members: iternext, iternext_dup, iternext_nodup, iterprev, iterprev_dup, iterprev_nodup
+
+    All other :py:class:`Cursor` methods are available as coroutines via
+    ``__getattr__`` proxy.
+
 Exceptions
 ##########
 
