@@ -116,6 +116,119 @@ also used to store regular key-value pairs — do not mix named databases with
 application keys in the main database.
 
 
+Duplicate-sort databases
+++++++++++++++++++++++++
+
+By default each key in a database maps to exactly one value.  Opening a database
+with ``dupsort=True`` allows a key to have multiple values, stored in sorted
+order.  This is useful for modelling one-to-many relationships (e.g. tags per
+document, edges per vertex) without encoding multiple values into a single
+record.
+
+.. code-block:: python
+
+    env = lmdb.open('/tmp/test', max_dbs=1)
+    db = env.open_db(b'edges', dupsort=True)
+
+    with env.begin(write=True, db=db) as txn:
+        txn.put(b'node1', b'node2')
+        txn.put(b'node1', b'node3')
+        txn.put(b'node1', b'node4')
+        txn.put(b'node2', b'node5')
+
+Duplicate values for a key are always sorted lexicographically, just like keys.
+The maximum size of a duplicate value is limited to 511 bytes (the same as the
+maximum key size), because LMDB stores duplicates in a nested B-tree that
+treats each value as a key internally.
+
+Reading
+#######
+
+:py:meth:`Transaction.get` returns the first (lowest-sorted) value for a key.
+To access all values, use a :py:class:`Cursor`:
+
+.. code-block:: python
+
+    with env.begin(db=db) as txn:
+        # Position on key, then iterate its values:
+        with txn.cursor() as cur:
+            if cur.set_key(b'node1'):
+                for value in cur.iternext_dup(values=True):
+                    print(value)       # b'node2', b'node3', b'node4'
+
+        # Count values for a key:
+        with txn.cursor() as cur:
+            if cur.set_key(b'node1'):
+                print(cur.count())     # 3
+
+        # Check if a specific (key, value) pair exists:
+        with txn.cursor() as cur:
+            print(cur.set_key_dup(b'node1', b'node3'))  # True
+
+        # Iterate all unique keys (skipping duplicates):
+        with txn.cursor() as cur:
+            for key in cur.iternext_nodup():
+                print(key)             # b'node1', b'node2'
+
+Batch reading with :py:meth:`Cursor.getmulti` supports ``dupdata=True`` to
+return all values per key in a single call:
+
+.. code-block:: python
+
+    with env.begin(db=db) as txn:
+        with txn.cursor() as cur:
+            results = cur.getmulti([b'node1', b'node2'], dupdata=True)
+            # [(b'node1', b'node2'), (b'node1', b'node3'),
+            #  (b'node1', b'node4'), (b'node2', b'node5')]
+
+Deleting
+########
+
+:py:meth:`Transaction.delete` accepts a ``value`` parameter to remove a
+specific duplicate.  Without it, all values for the key are removed.
+:py:meth:`Cursor.delete` takes ``dupdata=True`` to remove all values for the
+current key, or ``dupdata=False`` (the default) to remove only the current
+value.
+
+.. code-block:: python
+
+    with env.begin(write=True, db=db) as txn:
+        txn.delete(b'node1', b'node3')   # remove one value
+        txn.delete(b'node2')             # remove all values for key
+
+Cursor methods
+##############
+
+The following cursor methods are specific to ``dupsort=True`` databases:
+
+* :py:meth:`~Cursor.first_dup` / :py:meth:`~Cursor.last_dup` — move to the
+  first/last value for the current key.
+* :py:meth:`~Cursor.next_dup` / :py:meth:`~Cursor.prev_dup` — move to the
+  next/previous value for the current key.
+* :py:meth:`~Cursor.next_nodup` / :py:meth:`~Cursor.prev_nodup` — skip to
+  the next/previous distinct key.
+* :py:meth:`~Cursor.iternext_dup` / :py:meth:`~Cursor.iterprev_dup` — iterate
+  values for the current key.
+* :py:meth:`~Cursor.iternext_nodup` / :py:meth:`~Cursor.iterprev_nodup` —
+  iterate distinct keys only, skipping duplicates.
+* :py:meth:`~Cursor.set_key_dup` — seek to an exact ``(key, value)`` pair.
+* :py:meth:`~Cursor.set_range_dup` — seek to the first ``(key, value)`` pair
+  greater than or equal to a given pair.
+* :py:meth:`~Cursor.count` — return the number of values for the current key.
+
+Related flags
+#############
+
+Two additional flags modify how duplicate values are stored:
+
+* ``dupfixed=True``: all values for a given key have the same fixed size.
+  LMDB packs them more efficiently, omitting per-value size headers.  Implies
+  ``dupsort=True``.
+
+* ``integerdup=True``: values are C unsigned integers in native byte order.
+  Implies ``dupsort=True`` and ``dupfixed=True``.
+
+
 Storage efficiency & limits
 +++++++++++++++++++++++++++
 
