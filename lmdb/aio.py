@@ -87,10 +87,16 @@ class _AsyncContextWrapper:
 
 
 class AsyncEnvironment:
-    """Async proxy for :class:`lmdb.Environment`.
+    """Async wrapper for :py:class:`lmdb.Environment`.
 
-    Attribute access, sync-safe methods, and ``close()`` are direct.
-    All other callable methods are dispatched to an executor.
+    Created by :py:func:`wrap`.  All methods of the underlying
+    :py:class:`~lmdb.Environment` are available and are dispatched to an
+    executor, except for the low-overhead accessors ``path()``,
+    ``max_key_size()``, ``max_readers()``, and ``flags()``, which are called
+    directly.
+
+    Supports ``async with`` for lifetime management — the environment is
+    closed on exit.
     """
 
     __slots__ = ('_env', '_executor')
@@ -110,6 +116,14 @@ class AsyncEnvironment:
     # -- methods that return wrapped objects -------------------------------
 
     def begin(self, *args, **kwargs):
+        """Start a new transaction, returning an :py:class:`AsyncTransaction`.
+
+        Accepts the same arguments as :py:meth:`lmdb.Environment.begin`.
+        Can be used with ``await`` or ``async with``::
+
+            async with aenv.begin(write=True) as txn:
+                await txn.put(b'key', b'value')
+        """
         async def _begin():
             loop = asyncio.get_running_loop()
             txn = await loop.run_in_executor(
@@ -131,7 +145,18 @@ class AsyncEnvironment:
 
 
 class AsyncTransaction:
-    """Async proxy for :class:`lmdb.Transaction`."""
+    """Async wrapper for :py:class:`lmdb.Transaction`.
+
+    All methods of the underlying :py:class:`~lmdb.Transaction` are available.
+    Most are dispatched to an executor; ``id()`` is called directly.
+
+    An :py:class:`asyncio.Lock` serializes all operations dispatched through
+    this transaction, including operations on its cursors.  This makes
+    :py:func:`asyncio.gather` safe on the same transaction.
+
+    Supports ``async with`` — write transactions are committed on clean exit
+    and aborted on exception.
+    """
 
     __slots__ = ('_txn', '_executor', '_lock')
 
@@ -156,6 +181,15 @@ class AsyncTransaction:
     # -- methods that return wrapped objects -------------------------------
 
     def cursor(self, *args, **kwargs):
+        """Open a cursor, returning an :py:class:`AsyncCursor`.
+
+        Accepts the same arguments as :py:meth:`lmdb.Transaction.cursor`.
+        Can be used with ``await`` or ``async with``::
+
+            async with txn.cursor() as cur:
+                await cur.first()
+                items = await cur.iternext()
+        """
         async def _cursor():
             async with self._lock:
                 loop = asyncio.get_running_loop()
@@ -178,7 +212,19 @@ class AsyncTransaction:
 
 
 class AsyncCursor:
-    """Async proxy for :class:`lmdb.Cursor`."""
+    """Async wrapper for :py:class:`lmdb.Cursor`.
+
+    All methods of the underlying :py:class:`~lmdb.Cursor` are available.
+    Most are dispatched to an executor; ``key()``, ``value()``, and
+    ``item()`` are called directly.
+
+    Iterator methods (``iternext()``, ``iterprev()``, etc.) are consumed in
+    the executor and returned as a list.
+
+    Shares the parent transaction's :py:class:`asyncio.Lock`.
+
+    Supports ``async with`` — the cursor is closed on exit.
+    """
 
     __slots__ = ('_cursor', '_executor', '_lock')
 
