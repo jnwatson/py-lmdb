@@ -33,6 +33,138 @@ LMDB is a tiny database with some excellent properties:
   system's buffer cache.
 
 
+When to use py-lmdb
+++++++++++++++++++++
+
+Python has several key-value and embedded database options.  LMDB fills a
+specific niche — here is how it compares.
+
+**vs. dbm (shelve, gdbm, ndbm)**
+
+The ``dbm`` family ships with Python and provides a simple ``dict``-like
+interface.  LMDB is faster for read-heavy workloads (zero-copy reads via
+``mmap``), supports concurrent readers without locking, provides ACID
+transactions, and allows multiple processes to share a database safely.
+``dbm`` databases do not support transactions and offer no crash-safety
+guarantees.  Choose ``dbm`` only when simplicity matters more than
+performance or durability.
+
+**vs. SQLite**
+
+SQLite is a full relational database with SQL, joins, indexes, and
+aggregation.  If your data is naturally relational, SQLite is the better
+choice.  LMDB is a *key-value store* — it has no query language, no schema,
+and no secondary indexes.  Where LMDB excels is raw throughput: reads are
+memory-mapped with zero system calls, and readers never block writers.
+LMDB is a good fit when you need a fast persistent ordered map rather
+than a relational database — for example, caches, lookup tables, message
+queues, or ML feature stores.
+
+**vs. Redis**
+
+Redis is an in-memory data-structure server accessed over the network.
+LMDB is an embedded library — no server, no network round-trips, no
+serialization overhead.  LMDB data is persistent on disk by default, while
+Redis persistence is optional and adds latency.  LMDB can also handle
+datasets much larger than available RAM (the OS pages data in and out
+transparently), whereas Redis requires all data to fit in memory.  Use
+Redis when you need shared state across machines, pub/sub, expiration, or
+its rich data structures (lists, sets, sorted sets).  Use LMDB when you
+need fast local persistence within a single machine.
+
+**vs. RocksDB (python-rocksdb)**
+
+RocksDB is an LSM-tree store optimized for write-heavy workloads.  It
+can sustain higher write throughput than LMDB, especially for large
+datasets that exceed RAM.  LMDB uses a B+ tree with copy-on-write, giving
+it consistently fast reads and predictable latency — there are no
+background compactions that can cause latency spikes.  LMDB's read path
+is a simple ``mmap`` lookup with no copying, making it significantly
+faster for read-dominated workloads.  RocksDB also has a much larger
+dependency footprint.
+
+**vs. pickle (shelve, JSON files)**
+
+Serializing a Python ``dict`` to a pickle or JSON file is the simplest
+form of persistence, but it requires loading the entire dataset into memory
+and rewriting the whole file on every save.  Pickle files are typically more
+space-efficient since they have no page overhead or free-space tracking.
+LMDB reads and writes individual records without loading the full dataset,
+supports concurrent readers, and provides crash-safe transactions.  For
+anything beyond a small configuration file, LMDB is dramatically faster
+and more robust.
+
+**Summary**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 12 12 12 12 12 12
+
+   * -
+     - py-lmdb
+     - pickle
+     - dbm
+     - SQLite
+     - Redis
+     - RocksDB
+   * - ACID transactions
+     - Yes
+     - No
+     - No
+     - Yes
+     - No
+     - Yes
+   * - Concurrent readers
+     - Lock-free
+     - No
+     - No
+     - WAL mode
+     - Yes
+     - Yes
+   * - Read performance
+     - Excellent
+     - Poor
+     - Fair
+     - Good
+     - Good
+     - Good
+   * - Write performance
+     - Good
+     - Poor
+     - Fair
+     - Good
+     - Excellent
+     - Excellent
+   * - Larger than RAM
+     - Yes
+     - No
+     - Yes
+     - Yes
+     - No
+     - Yes
+   * - Embedded (no server)
+     - Yes
+     - Yes
+     - Yes
+     - Yes
+     - No
+     - Yes
+   * - Multi-process safe
+     - Yes
+     - No
+     - No
+     - Yes
+     - N/A
+     - Yes
+   * - Zero-copy reads
+     - Yes
+     - No
+     - No
+     - No
+     - No
+     - No
+
+
 Installation: Windows
 +++++++++++++++++++++
 
