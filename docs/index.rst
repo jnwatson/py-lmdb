@@ -65,10 +65,12 @@ queues, or ML feature stores.
 Redis is an in-memory data-structure server accessed over the network.
 LMDB is an embedded library — no server, no network round-trips, no
 serialization overhead.  LMDB data is persistent on disk by default, while
-Redis persistence is optional and adds latency.  Use Redis when you need
-shared state across machines, pub/sub, expiration, or its rich data
-structures (lists, sets, sorted sets).  Use LMDB when you need fast local
-persistence within a single machine.
+Redis persistence is optional and adds latency.  LMDB can also handle
+datasets much larger than available RAM (the OS pages data in and out
+transparently), whereas Redis requires all data to fit in memory.  Use
+Redis when you need shared state across machines, pub/sub, expiration, or
+its rich data structures (lists, sets, sorted sets).  Use LMDB when you
+need fast local persistence within a single machine.
 
 **vs. RocksDB (python-rocksdb)**
 
@@ -79,16 +81,26 @@ it consistently fast reads and predictable latency — there are no
 background compactions that can cause latency spikes.  LMDB's read path
 is a simple ``mmap`` lookup with no copying, making it significantly
 faster for read-dominated workloads.  RocksDB also has a much larger
-dependency footprint and longer compile times.
+dependency footprint.
+
+**vs. pickle (shelve, JSON files)**
+
+Serializing a Python ``dict`` to a pickle or JSON file is the simplest
+form of persistence, but it requires loading the entire dataset into memory
+and rewriting the whole file on every save.  LMDB reads and writes
+individual records without loading the full dataset, supports concurrent
+readers, and provides crash-safe transactions.  For anything beyond a small
+configuration file, LMDB is dramatically faster and more robust.
 
 **Summary**
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 16 16 16 16 16
+   :widths: 18 12 12 12 12 12 12
 
    * -
      - py-lmdb
+     - pickle
      - dbm
      - SQLite
      - Redis
@@ -96,28 +108,40 @@ dependency footprint and longer compile times.
    * - ACID transactions
      - Yes
      - No
+     - No
      - Yes
      - No
      - Yes
    * - Concurrent readers
      - Lock-free
      - No
+     - No
      - WAL mode
      - Yes
      - Yes
    * - Read performance
      - Excellent
+     - Poor
      - Fair
      - Good
      - Good
      - Good
    * - Write performance
      - Good
+     - Poor
      - Fair
      - Good
      - Excellent
      - Excellent
+   * - Larger than RAM
+     - Yes
+     - No
+     - Yes
+     - Yes
+     - No
+     - Yes
    * - Embedded (no server)
+     - Yes
      - Yes
      - Yes
      - Yes
@@ -126,17 +150,13 @@ dependency footprint and longer compile times.
    * - Multi-process safe
      - Yes
      - No
+     - No
      - Yes
      - N/A
      - Yes
-   * - Query language
-     - No
-     - No
-     - SQL
-     - Commands
-     - No
    * - Zero-copy reads
      - Yes
+     - No
      - No
      - No
      - No
