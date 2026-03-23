@@ -561,31 +561,103 @@ same transaction — calls are automatically queued.
     :py:class:`Environment`.  Once an environment is wrapped with
     :func:`lmdb.aio.wrap`, all access should go through the async wrapper.
 
-Limitations running on 32-bit Processes
-+++++++++++++++++++++++++++++++++++++++
-32-bit processes (for example 32-bit builds of Python on Windows) are severely
-limited in the amount of virtual memory that can be mapped in.  This is
-particularly true for any 32-bit process but is particularly true for
-Python running on Windows and long running processes.
+Handling database growth
+++++++++++++++++++++++++
 
-Virtual address space fragmentation is a significant issue for mapping files
-into memory, a requirement for lmdb, as lmdb requires a contiguous range of
-virtual addresses. See
-https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation
-for more information and a solution that potentially gives another 50% of
-virtual address space on Windows.
+LMDB uses a fixed-size memory map.  When the database is full, write operations
+raise :py:class:`lmdb.MapFullError`.  There are two strategies for handling
+this.
 
-Importantly, using a 32-bit instance of Python (even with the OS being 64-bits)
-means that the maximum size file that can be ever be mapped into memory is
-around 1.1 GiB, and that number decreases as the python process lives and
-allocates/deallocates memory.  That means the DB file you can open now might not
-be the DB file you can open in a hour, given the same process.
+**Set a large initial map size**
 
-On Windows, You can see the see the precise maximum mapping size by using the
-SysInternals tool VMMap, then selecting your Python process, then selecting the
-"free" row, then sorting by size.
+On 64-bit systems the map size is a virtual address reservation, not a physical
+allocation — the OS only allocates pages as they are written.  It is safe to
+set ``map_size`` to a value much larger than the current data (e.g. several
+GiB) when opening the environment:
 
-This is not a problem at all for 64-bit processes.
+.. code-block:: python
+
+    # Reserve 1 GiB of address space.  Only pages actually written
+    # consume physical memory/disk.
+    env = lmdb.open('/tmp/mydb', map_size=1024 * 1024 * 1024)
+
+.. caution::
+
+    On filesystems that don't support sparse files — notably Windows (NTFS)
+    and older macOS (HFS+) — the full ``map_size`` may be preallocated on
+    disk.  On such systems, choose a map size closer to the expected data size
+    and use ``set_mapsize()`` to grow as needed.
+
+**Resize at runtime with set_mapsize()**
+
+If the database outgrows its map, call :py:meth:`Environment.set_mapsize` to
+enlarge it:
+
+.. code-block:: python
+
+    import lmdb
+
+    env = lmdb.open('/tmp/mydb', map_size=1024 * 1024)
+
+    try:
+        with env.begin(write=True) as txn:
+            txn.put(b'key', large_value)
+    except lmdb.MapFullError:
+        # Double the map size and retry.
+        env.set_mapsize(env.info()['map_size'] * 2)
+        with env.begin(write=True) as txn:
+            txn.put(b'key', large_value)
+
+Calling ``set_mapsize()`` replaces the underlying memory map.  This means:
+
+* **All open transactions, cursors, and iterators are invalidated.**  Any
+  attempt to use them after the call will raise an exception.  Always finish or
+  abort transactions before calling ``set_mapsize()``.
+
+* A write transaction must **not** be active — the call will raise an error if
+  one is.
+
+* The environment itself remains usable: new transactions can be opened
+  immediately after the resize.
+
+A typical pattern for applications that grow organically is a retry loop:
+
+.. code-block:: python
+
+    def put_with_retry(env, key, value):
+        """Put a key/value pair, growing the map if necessary."""
+        while True:
+            try:
+                with env.begin(write=True) as txn:
+                    txn.put(key, value)
+                return
+            except lmdb.MapFullError:
+                env.set_mapsize(env.info()['map_size'] * 2)
+
+.. caution::
+
+    In multi-process scenarios, all processes sharing the environment should
+    use the same map size.  If one process resizes the map, other processes
+    will receive :py:class:`lmdb.MapResizedError` on their next transaction
+    and must call ``set_mapsize(0)`` (which re-reads the current size from the
+    file) or ``set_mapsize(new_size)`` to pick up the change.
+
+**32-bit processes**
+
+32-bit processes are severely limited in the amount of virtual memory that can
+be mapped.  The maximum file that can be mapped is around 1.1 GiB, and that
+ceiling decreases as the process runs due to address space fragmentation.  LMDB
+requires a *contiguous* range of virtual addresses for its map, so
+fragmentation is especially harmful.  See `this analysis
+<https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation>`_
+for more information.
+
+On Windows, you can inspect the precise maximum mapping size using the
+SysInternals tool VMMap: select your Python process, select the "free" row, and
+sort by size.
+
+This is not a concern for 64-bit processes.
+
 
 Interface
 +++++++++

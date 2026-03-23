@@ -2181,6 +2181,7 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         {"map_size", ARG_SIZE, OFFSET(env_set_mapsize, map_size)}
     };
     int rc;
+    MDB_txn *txn;
 
     static PyObject *cache = NULL;
     if(parse_args(self->valid, SPECSIZE(), argspec, &cache,
@@ -2188,10 +2189,60 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
+    /* Reject if a write transaction is active — mdb_env_set_mapsize would
+     * return EINVAL anyway, but we must also avoid invalidating a write txn
+     * that the caller still holds. */
+    if(self->write_txn_tid) {
+        PyErr_Format(Error,
+            "Cannot set_mapsize while a write transaction is active");
+        return NULL;
+    }
+
+    /* Phase 1: quickly mark all children invalid so no new LMDB operations
+     * can start on existing transactions/cursors.  The env itself stays
+     * valid (we do NOT set self->valid = 0). */
+    INVALIDATE_MARK(self)
+
+    /* Wait for in-flight LMDB operations to complete.  Same pattern as
+     * env_clear — see issue #180. */
+    if(self->active_ops > 0) {
+        self->active_ops_waiter = 1;
+        Py_BEGIN_ALLOW_THREADS
+        PyThread_acquire_lock(self->active_ops_lock, WAIT_LOCK);
+        Py_END_ALLOW_THREADS
+        PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+    }
+
+    /* Phase 2: abort all child transactions and close cursors.  This must
+     * happen while the old mmap is still valid so mdb_txn_abort can
+     * safely touch the pages it needs to. */
+    INVALIDATE(self)
+    Py_CLEAR(self->main_db);
+
+    /* Abort the spare read-only transaction — it holds references to the
+     * old memory map. */
+    txn = self->spare_txn;
+    if(txn) {
+        self->spare_txn = NULL;
+        mdb_txn_abort(txn);
+    }
+
+    /* Now safe to remap. */
     rc = mdb_env_set_mapsize(self->env, arg.map_size);
     if(rc) {
+        /* Remap failed — env is in an unusable state.  Mark it invalid
+         * so subsequent operations raise a clear error. */
+        self->valid = 0;
         return err_set("mdb_env_set_mapsize", rc);
     }
+
+    /* Re-create the main database handle for the new mapping. */
+    self->main_db = txn_db_from_name(self, NULL, 0);
+    if(! self->main_db) {
+        self->valid = 0;
+        return NULL;
+    }
+
     Py_RETURN_NONE;
 }
 
