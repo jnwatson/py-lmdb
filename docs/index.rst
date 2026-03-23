@@ -587,6 +587,88 @@ SysInternals tool VMMap, then selecting your Python process, then selecting the
 
 This is not a problem at all for 64-bit processes.
 
+
+Handling database growth
+++++++++++++++++++++++++
+
+LMDB uses a fixed-size memory map.  When the database is full, write operations
+raise :py:class:`lmdb.MapFullError`.  There are two strategies for handling
+this.
+
+**Set a large initial map size**
+
+On 64-bit systems the map size is a virtual address reservation, not a physical
+allocation — the OS only allocates pages as they are written.  It is safe to
+set ``map_size`` to a value much larger than the current data (e.g. several
+GiB) when opening the environment:
+
+.. code-block:: python
+
+    # Reserve 1 GiB of address space.  Only pages actually written
+    # consume physical memory/disk.
+    env = lmdb.open('/tmp/mydb', map_size=1024 * 1024 * 1024)
+
+.. caution::
+
+    On filesystems that don't support sparse files (notably older macOS HFS+),
+    the full ``map_size`` may be preallocated on disk.  On such systems, choose
+    a map size closer to the expected data size.
+
+**Resize at runtime with set_mapsize()**
+
+If the database outgrows its map, call :py:meth:`Environment.set_mapsize` to
+enlarge it:
+
+.. code-block:: python
+
+    import lmdb
+
+    env = lmdb.open('/tmp/mydb', map_size=1024 * 1024)
+
+    try:
+        with env.begin(write=True) as txn:
+            txn.put(b'key', large_value)
+    except lmdb.MapFullError:
+        # Double the map size and retry.
+        env.set_mapsize(env.info()['map_size'] * 2)
+        with env.begin(write=True) as txn:
+            txn.put(b'key', large_value)
+
+Calling ``set_mapsize()`` replaces the underlying memory map.  This means:
+
+* **All open transactions, cursors, and iterators are invalidated.**  Any
+  attempt to use them after the call will raise an exception.  Always finish or
+  abort transactions before calling ``set_mapsize()``.
+
+* A write transaction must **not** be active — the call will raise an error if
+  one is.
+
+* The environment itself remains usable: new transactions can be opened
+  immediately after the resize.
+
+A typical pattern for applications that grow organically is a retry loop:
+
+.. code-block:: python
+
+    def put_with_retry(env, key, value):
+        """Put a key/value pair, growing the map if necessary."""
+        while True:
+            try:
+                with env.begin(write=True) as txn:
+                    txn.put(key, value)
+                return
+            except lmdb.MapFullError:
+                env.set_mapsize(env.info()['map_size'] * 2)
+
+.. caution::
+
+    In multi-process scenarios, all processes sharing the environment should
+    use the same map size.  If one process resizes the map, other processes
+    will receive :py:class:`lmdb.MapResizedError` on their next transaction
+    and must call ``set_mapsize(0)`` (which re-reads the current size from the
+    file) or ``set_mapsize(new_size)`` to pick up the change.
+
+
 Interface
 +++++++++
 
