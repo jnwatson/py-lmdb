@@ -1,0 +1,20 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -4404,6 +4404,16 @@
+
+ 	if (fd == INVALID_HANDLE_VALUE)
+ 		rc = ErrCode();
++#ifdef _WIN32
++	else if (which == MDB_O_RDWR) {
++		/* Mark the data file as sparse so the OS does not preallocate
++		 * the full map_size on disk.  Silently ignored on filesystems
++		 * that do not support sparse files (e.g. FAT32). */
++		DWORD dw;
++		(void)DeviceIoControl(fd, FSCTL_SET_SPARSE, NULL, 0,
++			NULL, 0, &dw, NULL);
++	}
++#endif
+ #ifndef _WIN32
+ 	else {
+ 		if (which != MDB_O_RDONLY && which != MDB_O_RDWR) {

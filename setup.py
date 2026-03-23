@@ -144,6 +144,7 @@ if patch_lmdb_source:
         'validate-nodedsz-cursor-put',
         'validate-md-depth',
         'validate-md-root',
+        'win32-sparse-file',
     ]
 
     if sys.platform.startswith('win'):
