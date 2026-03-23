@@ -583,10 +583,13 @@ GiB) when opening the environment:
 
 .. caution::
 
-    On filesystems that don't support sparse files — notably Windows (NTFS)
-    and older macOS (HFS+) — the full ``map_size`` may be preallocated on
-    disk.  On such systems, choose a map size closer to the expected data size
-    and use ``set_mapsize()`` to grow as needed.
+    On filesystems that don't support sparse files — notably older macOS
+    (HFS+) — the full ``map_size`` may be preallocated on disk.  On such
+    systems, choose a map size closer to the expected data size and use
+    ``set_mapsize()`` to grow as needed.
+
+    py-lmdb enables sparse files on Windows (NTFS) automatically, so large
+    ``map_size`` values do not waste disk space there.
 
 **Resize at runtime with set_mapsize()**
 
