@@ -561,33 +561,6 @@ same transaction — calls are automatically queued.
     :py:class:`Environment`.  Once an environment is wrapped with
     :func:`lmdb.aio.wrap`, all access should go through the async wrapper.
 
-Limitations running on 32-bit Processes
-+++++++++++++++++++++++++++++++++++++++
-32-bit processes (for example 32-bit builds of Python on Windows) are severely
-limited in the amount of virtual memory that can be mapped in.  This is
-particularly true for any 32-bit process but is particularly true for
-Python running on Windows and long running processes.
-
-Virtual address space fragmentation is a significant issue for mapping files
-into memory, a requirement for lmdb, as lmdb requires a contiguous range of
-virtual addresses. See
-https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation
-for more information and a solution that potentially gives another 50% of
-virtual address space on Windows.
-
-Importantly, using a 32-bit instance of Python (even with the OS being 64-bits)
-means that the maximum size file that can be ever be mapped into memory is
-around 1.1 GiB, and that number decreases as the python process lives and
-allocates/deallocates memory.  That means the DB file you can open now might not
-be the DB file you can open in a hour, given the same process.
-
-On Windows, You can see the see the precise maximum mapping size by using the
-SysInternals tool VMMap, then selecting your Python process, then selecting the
-"free" row, then sorting by size.
-
-This is not a problem at all for 64-bit processes.
-
-
 Handling database growth
 ++++++++++++++++++++++++
 
@@ -610,9 +583,10 @@ GiB) when opening the environment:
 
 .. caution::
 
-    On filesystems that don't support sparse files (notably older macOS HFS+),
-    the full ``map_size`` may be preallocated on disk.  On such systems, choose
-    a map size closer to the expected data size.
+    On filesystems that don't support sparse files — notably Windows (NTFS)
+    and older macOS (HFS+) — the full ``map_size`` may be preallocated on
+    disk.  On such systems, choose a map size closer to the expected data size
+    and use ``set_mapsize()`` to grow as needed.
 
 **Resize at runtime with set_mapsize()**
 
@@ -667,6 +641,22 @@ A typical pattern for applications that grow organically is a retry loop:
     will receive :py:class:`lmdb.MapResizedError` on their next transaction
     and must call ``set_mapsize(0)`` (which re-reads the current size from the
     file) or ``set_mapsize(new_size)`` to pick up the change.
+
+**32-bit processes**
+
+32-bit processes are severely limited in the amount of virtual memory that can
+be mapped.  The maximum file that can be mapped is around 1.1 GiB, and that
+ceiling decreases as the process runs due to address space fragmentation.  LMDB
+requires a *contiguous* range of virtual addresses for its map, so
+fragmentation is especially harmful.  See `this analysis
+<https://web.archive.org/web/20170701204304/http://forthescience.org/blog/2014/08/16/python-and-memory-fragmentation>`_
+for more information.
+
+On Windows, you can inspect the precise maximum mapping size using the
+SysInternals tool VMMap: select your Python process, select the "free" row, and
+sort by size.
+
+This is not a concern for 64-bit processes.
 
 
 Interface
