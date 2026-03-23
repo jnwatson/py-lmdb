@@ -87,10 +87,12 @@ dependency footprint.
 
 Serializing a Python ``dict`` to a pickle or JSON file is the simplest
 form of persistence, but it requires loading the entire dataset into memory
-and rewriting the whole file on every save.  LMDB reads and writes
-individual records without loading the full dataset, supports concurrent
-readers, and provides crash-safe transactions.  For anything beyond a small
-configuration file, LMDB is dramatically faster and more robust.
+and rewriting the whole file on every save.  Pickle files are typically more
+space-efficient since they have no page overhead or free-space tracking.
+LMDB reads and writes individual records without loading the full dataset,
+supports concurrent readers, and provides crash-safe transactions.  For
+anything beyond a small configuration file, LMDB is dramatically faster
+and more robust.
 
 **Summary**
 
