@@ -116,6 +116,181 @@ also used to store regular key-value pairs — do not mix named databases with
 application keys in the main database.
 
 
+Cursors & iteration
+++++++++++++++++++++
+
+A :py:class:`Cursor` provides fine-grained navigation over the key-value pairs
+in a database.  Cursors are created from a transaction and share its lifetime.
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            # use the cursor ...
+
+Full scan
+#########
+
+Iterate every key-value pair in the database:
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            for key, value in cur.iternext():
+                print(key, value)
+
+:py:meth:`~Cursor.iternext` starts from the first key if the cursor is
+unpositioned, or from the current position otherwise.  Use
+:py:meth:`~Cursor.iterprev` for reverse iteration (starts from the last key):
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            for key, value in cur.iterprev():
+                print(key, value)        # last key first
+
+The ``keys`` and ``values`` parameters control what is yielded.  Passing
+``values=False`` avoids touching value data, which can be faster when you only
+need keys:
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            for key in cur.iternext(values=False):
+                print(key)
+
+Range queries
+#############
+
+:py:meth:`~Cursor.set_range` seeks to the first key **greater than or equal
+to** the given key, enabling range scans and prefix scans:
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            # Iterate all keys from b'order-100' onward:
+            if cur.set_range(b'order-100'):
+                for key, value in cur.iternext():
+                    print(key, value)
+
+For prefix scanning, combine ``set_range`` with a key check:
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            prefix = b'user:'
+            if cur.set_range(prefix):
+                for key, value in cur.iternext():
+                    if not key.startswith(prefix):
+                        break
+                    print(key, value)
+
+Exact lookup
+############
+
+:py:meth:`~Cursor.set_key` seeks to an exact key.  It returns ``True`` if the
+key exists, ``False`` otherwise.  :py:meth:`~Cursor.get` is a convenience
+wrapper that returns the value directly (or a default):
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            if cur.set_key(b'mykey'):
+                print(cur.value())     # the value
+
+            # Or more concisely via Transaction.get():
+            val = txn.get(b'mykey')    # returns None if missing
+
+Batch reads
+###########
+
+:py:meth:`~Cursor.getmulti` looks up multiple keys in a single call, returning
+a list of ``(key, value)`` tuples for each key found:
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            results = cur.getmulti([b'key1', b'key2', b'key3'])
+            for key, value in results:
+                print(key, value)
+
+Keys that do not exist are silently skipped.
+
+Batch writes
+############
+
+:py:meth:`~Cursor.putmulti` writes multiple records efficiently.  It returns
+a ``(consumed, added)`` tuple:
+
+.. code-block:: python
+
+    with env.begin(write=True) as txn:
+        with txn.cursor() as cur:
+            items = [(b'key1', b'val1'), (b'key2', b'val2')]
+            consumed, added = cur.putmulti(items)
+
+If the keys are in sorted order, pass ``append=True`` for a significant speed
+improvement — LMDB skips its internal search and appends directly:
+
+.. code-block:: python
+
+    with env.begin(write=True) as txn:
+        with txn.cursor() as cur:
+            sorted_items = sorted(items)
+            cur.putmulti(sorted_items, append=True)
+
+Cursor positioning
+##################
+
+Navigation methods like :py:meth:`~Cursor.first`, :py:meth:`~Cursor.last`,
+:py:meth:`~Cursor.next`, :py:meth:`~Cursor.prev`, :py:meth:`~Cursor.set_key`,
+and :py:meth:`~Cursor.set_range` all return ``True`` on success and ``False``
+when there is no matching element.  After a ``False`` return (or before any
+positioning call) the cursor is unpositioned — :py:meth:`~Cursor.key` and
+:py:meth:`~Cursor.value` return empty bytestrings.
+
+.. code-block:: python
+
+    with env.begin() as txn:
+        with txn.cursor() as cur:
+            cur.first()                # True (unless DB is empty)
+            print(cur.key())           # first key
+            print(cur.value())         # first value
+
+            cur.last()
+            print(cur.item())          # (last_key, last_value)
+
+            while cur.prev():          # walk backward from last
+                print(cur.key())
+
+Writing & deleting at the cursor
+################################
+
+:py:meth:`~Cursor.put` stores a record and positions the cursor on it.
+:py:meth:`~Cursor.delete` removes the current record and advances to the next.
+:py:meth:`~Cursor.replace` and :py:meth:`~Cursor.pop` combine a read and write
+in a single call:
+
+.. code-block:: python
+
+    with env.begin(write=True) as txn:
+        with txn.cursor() as cur:
+            cur.put(b'key', b'value')
+
+            # Overwrite, returning old value:
+            old = cur.replace(b'key', b'new_value')  # returns b'value'
+
+            # Fetch and delete in one step:
+            val = cur.pop(b'key')                     # returns b'new_value'
+
+
 Duplicate-sort databases
 ++++++++++++++++++++++++
 
