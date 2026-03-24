@@ -268,6 +268,7 @@ setup(
         "Topic :: Database",
         "Topic :: Database :: Database Engines/Servers",
     ],
+    python_requires='>=3.9',
     ext_package='lmdb',
     ext_modules=ext_modules,
     install_requires=install_requires,
