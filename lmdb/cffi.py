@@ -1503,8 +1503,8 @@ class Transaction(object):
             :py:class:`Environment` was opened with ``readonly=True``.
 
         `buffers`:
-            If ``True``, indicates :py:func:`buffer` objects should be yielded
-            instead of bytestrings. This setting applies to the
+            If ``True``, indicates :py:func:`memoryview` objects should be
+            yielded instead of bytestrings. This setting applies to the
             :py:class:`Transaction` instance itself and any :py:class:`Cursors
             <Cursor>` created within the transaction.
 
