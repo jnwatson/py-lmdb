@@ -1,18 +1,21 @@
-## 2026-03-19 2.1.1
+2026-03-19 2.1.1
+################
 
 - Fix false `MDB_CORRUPTED` error when overwriting values larger than the page
     size (overflow/bigdata values) with `txn.put(key, value, overwrite=True)`.
     Two hardening checks from 2.1.0 did not account for `F_BIGDATA` nodes where
     `NODEDSZ()` returns the logical data size, not the on-page size. (#431)
 
-## 2026-03-19 2.1.0
+2026-03-19 2.1.0
+################
 
 **Security release.** All users who open LMDB databases from untrusted or
 potentially-tampered sources should upgrade immediately. Applications that only
 open databases they created themselves are not at risk, but upgrading is still
 recommended for defense-in-depth.
 
-### Security fixes
+Security fixes
+--------------
 
 The bundled LMDB 0.9.35 trusts many on-disk fields without validation. A
 crafted `data.mdb` file can exploit this to crash the process, read arbitrary
@@ -56,7 +59,8 @@ patches to address them.
     - Reject meta page numbers (0, 1) as B-tree roots.
     - Validate `md_depth <= CURSOR_STACK` to prevent stack buffer overrun.
 
-### Bug fixes
+Bug fixes
+---------
 
 - Cross-thread write transactions now block instead of raising
     `lmdb.Error("Attempt to operate on closed/deleted/dropped object.")`.
@@ -66,18 +70,21 @@ patches to address them.
     `mdb_txn_begin` for write transactions, allowing another thread to
     block until the first commits. (#427, #428)
 
-### Other
+Other
+-----
 
 - Refactored `setup.py` patch application into a single loop with a shared
     patch list, replacing duplicated `os.system()` blocks.
 
-## 2026-03-17 2.0.0
+2026-03-17 2.0.0
+################
 
 This is the largest py-lmdb release in years, made possible by a new coding
 partner: Claude (Anthropic). Nearly every change below was co-authored by
 Claude, turning months of backlogged issues into a week of focused work.
 
-### Potentially breaking changes
+Potentially breaking changes
+----------------------------
 
 - **Thread-safety overhaul (#180).** Environment.close(), Transaction.abort(),
     Transaction.commit(), and cursor operations are now serialized with locks
@@ -95,7 +102,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     supported. Python 2 compatibility shims have been removed from the
     codebase.
 
-### New features
+New features
+------------
 
 - PEP 561 type stubs (py.typed) are now shipped (#257). IDEs and type
     checkers will pick up lmdb's types automatically.
@@ -105,7 +113,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     up in profiles for workloads with many short-lived transactions.
     Contributed by @ltfish (#421).
 
-### Bug fixes
+Bug fixes
+---------
 
 - Fix memory safety issues across cpython and CFFI implementations (#420):
     multiple reference count leaks in cpython.c (env_readers_callback,
@@ -126,7 +135,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Release GIL during mdb_env_close (#418) so the event loop isn't blocked
     while msync/fsync runs on large writemap databases.
 
-### Other
+Other
+-----
 
 - Comprehensive test suite for lmdb.tool (#148).
 
@@ -134,11 +144,13 @@ Claude, turning months of backlogged issues into a week of focused work.
 
 - Fix pyright errors and remove Python 2 compat code.
 
-## 2026-03-12 1.8.1
+2026-03-12 1.8.1
+################
 
 - CI Fix
 
-## 2026-03-12 1.8.0
+2026-03-12 1.8.0
+################
 
 - Update bundled LMDB from 0.9.33 to 0.9.35.
 
@@ -162,29 +174,35 @@ Claude, turning months of backlogged issues into a week of focused work.
 
 - CI-only: Fix PyPy wheel upload by adding auditwheel repair.
 
-## 2025-10-14 1.7.5
+2025-10-14 1.7.5
+################
 
 - CI-only: Fix generation of 3.14 binaries.
 
-## 2025-10-14 1.7.4 -- yanked
+2025-10-14 1.7.4 -- yanked
+##########################
 
 - CI-only: Generate Python 3.14 binaries.
 
-## 2025-07-15 1.7.3
+2025-07-15 1.7.3
+################
 
 - Fix CFFI build on some platforms by ensuring paths are absolute.
 
 - Correct CI badge URL in README.
 
-## 2025-07-10 1.7.2
+2025-07-10 1.7.2
+################
 
 - CI-only fix
 
-## 2025-07-09 1.7.1
+2025-07-09 1.7.1
+################
 
 - CI-only fix
 
-## 2025-07-09 1.7.0
+2025-07-09 1.7.0
+################
 
 - Rewrite CI to use cibuildwheel.
 
@@ -193,37 +211,45 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Prevent some accidental use of LMDB objects by child processes.
     Contributed by Callum Walker.
 
-## 2025-01-05 1.6.2
+2025-01-05 1.6.2
+################
 
 - CI-only fix.
 
-## 2025-01-05 1.6.1
+2025-01-05 1.6.1
+################
 
 - CI-only fix.
 
-## 2025-01-05 1.6.0
+2025-01-05 1.6.0
+################
 
 - Support for Python 3.13. Contributed by Miro Hrončok and Adam Williamson.
 
 - CI: Publish 3.13 binaries and Linux aarch64 wheels for multiple versions.
 
-## 2024-07-01 1.5.1
+2024-07-01 1.5.1
+################
 - CI-only fix.
 
-## 2024-06-30 1.5.0
+2024-06-30 1.5.0
+################
 - Add Python 3.12 binaries.
 
 - Update bundled LMDB to 0.9.31.
 
 - Remove Python 2.7 support.
 
-## 2022-04-04 v1.4.1
+2022-04-04 v1.4.1
+#################
 - Update CI to build manylinux binaries.
 
-## 2022-12-06 v1.4.0
+2022-12-06 v1.4.0
+#################
 - Add Python 3.11 support.
 
-## 2021-12-30 v1.3.0
+2021-12-30 v1.3.0
+#################
 - Add aarch64 architecture builds.  Contributed by odidev.
 
 - Add Python 3.10 support.
@@ -231,10 +257,12 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Fix crash relating to caching of transactions.  The 'max_spare_txns'
     parameter to Environment/open is currently ignored in cpython.
 
-## 2021-04-19 v1.2.1
+2021-04-19 v1.2.1
+#################
 - Resolve CI bug where non-Linux wheels were not being published to PyPI.
 
-## 2021-04-15 v1.2.0
+2021-04-15 v1.2.0
+#################
 - Update bundled LMDB to 0.9.29.
 
 - Add non-bundled testing to CI.
@@ -255,12 +283,14 @@ Claude, turning months of backlogged issues into a week of focused work.
 - CFFI implementation:  fix a bug in open_db in a read-only environment.
 
 
-## 2021-02-05 v1.1.1
+2021-02-05 v1.1.1
+#################
 - Dowgrade underlying LMDB to 0.9.26.  0.9.27 has a minor defect that will
     need to get resolved.
 
 
-## 2021-02-04 v1.1.0
+2021-02-04 v1.1.0
+#################
 - Migrate CI pipeline from Travis and AppVeyor to Github Actions.  Now
     includes comprehensive testing across 4 dimensions (OS, Python version,
     cpython/CFFI, pure/with mods).  Also includes publishing to PyPI.
@@ -273,7 +303,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Upgrade underlying LMDB to 0.9.27.
 
 
-## 2020-08-28 v1.0.0
+2020-08-28 v1.0.0
+#################
 - Start of new semantic versioning scheme.  This would be a minor version
     bump from the 0.99 release if it were semantically versioned.
 
@@ -283,7 +314,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     this module is built with LMDB_PURE environment variable set.
 
 
-## 2020-08-13 v0.99
+2020-08-13 v0.99
+################
 - Fix lmdb.tool encoding issues.
 
 - Fix -l lmdb invocation issue.
@@ -300,16 +332,18 @@ Claude, turning months of backlogged issues into a week of focused work.
     wasn't being used.
 
 
-## 2019-11-06 v0.98
+2019-11-06 v0.98
+################
 - Fix that a duplicate argument to a lmdb method would cause an assert.
 
-- Solaris needs ```#include "python.h"``` as soon as possible.  Fix
+- Solaris needs ``#include "python.h"`` as soon as possible.  Fix
     contributed by Jesús Cea.
 
 - Fix crash under debug cpython when mdb_cursor_open failed
 
 
-## 2019-08-11 v0.97
+2019-08-11 v0.97
+################
 
 - Fix a missed GIL unlock sequence.  Reported by ajschorr.
 
@@ -317,7 +351,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     de-code.
 
 
-## 2019-07-14 v0.96
+2019-07-14 v0.96
+################
 
 - First release under new maintainer, Nic Watson.
 
@@ -330,7 +365,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     with large values when the value isn't retrieved. Reported by Dan Patton.
 
 
-## 2019-06-08 v0.95
+2019-06-08 v0.95
+################
 
 - The minimum supported version of Python is now 2.7.
 
@@ -348,7 +384,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     reopening the environment. Fix contributed by Gareth Bult.
 
 
-## 2018-04-09 v0.94
+2018-04-09 v0.94
+################
 
 - CPython argument parsing now matches the behaviour of CFFI, and most sane
     Python APIs: a bool parameter is considered to be true if it is any truthy
@@ -361,7 +398,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Fixed several 2.7/3 bugs in command line tool.
 
 
-## 2017-07-16 v0.93
+2017-07-16 v0.93
+################
 
 - py-lmdb is now built with AppVeyor CI, providing early feedback on Windows
     build health. Egg and wheel artifacts are being generated, removing the need
@@ -384,14 +422,16 @@ Claude, turning months of backlogged issues into a week of focused work.
     LMDB. Support will appear in a future release.
 
 
-## 2016-10-17 v0.92
+2016-10-17 v0.92
+################
 
 - Changes to support __all__ caused the CPython module to fail to import at
     runtime on Python 3. This was hidden during testing as the CFFI module was
     successfully imported.
 
 
-## 2016-10-17 v0.91
+2016-10-17 v0.91
+################
 
 - The docstring for NotFoundError was clarified to indicate that it is
     not raised in normal circumstances.
@@ -446,9 +486,9 @@ Claude, turning months of backlogged issues into a week of focused work.
     contain the same names as on CFFI.
 
 - Both implementations were updated to remove lmdb.open() from __all__,
-    ensuring "from lmdb import *" does not shadow the builtin open(). The
+    ensuring ``from lmdb import *`` does not shadow the builtin open(). The
     function can still be invoked using its fully qualified name, and the alias
-    "Environment" may be used when "from lmdb import *" is used. Reported by
+    "Environment" may be used when ``from lmdb import *`` is used. Reported by
     Alexander Zhukov.
 
 - The CPython extension exported BadRSlotError, instead of BadRslotError. The
@@ -458,13 +498,15 @@ Claude, turning months of backlogged issues into a week of focused work.
     integerkey=True flags. Based on a patch by Jonathan Heyman.
 
 
-## 2016-07-11 v0.90
+2016-07-11 v0.90
+################
 
 - This release was deleted from PyPI due to an erroneous pull request
     upgrading the bundled LMDB to mdb.master.
 
 
-## 2016-02-12 v0.89
+2016-02-12 v0.89
+################
 
 - LMDB 0.9.18 is bundled.
 
@@ -473,7 +515,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     invoked manually. Reported by Kimikazu Kato.
 
 
-## 2016-01-24 v0.88
+2016-01-24 v0.88
+################
 
 - LMDB 0.9.17 is bundled.
 
@@ -482,7 +525,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Binary wheels are built for Python 3.5 Windows 32/64-bit.
 
 
-## 2015-08-11 v0.87
+2015-08-11 v0.87
+################
 
 - Environment.set_mapsize() was added to allow runtime adjustment of the
     environment map size.
@@ -496,7 +540,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     asynchronous IO loop.
 
 
-## 2015-06-07 v0.86
+2015-06-07 v0.86
+################
 
 - LMDB_FORCE_SYSTEM builds were broken by the GIL/page fault change. This
     release fixes the problem.
@@ -504,7 +549,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Various cosmetic fixes to documentation.
 
 
-## 2015-06-06 v0.85
+2015-06-06 v0.85
+################
 
 - New exception class: lmdb.BadDbiError.
 
@@ -542,7 +588,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     where the entire database does not fit in RAM.
 
 
-## 2014-09-22 v0.84
+2014-09-22 v0.84
+################
 
 - LMDB 0.9.14 is bundled.
 
@@ -550,7 +597,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     existed.
 
 
-## 2014-06-24 v0.83
+2014-06-24 v0.83
+################
 
 - LMDB 0.9.13 is bundled along with extra fixes from upstream Git.
 
@@ -570,7 +618,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Fixed crash in CFFI Cursor.putmulti().
 
 
-## 2014-05-26 v0.82
+2014-05-26 v0.82
+################
 
 - Both variants now implement max_spare_txns, reducing the cost of creating a
     read-only transaction 4x for an uncontended database and by up to 20x for
@@ -594,7 +643,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     significantly reduced.
 
 
-## 2014-04-26 v0.81
+2014-04-26 v0.81
+################
 
 - On Python 2.x the extension module would silently interpret Unicode
     instances as buffer objects, causing UCS-2/UCS-4 string data to end up in
@@ -609,7 +659,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - The extension module now builds under Python 3.4 on Windows.
 
 
-## 2014-04-21 v0.80
+2014-04-21 v0.80
+################
 
 - Both variants now build successfully as 32 bit / 64bit binaries on
     Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
@@ -624,7 +675,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     experimental at best, confusing at worst.
 
 
-## 2014-03-17 v0.79
+2014-03-17 v0.79
+################
 
 - CPython Cursor.delete() lacked dupdata argument, fixed.
 
@@ -647,7 +699,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - LMDB 0.9.11 is bundled along with extra fixes from upstream Git.
 
 
-## 2014-01-18 v0.78
+2014-01-18 v0.78
+################
 
 - Patch from bra-fsn to fix LMDB_LIBDIR.
 
@@ -665,7 +718,8 @@ Claude, turning months of backlogged issues into a week of focused work.
     performance without loss of sanity.
 
 
-## 2013-11-30 v0.77
+2013-11-30 v0.77
+################
 
 - Added Environment.max_key_size(), Environment.max_readers().
 
@@ -681,7 +735,8 @@ Claude, turning months of backlogged issues into a week of focused work.
 - Added Environment(meminit=...) option.
 
 
-## 2013-10-28 v0.76
+2013-10-28 v0.76
+################
 
 - Added support for Environment(..., readahead=False).
 

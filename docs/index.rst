@@ -1277,7 +1277,6 @@ ChangeLog
 +++++++++
 
 .. include:: ../ChangeLog
-    :literal:
 
 
 License
