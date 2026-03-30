@@ -1,3 +1,59 @@
+2026-03-29 2.2.0
+#################
+
+New features
+------------
+
+- New ``lmdb.aio`` module providing asyncio support with
+    ``AsyncEnvironment`` and ``AsyncTransaction``. (#434)
+
+- ``Environment.dbs()`` lists all named databases in an environment.
+    (#253, #438)
+
+- ``Cursor.getmulti()`` accepts ``values=False`` for batch key-existence
+    checks without fetching values. (#435)
+
+- ``Transaction.stat()`` now defaults to the main database when no ``db``
+    argument is given. (#366, #439)
+
+- ``Environment.set_mapsize()`` now safely invalidates open transactions
+    and cursors before remapping, preventing use-after-free crashes. (#443)
+
+- Enable sparse files on Windows so NTFS does not preallocate the full
+    ``map_size`` on disk. (#444)
+
+Bug fixes
+---------
+
+- Fix type stubs: return types now use ``Union[bytes, memoryview]`` to
+    reflect the ``buffers=`` parameter, and ``dbs()`` is included. (#448, #449)
+
+- Declare ``python_requires='>=3.9'`` so pip skips this package on
+    Python 2. (#447)
+
+Documentation
+-------------
+
+- Modernize documentation for Python 3 and current project state. (#436)
+
+- Add API reference for ``lmdb.aio`` module. (#440)
+
+- Document fork safety and multiprocessing guidance. (#441)
+
+- Document duplicate-sort (dupsort) databases. (#442)
+
+- Document cursor iteration and navigation patterns. (#445)
+
+- Add "When to use py-lmdb" comparison section. (#446)
+
+- Render ChangeLog as native HTML instead of a code block. (#451)
+
+Other
+-----
+
+- Add LMDB data layout validation tests and patched/pure equivalence
+    checks. (#433)
+
 2026-03-19 2.1.1
 ################
 
