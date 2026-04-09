@@ -1216,6 +1216,8 @@ db_flags(DbObject *self, PyObject *args, PyObject *kwds)
     }
 
     dct = PyDict_New();
+    if(! dct)
+        return NULL;
     f = self->flags;
     dict_set_bool(dct, "reverse_key", f & MDB_REVERSEKEY);
     dict_set_bool(dct, "dupsort", f & MDB_DUPSORT);
@@ -1825,6 +1827,8 @@ env_flags(EnvObject *self, PyObject *Py_UNUSED(ignored))
     }
 
     dct = PyDict_New();
+    if(! dct)
+        return NULL;
     dict_set_bool(dct, "subdir", !(flags & MDB_NOSUBDIR));
     dict_set_bool(dct, "readonly", flags & MDB_RDONLY);
     dict_set_bool(dct, "metasync", !(flags & MDB_NOMETASYNC));
@@ -2608,6 +2612,10 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     val_size = arg.dupfixed_bytes;
     if (!arg.keyfixed){ /* Init list */
         pylist = PyList_New(0);
+        if(! pylist) {
+            Py_DECREF(iter);
+            return NULL;
+        }
     }
     first = true;
     while((item = PyIter_Next(iter))) {
@@ -2716,7 +2724,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                             } else {
                                 Py_XDECREF(val);
                                 Py_XDECREF(tup);
-                                Py_DECREF(key);
+                                Py_XDECREF(key);
                                 goto failiter;
                             }
                         }
