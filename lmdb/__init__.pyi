@@ -268,4 +268,37 @@ class Cursor:
         self, k: Buffer, reverse: bool
     ) -> Iterator[tuple[_Val, _Val]]: ...
 
-__all__: list[str]
+__all__ = [
+    "Cursor",
+    "Environment",
+    "Transaction",
+    "_Database",
+    "enable_drop_gil",
+    "version",
+    "BadDbiError",
+    "BadRslotError",
+    "BadTxnError",
+    "BadValsizeError",
+    "CorruptedError",
+    "CursorFullError",
+    "DbsFullError",
+    "DiskError",
+    "Error",
+    "IncompatibleError",
+    "InvalidError",
+    "InvalidParameterError",
+    "KeyExistsError",
+    "LockError",
+    "MapFullError",
+    "MapResizedError",
+    "MemoryError",
+    "NotFoundError",
+    "PageFullError",
+    "PageNotFoundError",
+    "PanicError",
+    "ReadersFullError",
+    "ReadonlyError",
+    "TlsFullError",
+    "TxnFullError",
+    "VersionMismatchError",
+]
