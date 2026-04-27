@@ -539,9 +539,6 @@ class Some_LMDB_Resource_That_Was_Deleted_Or_Closed:
     of a native handle to ensure the handle is still valid prior to calling
     LMDB, or doing no crash-safety checking at all.
     """
-    def __nonzero__(self):
-        return 0
-
     def __bool__(self):
         return False
 
