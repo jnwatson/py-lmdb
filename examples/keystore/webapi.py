@@ -1,5 +1,4 @@
 
-from __future__ import absolute_import
 import pkg_resources
 import keystore.web
 import twisted.web.server

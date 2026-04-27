@@ -27,7 +27,6 @@ the corruption instead of crashing.  They must be skipped when
 running against unpatched LMDB (pure or system), since the crashes are real.
 """
 
-from __future__ import absolute_import
 import os
 import struct
 import unittest

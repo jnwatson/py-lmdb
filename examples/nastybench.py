@@ -10,19 +10,19 @@ import tempfile
 import lmdb
 
 
-val = ' ' * 100
+val = b' ' * 100
 MAX_KEYS = int(1e6)
 
 t0 = time()
 
-urandom = file('/dev/urandom', 'rb', 1048576).read
+urandom = open('/dev/urandom', 'rb', 1048576).read
 
 keys = set()
 while len(keys) < MAX_KEYS:
-    for _ in xrange(min(1000, MAX_KEYS - len(keys))):
+    for _ in range(min(1000, MAX_KEYS - len(keys))):
         keys.add(urandom(16))
 
-print 'make %d keys in %.2fsec' % (len(keys), time() - t0)
+print('make %d keys in %.2fsec' % (len(keys), time() - t0))
 keys = list(keys)
 
 if os.path.exists('/ram'):
@@ -36,23 +36,23 @@ if os.path.exists(DB_PATH):
 env = lmdb.open(DB_PATH, map_size=1048576 * 1024,
     metasync=False, sync=False, map_async=True)
 
-nextkey = iter(keys).next
+nextkey = iter(keys).__next__
 run = True
 while run:
     with env.begin(write=True) as txn:
         try:
-            for _ in xrange(10000):
+            for _ in range(10000):
                 txn.put(nextkey(), val)
         except StopIteration:
             run = False
 
 d = time() - t0
 env.sync(True)
-print 'insert %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys) / d)
+print('insert %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys) / d))
 
 
 
-nextkey = iter(keys).next
+nextkey = iter(keys).__next__
 t0 = time()
 
 with env.begin() as txn:
@@ -63,10 +63,10 @@ with env.begin() as txn:
         pass
 
 d = time() - t0
-print 'random lookup %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
+print('random lookup %d keys in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d))
 
 
-nextkey = iter(keys).next
+nextkey = iter(keys).__next__
 t0 = time()
 
 with env.begin(buffers=True) as txn:
@@ -77,10 +77,10 @@ with env.begin(buffers=True) as txn:
         pass
 
 d = time() - t0
-print 'random lookup %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
+print('random lookup %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d))
 
 
-nextkey = iter(keys).next
+nextkey = iter(keys).__next__
 t0 = time()
 
 with env.begin(buffers=True) as txn:
@@ -91,15 +91,15 @@ with env.begin(buffers=True) as txn:
         pass
 
 d = time() - t0
-print 'random lookup+hash %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
+print('random lookup+hash %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d))
 
 
 
-nextkey = iter(keys).next
+nextkey = iter(keys).__next__
 t0 = time()
 
 with env.begin(buffers=True) as txn:
-    nextrec = txn.cursor().iternext().next
+    nextrec = txn.cursor().iternext().__next__
     try:
         while 1:
             nextrec()
@@ -107,4 +107,4 @@ with env.begin(buffers=True) as txn:
         pass
 
 d = time() - t0
-print 'seq read %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d)
+print('seq read %d buffers in %.2fsec (%d/sec)' % (len(keys), d, len(keys)/d))

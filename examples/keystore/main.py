@@ -1,5 +1,4 @@
 
-from __future__ import absolute_import
 import webbrowser
 
 import twisted.internet.reactor

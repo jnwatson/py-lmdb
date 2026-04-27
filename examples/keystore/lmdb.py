@@ -1,5 +1,3 @@
-
-from __future__ import absolute_import
 import operator
 
 import twisted.internet.defer
@@ -9,7 +7,7 @@ import zope.interface
 import keystore.interfaces
 
 
-class LmdbKeyStoreSync(object):
+class LmdbKeyStoreSync:
     zope.interface.implements(keystore.interfaces.IKeyStoreSync)
     cursor = None
 
@@ -67,7 +65,7 @@ def _writer_task(env, func):
         return func(sync)
 
 
-class LmdbKeyStore(object):
+class LmdbKeyStore:
     zope.interface.implements(keystore.interfaces.IKeyStore)
 
     def __init__(self, reactor, pool, env):
@@ -89,7 +87,7 @@ class LmdbKeyStore(object):
     def _get_forward(self, sync, key, count, getter):
         positioned = sync.seek(key)
         out = []
-        for x in xrange(count):
+        for x in range(count):
             if not positioned:
                 break
             out.append(getter(sync))
@@ -101,7 +99,7 @@ class LmdbKeyStore(object):
         positioned = sync.seek(key)
         if not positioned:
             positioned = sync.last()
-        for x in xrange(count):
+        for x in range(count):
             if not positioned:
                 break
             out.append(sync.key)

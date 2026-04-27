@@ -20,8 +20,6 @@
 # <http://www.openldap.org/>.
 #
 
-from __future__ import absolute_import
-from __future__ import with_statement
 import os
 import sys
 import unittest
@@ -31,14 +29,13 @@ import testlib
 from testlib import B
 from testlib import OCT
 from testlib import INT_TYPES
-from testlib import UnicodeType
 
 import lmdb
 
 # Whether we have the patch that allows env.copy* to take a txn
 have_txn_patch = lmdb.version(subpatch=True)[3]  # type: ignore[call-arg]
 
-NO_READERS = UnicodeType('(no active readers)\n')
+NO_READERS = str('(no active readers)\n')
 
 try:
     PAGE_SIZE = os.sysconf(os.sysconf_names['SC_PAGE_SIZE'])
@@ -413,7 +410,7 @@ class InfoMethodsTest(unittest.TestCase):
     def test_path(self):
         path, env = testlib.temp_env()
         assert path == env.path()
-        assert isinstance(env.path(), UnicodeType)
+        assert isinstance(env.path(), str)
 
         env.close()
         self.assertRaises(Exception,
@@ -491,12 +488,12 @@ class InfoMethodsTest(unittest.TestCase):
     def test_readers(self):
         _, env = testlib.temp_env(max_spare_txns=0)
         r = env.readers()
-        assert isinstance(r, UnicodeType)
+        assert isinstance(r, str)
         assert r == NO_READERS
 
         rtxn = env.begin()
         r2 = env.readers()
-        assert isinstance(env.readers(), UnicodeType)
+        assert isinstance(env.readers(), str)
         assert env.readers() != r
 
         env.close()
@@ -799,7 +796,7 @@ class OpenDbTest(unittest.TestCase):
         _, env = testlib.temp_env()
         assert env.open_db(B('myindex')) is not None
         self.assertRaises(TypeError,
-            lambda: env.open_db(UnicodeType('myindex')))  # type: ignore[arg-type]
+            lambda: env.open_db(str('myindex')))  # type: ignore[arg-type]
 
     def test_sub_notxn(self):
         _, env = testlib.temp_env()

@@ -33,8 +33,6 @@ Usage:
     python tests/equiv_dump.py read <dir>      # Read existing DBs and dump to stdout
 """
 
-from __future__ import print_function
-
 import hashlib
 import os
 import sys

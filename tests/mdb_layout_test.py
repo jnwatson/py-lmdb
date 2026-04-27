@@ -32,7 +32,6 @@ All data sizes are derived from env.stat()['psize'] at runtime so the
 tests work correctly regardless of OS page size (4K, 16K, etc.).
 """
 
-from __future__ import absolute_import
 import unittest
 
 import pytest

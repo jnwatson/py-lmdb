@@ -58,14 +58,14 @@ def x():
     words.update([w.upper() for w in words])
     words.update([w[::-1] for w in words])
     words.update([w[::-1].upper() for w in words])
-    words.update(['-'.join(w) for w in words])
+    words.update([b'-'.join(w) for w in words])
     #words.update(['+'.join(w) for w in words])
     #words.update(['/'.join(w) for w in words])
     words = list(words)
     alllen = sum(len(w) for w in words)
     avglen = alllen  / len(words)
-    print 'permutate %d words avglen %d took %.2fsec' % (len(words), avglen, now()-t0)
-    print 'DB_PATH:', DB_PATH
+    print('permutate %d words avglen %d took %.2fsec' % (len(words), avglen, now()-t0))
+    print('DB_PATH:', DB_PATH)
 
     words_sorted = sorted(words)
     items = [(w, big or w) for w in words]
@@ -83,13 +83,13 @@ def x():
 
 
     st = env.stat()
-    print
-    print 'stat:', st
-    print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
+    print()
+    print('stat:', st)
+    print('k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
         ((2*alllen) / 1024., (2*alllen)/len(words),
          (st['psize'] * st['leaf_pages']) / 1024.,
-         (st['psize'] * st['leaf_pages']) / len(words))
-    print
+         (st['psize'] * st['leaf_pages']) / len(words)))
+    print()
 
 
     @case('enum (key, value) pairs')
@@ -110,7 +110,7 @@ def x():
             return sum(1 for _ in txn.cursor())
 
 
-    print
+    print()
 
 
     @case('rand lookup')
@@ -162,7 +162,7 @@ def x():
         return len(words)
 
 
-    print
+    print()
 
 
     @case('get+put')
@@ -201,7 +201,7 @@ def x():
         return len(words)
 
 
-    print
+    print()
 
 
     env = reopen_env()
@@ -258,7 +258,7 @@ def x():
         return len(words)
 
 
-    print
+    print()
 
 
     env = reopen_env()
@@ -288,12 +288,12 @@ def x():
         return len(words)
 
 
-    print
+    print()
     st = env.stat()
-    print 'stat:', st
-    print 'k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
+    print('stat:', st)
+    print('k+v size %.2fkb avg %d, on-disk size: %.2fkb avg %d' %\
         ((2*alllen) / 1024., (2*alllen)/len(words),
          (st['psize'] * st['leaf_pages']) / 1024.,
-         (st['psize'] * st['leaf_pages']) / len(words))
+         (st['psize'] * st['leaf_pages']) / len(words)))
 
 x()

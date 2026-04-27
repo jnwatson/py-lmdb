@@ -69,8 +69,6 @@ Basic tools for working with LMDB.
     watch: Show live environment statistics
 """
 
-from __future__ import absolute_import
-from __future__ import with_statement
 import array
 import collections
 import csv
@@ -368,7 +366,7 @@ def _find_diskstat(path):
                 return statpath
 
 
-class DiskStatter(object):
+class DiskStatter:
     FIELDS = (
         'reads',
         'reads_merged',

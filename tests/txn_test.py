@@ -29,7 +29,6 @@ import weakref
 import testlib
 from testlib import B
 from testlib import INT_TYPES
-from testlib import BytesType
 
 import lmdb
 
@@ -441,7 +440,7 @@ class GetTest(unittest.TestCase):
         _, env = testlib.temp_env()
         txn = env.begin()
         assert txn.get(B('a')) is None
-        assert txn.get(B('a'), default='default') is 'default'
+        assert txn.get(B('a'), default='default') == 'default'
 
     def test_empty_key(self):
         _, env = testlib.temp_env()
@@ -474,13 +473,13 @@ class GetTest(unittest.TestCase):
         _, env = testlib.temp_env()
         txn = env.begin(write=True)
         assert txn.put(B('a'), B('a'))
-        assert type(txn.get(B('a'))) is BytesType
+        assert type(txn.get(B('a'))) is bytes
 
     def test_buffers_yes(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=True, buffers=True)
         assert txn.put(B('a'), B('a'))
-        assert type(txn.get(B('a'))) is not BytesType
+        assert type(txn.get(B('a'))) is not bytes
 
     def test_dupsort(self):
         _, env = testlib.temp_env()
