@@ -145,85 +145,85 @@ class AsyncCursor(Generic[_VT_co]):
     #
     @overload
     async def iternext(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iternext(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iternext(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iternext_dup(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iternext_dup(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iternext_dup(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iternext_nodup(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iternext_nodup(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iternext_nodup(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iterprev(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iterprev(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iterprev_dup(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iterprev_dup(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev_dup(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iterprev_nodup(
-        self, *, key: Literal[True] = True, value: Literal[True] = True
+        self, *, key: Literal[True] = True, values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iterprev_nodup(
-        self, *, key: Literal[True] = True, value: Literal[False]
+        self, *, key: Literal[True] = True, values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev_nodup(
-        self, *, key: Literal[False], value: bool = True
+        self, *, key: Literal[False], values: bool = True
     ) -> list[_VT_co]: ...
 
     # proxied attributes
