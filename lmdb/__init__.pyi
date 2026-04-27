@@ -1,6 +1,7 @@
 from collections.abc import Iterable
 import os
 from typing import (
+    Final,
     Iterator,
     Literal,
     Optional,
@@ -128,6 +129,8 @@ class _Database:
 
 @final
 class Transaction:
+    env: Final[Environment]
+
     def __new__(
         cls,
         env: Environment,
@@ -171,6 +174,9 @@ class Transaction:
 
 @final
 class Cursor:
+    db: Final[_Database]
+    txn: Final[Transaction]
+
     def __new__(cls, db: _Database, txn: Transaction) -> Self: ...
     def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
