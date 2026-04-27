@@ -1,8 +1,11 @@
 from collections.abc import Iterable
-from typing import Final, Iterator, Literal, final, overload
+from typing import Final, Iterator, Literal, final, overload, type_check_only
 
 from _typeshed import StrOrBytesPath
-from typing_extensions import Buffer, Generic, Self, TypeVar
+from typing_extensions import Buffer, Generic, Self, TypeVar, TypedDict
+
+###
+# Stubs-only helpers
 
 _T = TypeVar("_T")
 
@@ -16,7 +19,48 @@ _VT_co = TypeVar(
     covariant=True,
 )
 
-__version__: str
+@type_check_only
+class _StatDict(TypedDict):
+    psize: int
+    depth: int
+    branch_pages: int
+    leaf_pages: int
+    overflow_pages: int
+    entries: int
+
+@type_check_only
+class _InfoDict(TypedDict):
+    map_addr: int
+    map_size: int
+    last_pgno: int
+    last_txnid: int
+    max_readers: int
+    num_readers: int
+
+@type_check_only
+class _EnvFlagsDict(TypedDict):
+    subdir: bool
+    readonly: bool
+    metasync: bool
+    sync: bool
+    map_async: bool
+    readahead: bool
+    writemap: bool
+    meminit: bool
+    lock: bool
+
+@type_check_only
+class _DbFlagsDict(TypedDict):
+    reverse_key: bool
+    dupsort: bool
+    integerkey: bool
+    integerdup: bool
+    dupfixed: bool
+
+###
+# Public API
+
+__version__: Final[str] = ...
 
 # Module-level functions
 
@@ -90,9 +134,9 @@ class Environment:
         self, fd: int, compact: bool = ..., txn: Transaction | None = ...
     ) -> None: ...
     def sync(self, force: bool = ...) -> None: ...
-    def stat(self) -> dict[str, int]: ...
-    def info(self) -> dict[str, int]: ...
-    def flags(self) -> dict[str, bool]: ...
+    def stat(self) -> _StatDict: ...
+    def info(self) -> _InfoDict: ...
+    def flags(self) -> _EnvFlagsDict: ...
     def max_key_size(self) -> int: ...
     def max_readers(self) -> int: ...
     def readers(self) -> str: ...
@@ -147,7 +191,7 @@ open = Environment
 
 @final
 class _Database:
-    def flags(self) -> dict[str, bool]: ...
+    def flags(self) -> _DbFlagsDict: ...
 
 @final
 class Transaction(Generic[_VT_co]):
@@ -186,7 +230,7 @@ class Transaction(Generic[_VT_co]):
     def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def id(self) -> int: ...
-    def stat(self, db: _Database | None = ...) -> dict[str, int]: ...
+    def stat(self, db: _Database | None = ...) -> _StatDict: ...
     def drop(self, db: _Database, delete: bool = ...) -> None: ...
     def commit(self) -> None: ...
     def abort(self) -> None: ...
