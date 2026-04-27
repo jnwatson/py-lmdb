@@ -1,16 +1,16 @@
-import sys
+from collections.abc import Iterable
+import os
 from typing import (
     Iterator,
+    Literal,
     Optional,
     TypeVar,
     Union,
+    final,
     overload,
 )
 
-if sys.version_info < (3, 12):
-    from typing_extensions import Buffer
-else:
-    from collections.abc import Buffer
+from typing_extensions import Buffer, Self
 
 _T = TypeVar("_T")
 
@@ -58,29 +58,30 @@ class DiskError(Error): ...
 
 # Core classes
 
+@final
 class Environment:
     readonly: bool
 
-    def __init__(
-        self,
-        path: str,
-        map_size: int = ...,
-        subdir: bool = ...,
-        readonly: bool = ...,
-        metasync: bool = ...,
-        sync: bool = ...,
-        map_async: bool = ...,
-        mode: int = ...,
-        create: bool = ...,
-        readahead: bool = ...,
-        writemap: bool = ...,
-        meminit: bool = ...,
-        max_readers: int = ...,
-        max_dbs: int = ...,
-        max_spare_txns: int = ...,
-        lock: bool = ...,
-    ) -> None: ...
-    def __enter__(self) -> Environment: ...
+    def __new__(
+        cls,
+        path: os.PathLike[bytes],
+        map_size: int = 10485760,
+        subdir: bool = True,
+        readonly: bool = False,
+        metasync: bool = True,
+        sync: bool = True,
+        map_async: bool = False,
+        mode: int = 0o755,
+        create: bool = True,
+        readahead: bool = True,
+        writemap: bool = False,
+        meminit: bool = True,
+        max_readers: int = 126,
+        max_dbs: int = 0,
+        max_spare_txns: int = 1,
+        lock: bool = True,
+    ) -> Self: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def close(self) -> None: ...
     def path(self) -> str: ...
@@ -121,19 +122,21 @@ class Environment:
 
 open = Environment
 
+@final
 class _Database:
     def flags(self) -> dict[str, bool]: ...
 
+@final
 class Transaction:
-    def __init__(
-        self,
+    def __new__(
+        cls,
         env: Environment,
-        db: Optional[_Database] = ...,
-        parent: Optional[Transaction] = ...,
-        write: bool = ...,
-        buffers: bool = ...,
-    ) -> None: ...
-    def __enter__(self) -> Transaction: ...
+        db: _Database | None = None,
+        parent: Transaction | None = None,
+        write: bool = False,
+        buffers: bool = False,
+    ) -> Self: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def id(self) -> int: ...
     def stat(self, db: Optional[_Database] = ...) -> dict[str, int]: ...
@@ -146,7 +149,7 @@ class Transaction:
     ) -> Optional[_Val]: ...
     @overload
     def get(
-        self, key: Buffer, default: _T = ..., db: Optional[_Database] = ...
+        self, key: Buffer, default: _T, db: Optional[_Database] = ...
     ) -> Union[_Val, _T]: ...
     def put(
         self,
@@ -160,17 +163,16 @@ class Transaction:
     def replace(
         self, key: Buffer, value: Buffer, db: Optional[_Database] = ...
     ) -> Optional[_Val]: ...
-    def pop(
-        self, key: Buffer, db: Optional[_Database] = ...
-    ) -> Optional[_Val]: ...
+    def pop(self, key: Buffer, db: Optional[_Database] = ...) -> Optional[_Val]: ...
     def delete(
         self, key: Buffer, value: Buffer = ..., db: Optional[_Database] = ...
     ) -> bool: ...
     def cursor(self, db: Optional[_Database] = ...) -> Cursor: ...
 
+@final
 class Cursor:
-    def __init__(self, db: _Database, txn: Transaction) -> None: ...
-    def __enter__(self) -> Cursor: ...
+    def __new__(cls, db: _Database, txn: Transaction) -> Self: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def __iter__(self) -> Iterator[tuple[_Val, _Val]]: ...
     def close(self) -> None: ...
@@ -189,23 +191,58 @@ class Cursor:
     def prev(self) -> bool: ...
     def prev_dup(self) -> bool: ...
     def prev_nodup(self) -> bool: ...
-    def set_key(self, key: Buffer) -> bool: ...
+    def set_key(self, key: Buffer, /) -> bool: ...
     def set_key_dup(self, key: Buffer, value: Buffer) -> bool: ...
-    def set_range(self, key: Buffer) -> bool: ...
+    def set_range(self, key: Buffer, /) -> bool: ...
     def set_range_dup(self, key: Buffer, value: Buffer) -> bool: ...
 
     # Data operations
     @overload
     def get(self, key: Buffer, default: None = ...) -> Optional[_Val]: ...
     @overload
-    def get(self, key: Buffer, default: _T = ...) -> Union[_Val, _T]: ...
+    def get(self, key: Buffer, default: _T) -> Union[_Val, _T]: ...
+
+    #
+    @overload  # keyfixed=False (default), values=True (default)
     def getmulti(
         self,
-        keys: list[Buffer],
-        dupdata: bool = ...,
-        dupfixed_bytes: Optional[int] = ...,
-        keyfixed: bool = ...,
+        keys: Iterable[Buffer],
+        dupdata: bool = False,
+        dupfixed_bytes: int | None = None,
+        keyfixed: Literal[False] = False,
+        values: Literal[True] = True,
     ) -> list[tuple[_Val, _Val]]: ...
+    @overload  # keyfixed=False (default), values=False
+    def getmulti(
+        self,
+        keys: Iterable[Buffer],
+        dupdata: bool = False,
+        dupfixed_bytes: int | None = None,
+        keyfixed: Literal[False] = False,
+        *,
+        values: Literal[False],
+    ) -> list[_Val]: ...
+    @overload  # keyfixed=True  (positional)
+    def getmulti(
+        self,
+        keys: Iterable[Buffer],
+        dupdata: bool,
+        dupfixed_bytes: int,
+        keyfixed: Literal[True],
+        values: bool = True,
+    ) -> memoryview: ...
+    @overload  # keyfixed=True  (keyword)
+    def getmulti(
+        self,
+        keys: Iterable[Buffer],
+        dupdata: bool = False,
+        *,
+        dupfixed_bytes: int,
+        keyfixed: Literal[True],
+        values: bool = True,
+    ) -> memoryview: ...
+
+    #
     def put(
         self,
         key: Buffer,
@@ -227,46 +264,89 @@ class Cursor:
     def count(self) -> int: ...
 
     # Iteration
-    @overload
-    def iternext(self) -> Iterator[tuple[_Val, _Val]]: ...
+
+    #
     @overload
     def iternext(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
+        self, key: Literal[True] = True, value: Literal[True] = True
+    ) -> Iterator[tuple[_Val, _Val]]: ...
     @overload
-    def iternext_dup(self) -> Iterator[_Val]: ...
+    def iternext(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iternext(self, key: Literal[False], value: bool = True) -> Iterator[_Val]: ...
+
+    # keep in sync with `iternext`
     @overload
     def iternext_dup(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
+        self, key: Literal[True] = True, value: Literal[True] = True
+    ) -> Iterator[tuple[_Val, _Val]]: ...
     @overload
-    def iternext_nodup(self) -> Iterator[_Val]: ...
+    def iternext_dup(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iternext_dup(
+        self, key: Literal[False], value: bool = True
+    ) -> Iterator[_Val]: ...
+
+    # keep in sync with `iternext`
     @overload
     def iternext_nodup(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
+        self, key: Literal[True] = True, value: Literal[True] = True
+    ) -> Iterator[tuple[_Val, _Val]]: ...
     @overload
-    def iterprev(self) -> Iterator[tuple[_Val, _Val]]: ...
+    def iternext_nodup(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iternext_nodup(
+        self, key: Literal[False], value: bool = True
+    ) -> Iterator[_Val]: ...
+
+    # keep in sync with `iternext`
     @overload
     def iterprev(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
+        self, key: Literal[True] = True, value: Literal[True] = True
+    ) -> Iterator[tuple[_Val, _Val]]: ...
     @overload
-    def iterprev_dup(self) -> Iterator[_Val]: ...
+    def iterprev(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iterprev(self, key: Literal[False], value: bool = True) -> Iterator[_Val]: ...
+
+    # keep in sync with `iternext`
     @overload
     def iterprev_dup(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
+        self, key: Literal[True] = True, value: Literal[True] = True
+    ) -> Iterator[tuple[_Val, _Val]]: ...
     @overload
-    def iterprev_nodup(self) -> Iterator[_Val]: ...
+    def iterprev_dup(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iterprev_dup(
+        self, key: Literal[False], value: bool = True
+    ) -> Iterator[_Val]: ...
+
+    # keep in sync with `iternext`
     @overload
     def iterprev_nodup(
-        self, keys: bool = ..., values: bool = ...
-    ) -> Iterator[Union[_Val, tuple[_Val, _Val]]]: ...
-
-    def _iter_from(
-        self, k: Buffer, reverse: bool
+        self, key: Literal[True] = True, value: Literal[True] = True
     ) -> Iterator[tuple[_Val, _Val]]: ...
+    @overload
+    def iterprev_nodup(
+        self, key: Literal[True] = True, *, value: Literal[False]
+    ) -> Iterator[_Val]: ...
+    @overload
+    def iterprev_nodup(
+        self, key: Literal[False], value: bool = True
+    ) -> Iterator[_Val]: ...
+
+    #
+    def _iter_from(self, k: Buffer, reverse: bool) -> Iterator[tuple[_Val, _Val]]: ...
 
 __all__ = [
     "Cursor",
