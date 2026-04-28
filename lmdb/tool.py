@@ -398,8 +398,8 @@ class DiskStatter(object):
 
 def cmd_watch(opts, args):
     assert ENV is not None
-    info = {}  # type: dict
-    stat = {}  # type: dict
+    info = {}
+    stat = {}
 
     def window(func):
         history = collections.deque()
