@@ -77,7 +77,7 @@ class Error(Exception):
 
     what: Final[str]
     code: Final[int]
-    readon: Final[str]
+    reason: Final[str]
 
     def __init__(self, what: str, code: int = 0) -> None: ...
 
