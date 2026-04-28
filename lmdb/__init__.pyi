@@ -385,85 +385,85 @@ class Cursor(Generic[_VT_co]):
     #
     @overload
     def iternext(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co]]: ...
     @overload
     def iternext(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iternext(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     def iternext_dup(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co, _VT_co]]: ...
     @overload
     def iternext_dup(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iternext_dup(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     def iternext_nodup(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co, _VT_co]]: ...
     @overload
     def iternext_nodup(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iternext_nodup(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     def iterprev(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co, _VT_co]]: ...
     @overload
     def iterprev(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iterprev(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     def iterprev_dup(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co, _VT_co]]: ...
     @overload
     def iterprev_dup(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iterprev_dup(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     def iterprev_nodup(
-        self, key: Literal[True] = True, values: Literal[True] = True
+        self, keys: Literal[True] = True, values: Literal[True] = True
     ) -> Iterator[tuple[_VT_co, _VT_co]]: ...
     @overload
     def iterprev_nodup(
-        self, key: Literal[True] = True, *, values: Literal[False]
+        self, keys: Literal[True] = True, *, values: Literal[False]
     ) -> Iterator[_VT_co]: ...
     @overload
     def iterprev_nodup(
-        self, key: Literal[False], values: bool = True
+        self, keys: Literal[False], values: bool = True
     ) -> Iterator[_VT_co]: ...
 
     #
