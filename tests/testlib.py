@@ -20,7 +20,6 @@
 # <http://www.openldap.org/>.
 #
 
-from __future__ import absolute_import
 import atexit
 import gc
 import os
@@ -92,9 +91,6 @@ def debug_collect():
         for x in range(10):
             # PyPy doesn't collect objects with __del__ on first attempt.
             gc.collect()
-
-UnicodeType = str
-BytesType = bytes
 
 INT_TYPES = (int,)
 

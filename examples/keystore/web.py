@@ -1,5 +1,4 @@
 
-from __future__ import absolute_import
 import twisted.python.failure
 import twisted.python.log
 import twisted.web.http
@@ -7,14 +6,14 @@ import twisted.web.resource
 import twisted.web.server
 
 
-class Response(object):
+class Response:
     def __init__(self, body=None, headers=None, status=None):
         self.body = body
         self.headers = headers or {}
         self.status = status
 
 
-class DeferrableResourceRender(object):
+class DeferrableResourceRender:
     def __init__(self, resource_, request):
         self.resource = resource_
         self.request = request

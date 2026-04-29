@@ -29,9 +29,6 @@
 # Various efforts to cause Python-level leaks.
 #
 
-from __future__ import absolute_import
-from __future__ import with_statement
-
 import gc
 import sys
 import itertools
