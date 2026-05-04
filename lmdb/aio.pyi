@@ -9,7 +9,6 @@ from typing_extensions import Buffer, Generic, Self, TypedDict, TypeVar
 
 from . import Cursor, Environment, Transaction, _Database
 
-_T = TypeVar("_T")
 _DefaultT = TypeVar("_DefaultT", default=None)
 _T_co = TypeVar("_T_co", covariant=True)
 _VT_co = TypeVar(
@@ -44,7 +43,7 @@ class _AsyncContextWrapper(Generic[_T_co]):
     async def __aenter__(self) -> _T_co: ...
     async def __aexit__(
         self,
-        exc_type: type[BaseException],
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
         /,
@@ -86,7 +85,7 @@ class AsyncTransaction(Generic[_VT_co]):
     async def __aenter__(self) -> Self: ...
     async def __aexit__(
         self,
-        exc_type: type[BaseException],
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
         /,
@@ -128,8 +127,8 @@ class AsyncTransaction(Generic[_VT_co]):
     ) -> bool: ...
     async def replace(
         self, key: Buffer, value: Buffer, db: _Database | None = None
-    ) -> _VT_co: ...
-    async def pop(self, key: Buffer, db: _Database | None = None) -> _VT_co: ...
+    ) -> _VT_co | None: ...
+    async def pop(self, key: Buffer, db: _Database | None = None) -> _VT_co | None: ...
     async def delete(
         self, key: Buffer, value: Buffer = b"", db: _Database | None = None
     ) -> bool: ...
@@ -150,7 +149,7 @@ class AsyncCursor(Generic[_VT_co]):
     async def __aenter__(self) -> Self: ...
     async def __aexit__(
         self,
-        exc_type: type[BaseException],
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
         /,
@@ -167,35 +166,35 @@ class AsyncCursor(Generic[_VT_co]):
     ) -> list[_VT_co]: ...
     @overload
     async def iternext(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False], values: Literal[True] = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iternext_dup(
-        self, *, keys: Literal[True] = True, values: Literal[True] = True
+        self, *, keys: Literal[True], values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iternext_dup(
-        self, *, keys: Literal[True] = True, values: Literal[False]
+        self, *, keys: Literal[True], values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iternext_dup(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False] = False, values: Literal[True] = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iternext_nodup(
-        self, *, keys: Literal[True] = True, values: Literal[True] = True
+        self, *, keys: Literal[True] = True, values: Literal[True]
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iternext_nodup(
-        self, *, keys: Literal[True] = True, values: Literal[False]
+        self, *, keys: Literal[True] = True, values: Literal[False] = False
     ) -> list[_VT_co]: ...
     @overload
     async def iternext_nodup(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False], values: Literal[True]
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
@@ -209,35 +208,35 @@ class AsyncCursor(Generic[_VT_co]):
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False], values: Literal[True] = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iterprev_dup(
-        self, *, keys: Literal[True] = True, values: Literal[True] = True
+        self, *, keys: Literal[True], values: Literal[True] = True
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iterprev_dup(
-        self, *, keys: Literal[True] = True, values: Literal[False]
+        self, *, keys: Literal[True], values: Literal[False]
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev_dup(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False] = False, values: Literal[True] = True
     ) -> list[_VT_co]: ...
 
     # keep in sync with `iternext`
     @overload
     async def iterprev_nodup(
-        self, *, keys: Literal[True] = True, values: Literal[True] = True
+        self, *, keys: Literal[True] = True, values: Literal[True]
     ) -> list[tuple[_VT_co, _VT_co]]: ...
     @overload
     async def iterprev_nodup(
-        self, *, keys: Literal[True] = True, values: Literal[False]
+        self, *, keys: Literal[True] = True, values: Literal[False] = False
     ) -> list[_VT_co]: ...
     @overload
     async def iterprev_nodup(
-        self, *, keys: Literal[False], values: bool = True
+        self, *, keys: Literal[False], values: Literal[True]
     ) -> list[_VT_co]: ...
 
     # proxied attributes
@@ -266,9 +265,9 @@ class AsyncCursor(Generic[_VT_co]):
     async def next(self) -> bool: ...
     async def next_dup(self) -> bool: ...
     async def next_nodup(self) -> bool: ...
-    async def set_key(self, key: Buffer) -> bool: ...
+    async def set_key(self, key: Buffer, /) -> bool: ...
     async def set_key_dup(self, key: Buffer, value: Buffer) -> bool: ...
-    async def set_range(self, key: Buffer) -> bool: ...
+    async def set_range(self, key: Buffer, /) -> bool: ...
     async def set_range_dup(self, key: Buffer, value: Buffer) -> bool: ...
     async def delete(self, dupdata: bool = False) -> bool: ...
     async def count(self) -> int: ...
