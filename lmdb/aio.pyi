@@ -2,12 +2,20 @@ import asyncio
 from collections.abc import Awaitable, Generator, Iterable
 from concurrent.futures import Executor
 from types import TracebackType
-from typing import Any, Final, Literal, overload, type_check_only
+from typing import Any, Final, Literal, overload
 
 from _typeshed import Unused
-from typing_extensions import Buffer, Generic, Self, TypedDict, TypeVar
+from typing_extensions import Buffer, Generic, Self, TypeVar
 
-from . import Cursor, Environment, Transaction, _Database
+from . import (
+    Cursor,
+    Environment,
+    Transaction,
+    _Database,
+    _EnvFlagsDict,
+    _InfoDict,
+    _StatDict,
+)
 
 _DefaultT = TypeVar("_DefaultT", default=None)
 _T_co = TypeVar("_T_co", covariant=True)
@@ -17,15 +25,6 @@ _VT_co = TypeVar(
     default=bytes | memoryview,
     covariant=True,
 )
-
-@type_check_only
-class _StatDict(TypedDict):
-    psize: int
-    depth: int
-    branch_pages: int
-    leaf_pages: int
-    overflow_pages: int
-    entries: int
 
 ###
 
@@ -58,19 +57,45 @@ class AsyncEnvironment:
     def __init__(self, env: Environment, executor: Executor | None = None) -> None: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(self, *_exc: Unused) -> None: ...
-    def begin(self, *args, **kwargs) -> _AsyncContextWrapper[AsyncTransaction]: ...
+
+    #
+    @overload
+    def begin(
+        self,
+        db: _Database | None = None,
+        parent: Transaction | None = None,
+        write: bool = False,
+        buffers: Literal[False] = False,
+    ) -> _AsyncContextWrapper[AsyncTransaction[bytes]]: ...
+    @overload
+    def begin(
+        self,
+        db: _Database | None,
+        parent: Transaction | None,
+        write: bool,
+        buffers: Literal[True],
+    ) -> _AsyncContextWrapper[AsyncTransaction[memoryview]]: ...
+    @overload
+    def begin(
+        self,
+        db: _Database | None = None,
+        parent: Transaction | None = None,
+        write: bool = False,
+        *,
+        buffers: Literal[True],
+    ) -> _AsyncContextWrapper[AsyncTransaction[memoryview]]: ...
 
     # proxied sync methods
 
     def path(self) -> str: ...
     def max_key_size(self) -> int: ...
     def max_readers(self) -> int: ...
-    def flags(self) -> dict[str, bool]: ...
+    def flags(self) -> _EnvFlagsDict: ...
 
     # proxied async methods
 
-    async def stat(self) -> dict[str, int]: ...
-    async def info(self) -> dict[str, int]: ...
+    async def stat(self) -> _StatDict: ...
+    async def info(self) -> _InfoDict: ...
 
 class AsyncTransaction(Generic[_VT_co]):
     __slots__ = "_txn", "_executor", "_lock"
