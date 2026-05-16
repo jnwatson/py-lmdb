@@ -337,5 +337,32 @@ class AsyncConcurrencyTest(testlib.LmdbTest):
         run(go())
 
 
+class IntrospectionTest(unittest.TestCase):
+    """Proxied methods must be real class attributes (dir/inspect/stubtest)."""
+
+    def test_methods_are_real_attributes(self):
+        for cls, names in (
+            (lmdb.aio.AsyncEnvironment, ('path', 'stat', 'info')),
+            (lmdb.aio.AsyncTransaction, ('id', 'get', 'put', 'commit')),
+            (lmdb.aio.AsyncCursor, ('key', 'get', 'iternext', 'getmulti')),
+        ):
+            for name in names:
+                self.assertIn(name, dir(cls))
+                self.assertIn(name, vars(cls))
+
+    def test_async_method_metadata(self):
+        import inspect
+        get = vars(lmdb.aio.AsyncTransaction)['get']
+        self.assertTrue(inspect.iscoroutinefunction(get))
+        self.assertIs(get.__wrapped__, lmdb.Transaction.get)
+        self.assertEqual(get.__doc__, lmdb.Transaction.get.__doc__)
+
+    def test_passthrough_is_not_a_coroutine(self):
+        import inspect
+        path = vars(lmdb.aio.AsyncEnvironment)['path']
+        self.assertFalse(inspect.iscoroutinefunction(path))
+        self.assertIs(path.__wrapped__, lmdb.Environment.path)
+
+
 if __name__ == '__main__':
     unittest.main()
