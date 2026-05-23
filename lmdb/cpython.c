@@ -2011,6 +2011,15 @@ env_dbs(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     while((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
+        if(key.mv_size == SIZE_MAX) {
+            Py_DECREF(list);
+            mdb_cursor_close(cursor);
+            if(own_txn) {
+                mdb_txn_reset(txn);
+                self->spare_txn = txn;
+            }
+            return PyErr_NoMemory();
+        }
         name = malloc(key.mv_size + 1);
         if(! name) {
             Py_DECREF(list);
