@@ -591,10 +591,17 @@ dict_from_fields(void *o, const struct dict_field *fields)
 static PyObject *
 obj_from_val(MDB_val *val, int as_buffer)
 {
-    if(as_buffer) {
-        return PyMemoryView_FromMemory(val->mv_data, val->mv_size, PyBUF_READ);
+    if(val->mv_size > (size_t) PY_SSIZE_T_MAX) {
+        PyErr_SetString(PyExc_OverflowError,
+            "value too large to convert (corrupt database?)");
+        return NULL;
     }
-    return PyBytes_FromStringAndSize(val->mv_data, val->mv_size);
+    if(as_buffer) {
+        return PyMemoryView_FromMemory(val->mv_data,
+                                       (Py_ssize_t) val->mv_size, PyBUF_READ);
+    }
+    return PyBytes_FromStringAndSize(val->mv_data,
+                                     (Py_ssize_t) val->mv_size);
 }
 
 /* Track Py_buffer views acquired during argument parsing so they can be
@@ -2582,7 +2589,8 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         int values;
     } arg = {Py_None, 0, 0, 0, 1};
 
-    int i, as_buffer;
+    int as_buffer;
+    size_t i;
     PyObject *iter, *item, *tup, *key, *val;
     PyObject *pylist = NULL;
     MDB_cursor_op get_op, next_op;
@@ -2700,7 +2708,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                     }
                 } else {
                     /* dupfixed, MDB_GET_MULTIPLE returns batch, iterate values */
-                    int items = (int) self->val.mv_size/val_size;
+                    size_t items = self->val.mv_size / val_size;
                     if (first) {
                         key_size = (size_t) self->key.mv_size;
                         /* key_size is from a (possibly adversarial) on-disk
