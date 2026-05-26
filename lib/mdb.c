@@ -1647,9 +1647,12 @@ static char *
 mdb_dval(MDB_txn *txn, MDB_dbi dbi, MDB_val *data, char *buf)
 {
 	if (txn->mt_dbs[dbi].md_flags & MDB_DUPSORT) {
+		unsigned int len;
 		mdb_dkey(data, buf+1);
 		*buf = '[';
-		strcpy(buf + data->mv_size * 2 + 1, "]");
+		len = strlen(buf+1);
+		buf[len+1] = ']';
+		buf[len+2] = '\0';
 	} else
 		*buf = '\0';
 	return buf;
