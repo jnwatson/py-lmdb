@@ -82,6 +82,13 @@
 #endif
 
 
+/* Overflow-safe size_t arithmetic for sizes derived from on-disk values.
+ * LMDB files are routinely passed between hosts; any field read out of one
+ * (notably MDB_val::mv_size) must be assumed attacker-controlled. */
+#define SIZE_ADD_OVERFLOW(a, b) ((b) > SIZE_MAX - (a))
+#define SIZE_MUL_OVERFLOW(a, b) ((a) != 0 && (b) > SIZE_MAX / (a))
+
+
 /**
  * On Win32, Environment.copyfd() needs _get_osfmodule() from the C library,
  * except that function performs no input validation. So instead we import
@@ -2011,6 +2018,19 @@ env_dbs(EnvObject *self, PyObject *args, PyObject *kwds)
     }
 
     while((rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT)) == 0) {
+        if(SIZE_ADD_OVERFLOW(key.mv_size, 1)) {
+            /* Sub-database name from a (possibly adversarial) on-disk record
+             * is so large that the NUL-terminator allocation would wrap. */
+            Py_DECREF(list);
+            mdb_cursor_close(cursor);
+            if(own_txn) {
+                mdb_txn_reset(txn);
+                self->spare_txn = txn;
+            }
+            PyErr_SetString(PyExc_OverflowError,
+                "sub-database name size overflow (corrupt database?)");
+            return NULL;
+        }
         name = malloc(key.mv_size + 1);
         if(! name) {
             Py_DECREF(list);
@@ -2683,9 +2703,25 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                     int items = (int) self->val.mv_size/val_size;
                     if (first) {
                         key_size = (size_t) self->key.mv_size;
+                        /* key_size is from a (possibly adversarial) on-disk
+                         * record; guard size arithmetic against overflow. */
+                        if (SIZE_ADD_OVERFLOW(key_size, val_size)) {
+                            PyErr_SetString(PyExc_OverflowError,
+                                "key+value size overflow in getmulti "
+                                "(corrupt database?)");
+                            goto failiter;
+                        }
                         item_size = key_size + val_size;
                         if (arg.keyfixed) { /* Init structured array buffer */
+                            if (SIZE_MUL_OVERFLOW(buffer_size, item_size)) {
+                                PyErr_NoMemory();
+                                goto failiter;
+                            }
                             buffer = malloc(buffer_size * item_size);
+                            if (! buffer) {
+                                PyErr_NoMemory();
+                                goto failiter;
+                            }
                         }
                         first = false;
                     }
@@ -2696,8 +2732,27 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                             /* Add to array buffer */
                             char *k, *v;
                             if (buffer_pos >= buffer_size) { // Grow buffer
-                                buffer_size = buffer_size * 2;
-                                buffer = realloc(buffer, buffer_size * item_size);
+                                char *new_buffer;
+                                size_t new_size;
+                                if (buffer_size > SIZE_MAX / 2) {
+                                    PyErr_NoMemory();
+                                    goto failiter;
+                                }
+                                new_size = buffer_size * 2;
+                                if (SIZE_MUL_OVERFLOW(new_size, item_size)) {
+                                    PyErr_NoMemory();
+                                    goto failiter;
+                                }
+                                new_buffer = realloc(buffer,
+                                                     new_size * item_size);
+                                if (! new_buffer) {
+                                    /* Original `buffer` still valid; the
+                                     * failiter cleanup frees it. */
+                                    PyErr_NoMemory();
+                                    goto failiter;
+                                }
+                                buffer = new_buffer;
+                                buffer_size = new_size;
                             }
                             k = buffer + (buffer_pos * item_size);
                             v = k + key_size;
@@ -2751,13 +2806,21 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
     }
 
     if (arg.keyfixed){
-        size_t newsize = buffer_pos * item_size;
+        size_t newsize;
+        char *new_buffer;
         PyObject *owner, *mv;
-        buffer = realloc(buffer, newsize);
-        if(! buffer && newsize) {
+        if (SIZE_MUL_OVERFLOW(buffer_pos, item_size)) {
             PyErr_NoMemory();
             goto fail;
         }
+        newsize = buffer_pos * item_size;
+        new_buffer = realloc(buffer, newsize);
+        if(! new_buffer && newsize) {
+            /* Original buffer still allocated; fail cleanup frees it. */
+            PyErr_NoMemory();
+            goto fail;
+        }
+        buffer = new_buffer;
         /* Wrap the buffer in a bytes object that owns the memory.
          * PyBytes_FromStringAndSize copies the data, then we free
          * the original buffer. */
