@@ -188,6 +188,23 @@ class AsyncEnvironment:
 
     stat = _async_method(Environment.stat)
     info = _async_method(Environment.info)
+    close = _async_method(Environment.close)
+    copy = _async_method(Environment.copy)
+    copyfd = _async_method(Environment.copyfd)
+    sync = _async_method(Environment.sync)
+    readers = _async_method(Environment.readers)
+    reader_check = _async_method(Environment.reader_check)
+    set_mapsize = _async_method(Environment.set_mapsize)
+    open_db = _async_method(Environment.open_db)
+    dbs = _async_method(Environment.dbs)
+
+    # -- attribute fallback -----------------------------------------------
+
+    def __getattr__(self, name):
+        attr = getattr(self._env, name)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr
 
 
 class AsyncTransaction:
@@ -262,6 +279,14 @@ class AsyncTransaction:
     pop = _async_method_locked(Transaction.pop)
     delete = _async_method_locked(Transaction.delete)
 
+    # -- attribute fallback -----------------------------------------------
+
+    def __getattr__(self, name):
+        attr = getattr(self._txn, name)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr
+
 
 class AsyncCursor:
     """Async wrapper for :py:class:`lmdb.Cursor`.
@@ -331,3 +356,11 @@ class AsyncCursor:
     iterprev = _collect_locked(Cursor.iterprev)
     iterprev_dup = _collect_locked(Cursor.iterprev_dup)
     iterprev_nodup = _collect_locked(Cursor.iterprev_nodup)
+
+    # -- attribute fallback -----------------------------------------------
+
+    def __getattr__(self, name):
+        attr = getattr(self._cursor, name)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr
