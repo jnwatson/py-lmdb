@@ -104,6 +104,74 @@ jobs:
           git commit -m "debug #465 backtrace (${{ matrix.purity }})"
           git push -f origin HEAD:claude/465-logs-${{ matrix.purity }}
 
+  # Detector: find any munmap() that frees a region still containing a
+  # locked (robust) mutex -- i.e. the exact lifecycle bug behind #465 --
+  # and capture the culprit LMDB call site. Result pushed to a side branch.
+  aarch64-robust-detector:
+    name: aarch64 robust-list detector
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Build (robust ON, debug symbols)
+        env:
+          LMDB_FORCE_CPYTHON: 1
+          CFLAGS: "-g -O0 -fno-omit-frame-pointer"
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          python setup.py develop
+      - name: Build detector shim
+        run: |
+          cat > /tmp/rdetect.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <stdint.h>
+          #include <pthread.h>
+          #include <execinfo.h>
+          #define N 8192
+          static volatile uintptr_t slot[N]; static pid_t tids[N]; static volatile int lk;
+          static void L(void){while(__atomic_exchange_n(&lk,1,__ATOMIC_ACQUIRE));}
+          static void U(void){__atomic_store_n(&lk,0,__ATOMIC_RELEASE);}
+          static void add(void*p){uintptr_t v=(uintptr_t)p;L();for(int i=0;i<N;i++){int j=(v/64+i)%N;if(!slot[j]){slot[j]=v;tids[j]=(pid_t)pthread_self();break;}}U();}
+          static void del(void*p){uintptr_t v=(uintptr_t)p;L();for(int i=0;i<N;i++){int j=(v/64+i)%N;if(slot[j]==v){slot[j]=0;break;}}U();}
+          static int(*r_lock)(pthread_mutex_t*),(*r_try)(pthread_mutex_t*),(*r_un)(pthread_mutex_t*),(*r_mu)(void*,size_t);
+          __attribute__((constructor)) static void init(void){r_lock=dlsym(RTLD_NEXT,"pthread_mutex_lock");r_try=dlsym(RTLD_NEXT,"pthread_mutex_trylock");r_un=dlsym(RTLD_NEXT,"pthread_mutex_unlock");r_mu=dlsym(RTLD_NEXT,"munmap");}
+          int pthread_mutex_lock(pthread_mutex_t*m){int rc=r_lock(m);if(rc==0||rc==130)add(m);return rc;}
+          int pthread_mutex_trylock(pthread_mutex_t*m){int rc=r_try(m);if(rc==0||rc==130)add(m);return rc;}
+          int pthread_mutex_unlock(pthread_mutex_t*m){del(m);return r_un(m);}
+          int munmap(void*a,size_t n){uintptr_t lo=(uintptr_t)a,hi=lo+n;L();for(int i=0;i<N;i++){if(slot[i]&&slot[i]>=lo&&slot[i]<hi){U();fprintf(stderr,"\n*** HELD-MUTEX-UNMAP: munmap(%p,%zu) frees locked mutex %p tid=%d ***\n",a,n,(void*)slot[i],(int)tids[i]);void*bt[40];int k=backtrace(bt,40);backtrace_symbols_fd(bt,k,2);fprintf(stderr,"*** end ***\n");L();}}U();return r_mu(a,n);}
+          EOF
+          gcc -O0 -g -shared -fPIC /tmp/rdetect.c -o /tmp/rdetect.so -ldl
+      - name: Run suite under detector
+        run: |
+          LD_PRELOAD=/tmp/rdetect.so pytest tests/ -q -p no:cacheprovider \
+            > /tmp/det_stdout.txt 2> /tmp/det_stderr.txt || true
+          {
+            echo "## detections:"; grep -c "HELD-MUTEX-UNMAP" /tmp/det_stderr.txt || true
+            echo "## first detections + backtraces:"
+            grep -A24 "HELD-MUTEX-UNMAP" /tmp/det_stderr.txt | head -120
+            echo "## pytest tail:"; tail -15 /tmp/det_stdout.txt
+          } > /tmp/detector.txt
+          cat /tmp/detector.txt
+      - name: Push detector result to side branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/detector.txt /tmp/keep.txt
+          git checkout --orphan logs-detector
+          git reset
+          cp /tmp/keep.txt detector.txt
+          git add -f detector.txt
+          git commit -m "debug #465 robust-list detector output"
+          git push -f origin HEAD:claude/465-logs-detector
+
   # Fix hypothesis: the crash is glibc's robust process-shared mutex
   # walking a dangling robust-list entry left by a munmap'd lock file.
   # Building liblmdb with MDB_USE_ROBUST=0 removes the robust machinery.
