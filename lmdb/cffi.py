@@ -31,6 +31,7 @@ import inspect
 import os
 import sys
 import threading
+import time
 
 is_win32 = sys.platform == 'win32'
 if is_win32:
@@ -917,6 +918,26 @@ class Environment:
         <http://lmdb.tech/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
+            # Issue #465: LMDB requires all transactions closed before
+            # mdb_env_close, and a write transaction belongs to the OS
+            # thread that began it (MDB_NOTLS).  On Linux its robust
+            # process-shared write mutex can only be released by that
+            # thread.  If close() runs on a different thread while a write
+            # txn is still open, wait (bounded) for the owning thread to
+            # release it first, so the mutex is unlocked on its own thread
+            # before mdb_env_close unmaps the lock file; otherwise it is
+            # left dangling on the owning thread's robust list and a later
+            # begin() crashes inside pthread_mutex_lock on aarch64.  The
+            # wait MUST be outside _close_lock — the owning thread needs
+            # that lock to abort.  The lock then serialises the abort's
+            # unlock ahead of our mdb_env_close.
+            me = threading.get_ident()
+            spins = 0
+            while (self._write_txn_tid and self._write_txn_tid != me
+                   and spins < 5000):
+                time.sleep(0.001)
+                spins += 1
+
             with self._close_lock:
                 if not self._env:
                     return
