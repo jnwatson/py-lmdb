@@ -1,0 +1,22 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -281,9 +281,18 @@
+ #ifndef MDB_USE_ROBUST
+ /* Android currently lacks Robust Mutex support. So does glibc < 2.4. */
++/* py-lmdb (issue #465): also disable robust mutexes on Linux/aarch64.
++ * glibc's robust process-shared mutex bookkeeping leaves a dangling
++ * entry on the thread's robust list under py-lmdb's rapid environment
++ * open/close pattern (each env mmaps then munmaps its lock file).  A
++ * later mdb_txn_begin() then faults inside __pthread_mutex_lock_full
++ * while walking that list.  The corruption is layout-dependent and
++ * reliably crashes on aarch64 (x86_64 happens not to fault).  Non-
++ * robust mutexes avoid the robust list entirely. */
+ # if defined(MDB_USE_POSIX_MUTEX) && (defined(ANDROID) || \
++	defined(__aarch64__) || \
+ 	(defined(__GLIBC__) && GLIBC_VER < 0x020004))
+ #  define MDB_USE_ROBUST	0
+ # else
+ #  define MDB_USE_ROBUST	1
+ # endif
+ #endif /* !MDB_USE_ROBUST */

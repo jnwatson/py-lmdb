@@ -1,3 +1,20 @@
+Unreleased
+##########
+
+Fixes
+-----
+
+- Fix segmentation fault on Linux/aarch64 when opening an
+    ``Environment`` (e.g. ``test_max_readers``). glibc's robust
+    process-shared mutexes leave a dangling entry on the calling
+    thread's robust list under py-lmdb's environment open/close
+    pattern (each environment ``mmap``\ s then ``munmap``\ s its lock
+    file), causing a crash inside ``pthread_mutex_lock`` on a later
+    transaction begin. Robust mutexes are now disabled on aarch64,
+    matching the existing Android carve-out. The corruption is
+    layout-dependent and did not surface on x86_64. (#465)
+
+
 2026-03-29 2.2.0
 #################
 
