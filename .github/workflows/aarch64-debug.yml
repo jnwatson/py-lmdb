@@ -10,8 +10,15 @@ on:
 
 jobs:
   aarch64-gdb:
-    name: aarch64 backtrace
+    name: aarch64 backtrace (${{ matrix.purity }})
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        # 'patched' = bundled LMDB + py-lmdb patches; 'pure' = bundled
+        # LMDB source with NO py-lmdb patches.  If 'pure' also crashes,
+        # the bug is in upstream LMDB, not the patches.
+        purity: [patched, pure]
     steps:
       - uses: actions/checkout@v4
 
@@ -35,9 +42,43 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest cffi patch-ng setuptools
           sudo apt-get update && sudo apt-get install -y gdb
+          if [ "${{ matrix.purity }}" = "pure" ]; then
+            export LMDB_PURE=1
+          fi
           python setup.py develop
 
-      - name: Run isolated test_max_readers under gdb
+      - name: Write workload-identical reproducer
+        run: |
+          cat > /tmp/repro465.py <<'PY'
+          import lmdb, tempfile, shutil, sys
+          # Churn many open/close cycles (read + write txns), mirroring the
+          # ~100 tests that run before test_max_readers, then exercise the
+          # max_readers opens that crash.  Identical for patched and pure,
+          # so a crash here cannot be blamed on differing test skips.
+          def churn(n):
+              for _ in range(n):
+                  d = tempfile.mkdtemp(prefix='r465_')
+                  env = lmdb.open(d, max_dbs=10)
+                  with env.begin(write=True) as t:
+                      t.put(b'k', b'v')
+                  with env.begin() as t:
+                      t.get(b'k')
+                  env.close()
+                  shutil.rmtree(d, ignore_errors=True)
+          churn(200)
+          for val in (123, 234):
+              d = tempfile.mkdtemp(prefix='r465_')
+              env = lmdb.open(d, max_dbs=10, max_readers=val)
+              assert env.info()['max_readers'] == val
+              with env.begin() as t:
+                  t.get(b'k')
+              env.close()
+              shutil.rmtree(d, ignore_errors=True)
+          print("REPRO COMPLETED WITHOUT CRASH", flush=True)
+          PY
+          echo "wrote reproducer"
+
+      - name: Run reproducer under gdb (identical workload, patched vs pure)
         run: |
           gdb -q -batch \
             -ex 'set pagination off' \
@@ -48,9 +89,9 @@ jobs:
             -ex 'info registers' \
             -ex 'echo \n===== ALL THREADS =====\n' \
             -ex 'thread apply all bt' \
-            --args python -m pytest tests/env_test.py -k max_readers -x -q || true
+            --args python /tmp/repro465.py || true
 
-      - name: Run full suite under gdb (state-dependent repro)
+      - name: Run full suite under gdb (authoritative backtrace)
         run: |
           gdb -q -batch \
             -ex 'set pagination off' \
