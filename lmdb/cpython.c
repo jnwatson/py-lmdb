@@ -31,7 +31,6 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
-#include <time.h>
 
 #ifdef _WIN32
 #   define bool int
@@ -202,6 +201,14 @@ struct EnvObject {
     PyThread_type_lock active_ops_lock;
     /** 1 if a thread is blocked waiting for active_ops to reach 0. */
     int active_ops_waiter;
+    /** Lock used to block-wait in close() for another thread to release
+     *  an active write transaction (so its robust write mutex is unlocked
+     *  on the owning thread before the lock file is unmapped).  Allocated
+     *  in locked state; released by the owning thread after it aborts or
+     *  commits the write txn, when write_txn_waiter is set.  Issue #465. */
+    PyThread_type_lock write_txn_lock;
+    /** 1 if a thread is blocked in close() waiting for the write txn. */
+    int write_txn_waiter;
 };
 
 /** TransObject.flags bitfield values. */
@@ -709,6 +716,20 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
         } \
     } while(0)
 
+/* NOTIFY_WRITE_TXN_DONE: wake a thread blocked in env_clear waiting for
+ * this (owning) thread to release its write transaction.  MUST be called
+ * with the GIL held and only AFTER the write txn's mutex has been
+ * released (i.e. after mdb_txn_abort/commit completes), so the waiter
+ * does not unmap the lock file while the robust mutex is still held.
+ * Issue #465. */
+#define NOTIFY_WRITE_TXN_DONE(_env) \
+    do { \
+        if((_env)->write_txn_waiter) { \
+            (_env)->write_txn_waiter = 0; \
+            PyThread_release_lock((_env)->write_txn_lock); \
+        } \
+    } while(0)
+
 /* ENV_UNLOCKED: release GIL for an LMDB call, holding the env's active_ops
  * counter to prevent env_clear from closing the env underneath us.  The
  * counter is incremented while the GIL is still held (so env_clear can't
@@ -1058,6 +1079,8 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         mdb_txn_abort(txn);
         if(write && !parent) {
             env->write_txn_tid = 0;
+            /* Mutex released; wake any close() waiting on it.  #465. */
+            NOTIFY_WRITE_TXN_DONE(env);
         }
         return NULL;
     }
@@ -1299,19 +1322,6 @@ trans_dealloc(TransObject *self);
 static void
 txn_abort(MDB_txn *txn);
 
-/* Portable ~1ms sleep, used while waiting for another thread to release
- * a write transaction during env close (issue #465). */
-static void
-brief_sleep(void)
-{
-#ifdef _WIN32
-    Sleep(1);
-#else
-    struct timespec ts = {0, 1000000L};
-    nanosleep(&ts, NULL);
-#endif
-}
-
 static int
 env_clear(EnvObject *self)
 {
@@ -1347,19 +1357,19 @@ env_clear(EnvObject *self)
      * wrong thread) cannot release the mutex, and unmapping the lock
      * file underneath it strands a dangling entry on the owning thread's
      * robust list -> SIGSEGV in a later mdb_txn_begin on aarch64 (glibc
-     * tolerates this on x86_64).  Honor the contract: wait (bounded) for
-     * the owning thread to release the write txn so its mutex is
-     * unlocked on the correct thread before we tear the mapping down.
-     * Issue #465. */
-    {
-        unsigned long me = (unsigned long) PyThread_get_thread_ident();
-        int spins = 0;
-        while(self->write_txn_tid && self->write_txn_tid != me &&
-              spins++ < 5000) {
-            Py_BEGIN_ALLOW_THREADS
-            brief_sleep();
-            Py_END_ALLOW_THREADS
-        }
+     * tolerates this on x86_64).  Honor the contract: block until the
+     * owning thread releases the write txn (it signals write_txn_lock
+     * after its abort/commit unlocks the mutex on the correct thread),
+     * then tear the mapping down.  We check write_txn_tid under the GIL
+     * and set the waiter flag before releasing it, so the owning thread
+     * (which needs the GIL to run its teardown) cannot signal before we
+     * are registered -- no lost wakeup, no polling.  Issue #465. */
+    if(self->write_txn_tid &&
+       self->write_txn_tid != (unsigned long) PyThread_get_thread_ident()) {
+        self->write_txn_waiter = 1;
+        Py_BEGIN_ALLOW_THREADS
+        PyThread_acquire_lock(self->write_txn_lock, WAIT_LOCK);
+        Py_END_ALLOW_THREADS
     }
 
     /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */
@@ -1425,6 +1435,10 @@ env_dealloc(EnvObject *self)
     if(self->active_ops_lock) {
         PyThread_free_lock(self->active_ops_lock);
         self->active_ops_lock = NULL;
+    }
+    if(self->write_txn_lock) {
+        PyThread_free_lock(self->write_txn_lock);
+        self->write_txn_lock = NULL;
     }
     PyObject_Del(self);
 }
@@ -1514,6 +1528,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->write_txn_tid = 0;
     self->active_ops = 0;
     self->active_ops_waiter = 0;
+    self->write_txn_waiter = 0;
+    self->write_txn_lock = NULL;
     self->active_ops_lock = PyThread_allocate_lock();
     if(! self->active_ops_lock) {
         PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
@@ -1522,6 +1538,16 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     }
     /* Acquire immediately so waiters will block until signaled. */
     PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+
+    self->write_txn_lock = PyThread_allocate_lock();
+    if(! self->write_txn_lock) {
+        PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
+        Py_DECREF(self);
+        return NULL;
+    }
+    /* Acquire immediately so a close() waiter blocks until the owning
+     * thread releases its write transaction. */
+    PyThread_acquire_lock(self->write_txn_lock, NOWAIT_LOCK);
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -3952,6 +3978,9 @@ trans_dealloc(TransObject *self)
                     self->env->active_ops++;
                     txn_abort(txn);
                     ACTIVE_OPS_DEC(self->env);
+                    /* Mutex released on this (owning) thread; wake a
+                     * close() blocked waiting for it.  Issue #465. */
+                    NOTIFY_WRITE_TXN_DONE(self->env);
                 }
             }
         }
@@ -4052,6 +4081,9 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                 mdb_txn_abort(txn);
                 Py_END_ALLOW_THREADS
                 ACTIVE_OPS_DEC(env);
+                /* Mutex released on this (owning) thread; wake a close()
+                 * blocked waiting for it.  Issue #465. */
+                NOTIFY_WRITE_TXN_DONE(env);
             } else if(txn) {
                 mdb_txn_abort(txn);
             }
@@ -4100,6 +4132,9 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         rc = mdb_txn_commit(txn);
         Py_END_ALLOW_THREADS
         ACTIVE_OPS_DEC(env);
+        /* Mutex released on this (owning) thread; wake a close() blocked
+         * waiting for it.  Issue #465. */
+        NOTIFY_WRITE_TXN_DONE(env);
         Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
