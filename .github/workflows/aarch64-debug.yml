@@ -1,12 +1,17 @@
 # TEMPORARY debugging workflow for issue #465 (aarch64 segfault).
-# Runs the test suite on a native ARM runner under gdb to capture a
-# symbolized backtrace of the crash. Delete before merging PR #466.
+# Captures a symbolized gdb backtrace of the crash on a native ARM
+# runner and pushes a COMPACT artifact to a side branch
+# (claude/465-logs-<purity>) so it can be read via the GitHub API
+# without wading through full Actions logs. Delete before merging PR #466.
 name: aarch64 crash debug (issue #465)
 
 on:
   push:
     branches:
       - 'claude/**'
+
+permissions:
+  contents: write
 
 jobs:
   aarch64-gdb:
@@ -16,8 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         # 'patched' = bundled LMDB + py-lmdb patches; 'pure' = bundled
-        # LMDB source with NO py-lmdb patches.  If 'pure' also crashes,
-        # the bug is in upstream LMDB, not the patches.
+        # LMDB source with NO py-lmdb patches.
         purity: [patched, pure]
     steps:
       - uses: actions/checkout@v4
@@ -26,13 +30,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-
-      - name: System info
-        run: |
-          uname -a
-          getconf PAGE_SIZE
-          ldd --version | head -1
-          gcc --version | head -1
 
       - name: Install dependencies (with debug symbols)
         env:
@@ -47,57 +44,62 @@ jobs:
           fi
           python setup.py develop
 
-      - name: Write workload-identical reproducer
+      - name: Capture crash backtrace under gdb
         run: |
-          cat > /tmp/repro465.py <<'PY'
-          import lmdb, tempfile, shutil, sys
-          # Churn many open/close cycles (read + write txns), mirroring the
-          # ~100 tests that run before test_max_readers, then exercise the
-          # max_readers opens that crash.  Identical for patched and pure,
-          # so a crash here cannot be blamed on differing test skips.
-          def churn(n):
-              for _ in range(n):
-                  d = tempfile.mkdtemp(prefix='r465_')
-                  env = lmdb.open(d, max_dbs=10)
-                  with env.begin(write=True) as t:
-                      t.put(b'k', b'v')
-                  with env.begin() as t:
-                      t.get(b'k')
-                  env.close()
-                  shutil.rmtree(d, ignore_errors=True)
-          churn(200)
-          for val in (123, 234):
-              d = tempfile.mkdtemp(prefix='r465_')
-              env = lmdb.open(d, max_dbs=10, max_readers=val)
-              assert env.info()['max_readers'] == val
-              with env.begin() as t:
-                  t.get(b'k')
-              env.close()
-              shutil.rmtree(d, ignore_errors=True)
-          print("REPRO COMPLETED WITHOUT CRASH", flush=True)
-          PY
-          echo "wrote reproducer"
+          set -x
+          # gdb 'logging redirect on' sends gdb's OWN output (stop reason,
+          # backtraces) to the log file, while the inferior's stdout/stderr
+          # (pytest's voluminous output) goes to out.txt. This isolates the
+          # backtrace from the noise.
+          run_gdb () {
+            local logf="$1"; shift
+            local outf="$1"; shift
+            gdb -q -batch \
+              -ex 'set pagination off' \
+              -ex "set logging file $logf" \
+              -ex 'set logging overwrite on' \
+              -ex 'set logging redirect on' \
+              -ex 'set logging on' \
+              -ex 'run' \
+              -ex 'echo \n===== bt full =====\n' \
+              -ex 'bt full' \
+              -ex 'echo \n===== thread apply all bt =====\n' \
+              -ex 'thread apply all bt' \
+              -ex 'set logging off' \
+              --args "$@" > "$outf" 2>&1 || true
+          }
+          run_gdb /tmp/bt_suite.txt /tmp/out_suite.txt \
+            python -m pytest tests/ -q -p no:cacheprovider
 
-      - name: Run reproducer under gdb (identical workload, patched vs pure)
-        run: |
-          gdb -q -batch \
-            -ex 'set pagination off' \
-            -ex 'run' \
-            -ex 'echo \n===== BACKTRACE =====\n' \
-            -ex 'bt full' \
-            -ex 'echo \n===== REGISTERS =====\n' \
-            -ex 'info registers' \
-            -ex 'echo \n===== ALL THREADS =====\n' \
-            -ex 'thread apply all bt' \
-            --args python /tmp/repro465.py || true
+          ART=465-backtrace-${{ matrix.purity }}.txt
+          {
+            echo "############################################################"
+            echo "# issue #465 aarch64 backtrace  --  purity=${{ matrix.purity }}"
+            echo "############################################################"
+            echo "## SYSTEM"
+            uname -a; echo "PAGE_SIZE=$(getconf PAGE_SIZE)"
+            ldd --version | head -1
+            python -c "import lmdb,sys; print('lmdb',lmdb.__version__,'libversion',lmdb.version())"
+            echo
+            echo "## FULL SUITE -- GDB BACKTRACE (gdb's own output)"
+            cat /tmp/bt_suite.txt 2>/dev/null || echo "(no gdb log)"
+            echo
+            echo "## FULL SUITE -- PROGRAM OUTPUT TAIL (last test + faulthandler)"
+            tail -150 /tmp/out_suite.txt 2>/dev/null || echo "(no program output)"
+          } > "$ART"
+          echo "----- artifact preview -----"
+          head -80 "$ART"
 
-      - name: Run full suite under gdb (authoritative backtrace)
+      - name: Push backtrace artifact to side branch
         run: |
-          gdb -q -batch \
-            -ex 'set pagination off' \
-            -ex 'run' \
-            -ex 'echo \n===== BACKTRACE =====\n' \
-            -ex 'bt full' \
-            -ex 'echo \n===== ALL THREADS =====\n' \
-            -ex 'thread apply all bt' \
-            --args python -m pytest tests/ -q || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          ART=465-backtrace-${{ matrix.purity }}.txt
+          cp "$ART" /tmp/backtrace.txt
+          # Orphan branch containing ONLY the backtrace file.
+          git checkout --orphan logs-${{ matrix.purity }}
+          git reset            # unstage everything; working tree untouched
+          cp /tmp/backtrace.txt backtrace.txt
+          git add -f backtrace.txt
+          git commit -m "debug #465 backtrace (${{ matrix.purity }})"
+          git push -f origin HEAD:claude/465-logs-${{ matrix.purity }}
