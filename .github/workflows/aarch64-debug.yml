@@ -240,6 +240,82 @@ jobs:
           git commit -m "debug #465 robust-list walker (robust ON)"
           git push -f origin HEAD:claude/465-logs-walker
 
+  # Deep dump: decode the mutex __data (lock/owner/kind/list ptrs), the
+  # fault address, faulting instruction, and robust-list chain at the
+  # crash, with glibc debug symbols for exact source lines. This pins the
+  # precise glibc mechanism (glibc defect vs. bad mutex state from LMDB).
+  aarch64-gdb-dump:
+    name: aarch64 gdb deep dump
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Install gdb + glibc debug symbols
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdb libc6-dbg
+      - name: Build robust ON, debug
+        env: { LMDB_FORCE_CPYTHON: '1', CFLAGS: '-g -O0 -fno-omit-frame-pointer' }
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          sed -i '/disable-robust-mutex-aarch64/d' setup.py   # robust ON
+          python setup.py develop
+      - name: Crash + deep dump under gdb
+        run: |
+          cat > /tmp/cmds.gdb <<'EOF'
+          set pagination off
+          set print pretty on
+          set logging file /tmp/dump.txt
+          set logging overwrite on
+          set logging redirect on
+          set logging enabled on
+          run
+          echo \n===== FAULT =====\n
+          printf "pc=%#lx\n", $pc
+          x/3i $pc
+          printf "si_addr=%p\n", $_siginfo._sifields._sigfault.si_addr
+          echo \n===== REGISTERS =====\n
+          info registers
+          echo \n===== FRAME 0 (glibc) =====\n
+          frame 0
+          info locals
+          list
+          echo \n===== MUTEX __data (raw doublewords) =====\n
+          frame 1
+          printf "rmutex=%p ti=%p\n", rmutex, ti
+          echo word0=__lock|__count word1=__owner|__nusers word2=__kind|__spins word3=__list.__next word4=__list.__prev\n
+          x/5gx rmutex
+          echo \n===== robust_head.list (frame0 next) and its chain =====\n
+          frame 0
+          printf "next=%p\n", next
+          x/2gx next
+          echo \n===== BACKTRACE =====\n
+          bt
+          set logging enabled off
+          EOF
+          gdb -q -batch -x /tmp/cmds.gdb \
+            --args python -m pytest tests/ -q -p no:cacheprovider \
+            >/dev/null 2>&1 || true
+          echo "## glibc:"; ldd --version | head -1 > /tmp/out.txt
+          cat /tmp/dump.txt >> /tmp/out.txt 2>/dev/null || echo "(no dump)" >> /tmp/out.txt
+          cat /tmp/out.txt
+      - name: Push dump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/out.txt /tmp/keep.txt
+          git checkout --orphan logs-gdbdump
+          git reset
+          cp /tmp/keep.txt gdbdump.txt
+          git add -f gdbdump.txt
+          git commit -m "debug #465 gdb deep dump"
+          git push -f origin HEAD:claude/465-logs-gdbdump
+
   # Fix hypothesis: the crash is glibc's robust process-shared mutex
   # walking a dangling robust-list entry left by a munmap'd lock file.
   # Building liblmdb with MDB_USE_ROBUST=0 removes the robust machinery.
