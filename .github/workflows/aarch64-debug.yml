@@ -240,6 +240,96 @@ jobs:
           git commit -m "debug #465 robust-list walker (robust ON)"
           git push -f origin HEAD:claude/465-logs-walker
 
+  # Decisive glibc-vs-LMDB test: after every pthread_mutex_unlock, check
+  # whether the just-unlocked mutex is STILL on the thread's robust list.
+  # If it is, glibc's unlock failed to dequeue it -> a glibc defect (the
+  # robust-list head is then left dangling when LMDB munmaps the lock
+  # file, which is the #465 crash). Reports the offending call site.
+  aarch64-dequeue-check:
+    name: aarch64 unlock-dequeue check
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Build robust ON, debug
+        env: { LMDB_FORCE_CPYTHON: '1', CFLAGS: '-g -O0 -fno-omit-frame-pointer' }
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          sed -i '/disable-robust-mutex-aarch64/d' setup.py
+          python setup.py develop
+      - name: Build dequeue-check shim
+        run: |
+          cat > /tmp/deq.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <stdint.h>
+          #include <pthread.h>
+          #include <sys/syscall.h>
+          #include <execinfo.h>
+          /* __list sits at offset 24 within pthread_mutex_t on aarch64/glibc
+           * (confirmed by gdb: __lock|__count, __owner|__nusers,
+           *  __kind|__spins, then __list.__next at +24). */
+          #define LIST_OFF 24
+          struct rlh { void *list; long off; void *pending; };
+          static __thread int guard;
+          static int (*r_unlock)(pthread_mutex_t*);
+          static long hits=0;
+          __attribute__((constructor)) static void init(void){ r_unlock=dlsym(RTLD_NEXT,"pthread_mutex_unlock"); }
+          static int still_listed(void *target){
+            struct rlh *h=0; size_t l=0;
+            if (syscall(SYS_get_robust_list,0,&h,&l)||!h) return 0;
+            void *cur=h->list; int n=0;
+            while (cur && cur!=(void*)h && n++<4000){
+              if (cur==target) return 1;
+              cur=*(void**)cur;            /* __next is first field of __list */
+            }
+            return 0;
+          }
+          int pthread_mutex_unlock(pthread_mutex_t*m){
+            int rc=r_unlock(m);
+            if(!guard){ guard=1;
+              void *target=(char*)m+LIST_OFF;
+              if (still_listed(target)){
+                if(++hits<=8){
+                  fprintf(stderr,"\n*** UNLOCK DID NOT DEQUEUE: mutex %p still on robust list after pthread_mutex_unlock ***\n",(void*)m);
+                  void*bt[40]; int k=backtrace(bt,40); backtrace_symbols_fd(bt,k,2);
+                }
+              }
+              guard=0;
+            }
+            return rc;
+          }
+          EOF
+          gcc -O0 -g -shared -fPIC /tmp/deq.c -o /tmp/deq.so -ldl
+      - name: Run suite under dequeue check
+        run: |
+          LD_PRELOAD=/tmp/deq.so pytest tests/ -q -p no:cacheprovider \
+            >/tmp/d.out 2>/tmp/d.err || true
+          {
+            echo "## not-dequeued count:"; grep -c "DID NOT DEQUEUE" /tmp/d.err || true
+            echo "## first occurrences + backtraces:"
+            grep -A12 "DID NOT DEQUEUE" /tmp/d.err | head -90
+            echo "## pytest tail:"; tail -8 /tmp/d.out
+          } > /tmp/deq.txt
+          cat /tmp/deq.txt
+      - name: Push result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/deq.txt /tmp/keep.txt
+          git checkout --orphan logs-deq
+          git reset
+          cp /tmp/keep.txt dequeue.txt
+          git add -f dequeue.txt
+          git commit -m "debug #465 unlock-dequeue check"
+          git push -f origin HEAD:claude/465-logs-deq
+
   # Deep dump: decode the mutex __data (lock/owner/kind/list ptrs), the
   # fault address, faulting instruction, and robust-list chain at the
   # crash, with glibc debug symbols for exact source lines. This pins the
