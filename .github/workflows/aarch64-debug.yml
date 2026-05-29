@@ -1,0 +1,62 @@
+# TEMPORARY debugging workflow for issue #465 (aarch64 segfault).
+# Runs the test suite on a native ARM runner under gdb to capture a
+# symbolized backtrace of the crash. Delete before merging PR #466.
+name: aarch64 crash debug (issue #465)
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+
+jobs:
+  aarch64-gdb:
+    name: aarch64 backtrace
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: System info
+        run: |
+          uname -a
+          getconf PAGE_SIZE
+          ldd --version | head -1
+          gcc --version | head -1
+
+      - name: Install dependencies (with debug symbols)
+        env:
+          LMDB_FORCE_CPYTHON: 1
+          CFLAGS: "-g -O0 -fno-omit-frame-pointer"
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          sudo apt-get update && sudo apt-get install -y gdb
+          python setup.py develop
+
+      - name: Run isolated test_max_readers under gdb
+        run: |
+          gdb -q -batch \
+            -ex 'set pagination off' \
+            -ex 'run' \
+            -ex 'echo \n===== BACKTRACE =====\n' \
+            -ex 'bt full' \
+            -ex 'echo \n===== REGISTERS =====\n' \
+            -ex 'info registers' \
+            -ex 'echo \n===== ALL THREADS =====\n' \
+            -ex 'thread apply all bt' \
+            --args python -m pytest tests/env_test.py -k max_readers -x -q || true
+
+      - name: Run full suite under gdb (state-dependent repro)
+        run: |
+          gdb -q -batch \
+            -ex 'set pagination off' \
+            -ex 'run' \
+            -ex 'echo \n===== BACKTRACE =====\n' \
+            -ex 'bt full' \
+            -ex 'echo \n===== ALL THREADS =====\n' \
+            -ex 'thread apply all bt' \
+            --args python -m pytest tests/ -q || true
