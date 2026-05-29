@@ -240,6 +240,82 @@ jobs:
           git commit -m "debug #465 robust-list walker (robust ON)"
           git push -f origin HEAD:claude/465-logs-walker
 
+  # Stranding catcher: at every munmap, check whether the thread's
+  # robust_head.list points INTO the region being unmapped. This is
+  # layout-independent (it fires when the strand happens, regardless of
+  # whether the freed address is later reused) and names the exact
+  # env-close call site that leaves the robust list head dangling.
+  aarch64-strand-catcher:
+    name: aarch64 strand catcher
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Build robust ON, debug
+        env: { LMDB_FORCE_CPYTHON: '1', CFLAGS: '-g -O0 -fno-omit-frame-pointer' }
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          sed -i '/disable-robust-mutex-aarch64/d' setup.py
+          python setup.py develop
+      - name: Build strand-catcher shim
+        run: |
+          cat > /tmp/strand.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <stdint.h>
+          #include <sys/syscall.h>
+          #include <execinfo.h>
+          struct rlh { void *list; long off; void *pending; };
+          static int (*r_mu)(void*,size_t); static long hits=0;
+          __attribute__((constructor)) static void init(void){ r_mu=dlsym(RTLD_NEXT,"munmap"); }
+          int munmap(void*a,size_t n){
+            uintptr_t lo=(uintptr_t)a, hi=lo+n;
+            struct rlh *h=0; size_t l=0;
+            if (syscall(SYS_get_robust_list,0,&h,&l)==0 && h){
+              uintptr_t f=(uintptr_t)h->list;
+              if (h->list!=(void*)h && f>=lo && f<hi){
+                if(++hits<=8){
+                  fprintf(stderr,"\n*** STRAND: munmap(%p,%zu) frees region containing robust_head.list=%p ***\n",a,n,(void*)f);
+                  void*bt[40]; int k=backtrace(bt,40); backtrace_symbols_fd(bt,k,2);
+                }
+              }
+            }
+            return r_mu(a,n);
+          }
+          EOF
+          gcc -O0 -g -shared -fPIC /tmp/strand.c -o /tmp/strand.so -ldl
+      - name: Run suite x3 under strand catcher
+        run: |
+          : > /tmp/s.err
+          for r in 1 2 3; do
+            echo "=== run $r ===" >> /tmp/s.err
+            LD_PRELOAD=/tmp/strand.so pytest tests/ -q -p no:cacheprovider \
+              >>/tmp/s.out 2>>/tmp/s.err || true
+          done
+          {
+            echo "## strand count:"; grep -c "STRAND:" /tmp/s.err || true
+            echo "## occurrences + backtraces:"
+            grep -A14 "STRAND:" /tmp/s.err | head -120
+          } > /tmp/strand.txt
+          cat /tmp/strand.txt
+      - name: Push result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/strand.txt /tmp/keep.txt
+          git checkout --orphan logs-strand
+          git reset
+          cp /tmp/keep.txt strand.txt
+          git add -f strand.txt
+          git commit -m "debug #465 strand catcher"
+          git push -f origin HEAD:claude/465-logs-strand
+
   # Decisive glibc-vs-LMDB test: after every pthread_mutex_unlock, check
   # whether the just-unlocked mutex is STILL on the thread's robust list.
   # If it is, glibc's unlock failed to dequeue it -> a glibc defect (the
