@@ -103,3 +103,27 @@ jobs:
           git add -f backtrace.txt
           git commit -m "debug #465 backtrace (${{ matrix.purity }})"
           git push -f origin HEAD:claude/465-logs-${{ matrix.purity }}
+
+  # Fix hypothesis: the crash is glibc's robust process-shared mutex
+  # walking a dangling robust-list entry left by a munmap'd lock file.
+  # Building liblmdb with MDB_USE_ROBUST=0 removes the robust machinery.
+  # If this job goes GREEN, the root cause and fix are confirmed.
+  aarch64-robust0-fix-check:
+    name: aarch64 fix check (MDB_USE_ROBUST=0)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Build with MDB_USE_ROBUST=0
+        env:
+          LMDB_FORCE_CPYTHON: 1
+          CFLAGS: "-DMDB_USE_ROBUST=0"
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          python setup.py develop
+      - name: Run full suite (real pass/fail)
+        run: pytest tests/ -q
