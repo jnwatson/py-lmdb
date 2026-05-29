@@ -240,6 +240,59 @@ jobs:
           git commit -m "debug #465 robust-list walker (robust ON)"
           git push -f origin HEAD:claude/465-logs-walker
 
+  # Bisect which test seeds the corruption. Runs targeted subsets
+  # (several times each, since the crash is intermittent) and reports
+  # which subset segfaults. Narrows toward a deterministic reproducer.
+  aarch64-bisect:
+    name: aarch64 seeder bisection
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Build robust ON
+        env: { LMDB_FORCE_CPYTHON: '1' }
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          sed -i '/disable-robust-mutex-aarch64/d' setup.py
+          python setup.py develop
+      - name: Run subsets
+        run: |
+          run() { # name, N, pytest-args...
+            local name="$1"; local N="$2"; shift 2
+            local crashes=0
+            for i in $(seq 1 "$N"); do
+              python -m pytest "$@" -q -p no:cacheprovider >/dev/null 2>&1
+              rc=$?
+              # 139 = SIGSEGV; >128 = killed by signal
+              if [ $rc -gt 128 ]; then crashes=$((crashes+1)); fi
+            done
+            printf "%-40s %d/%d runs crashed (last rc=%d)\n" "$name" "$crashes" "$N" "$rc" | tee -a /tmp/bisect.txt
+          }
+          : > /tmp/bisect.txt
+          run "full suite"                      5 tests/
+          run "all EXCEPT crash_test"           5 tests/ --ignore=tests/crash_test.py
+          run "crash_test + env_test"           8 tests/crash_test.py tests/env_test.py
+          run "crash_test alone"               10 tests/crash_test.py
+          run "env_test alone"                 10 tests/env_test.py
+          run "cursor+cve+env"                  8 tests/cursor_test.py tests/cve_test.py tests/env_test.py
+          echo "=== summary ==="; cat /tmp/bisect.txt
+      - name: Push result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/bisect.txt /tmp/keep.txt
+          git checkout --orphan logs-bisect
+          git reset
+          cp /tmp/keep.txt bisect.txt
+          git add -f bisect.txt
+          git commit -m "debug #465 seeder bisection"
+          git push -f origin HEAD:claude/465-logs-bisect
+
   # Stranding catcher: at every munmap, check whether the thread's
   # robust_head.list points INTO the region being unmapped. This is
   # layout-independent (it fires when the strand happens, regardless of
