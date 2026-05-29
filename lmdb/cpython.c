@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #   define bool int
@@ -1298,6 +1299,19 @@ trans_dealloc(TransObject *self);
 static void
 txn_abort(MDB_txn *txn);
 
+/* Portable ~1ms sleep, used while waiting for another thread to release
+ * a write transaction during env close (issue #465). */
+static void
+brief_sleep(void)
+{
+#ifdef _WIN32
+    Sleep(1);
+#else
+    struct timespec ts = {0, 1000000L};
+    nanosleep(&ts, NULL);
+#endif
+}
+
 static int
 env_clear(EnvObject *self)
 {
@@ -1320,6 +1334,32 @@ env_clear(EnvObject *self)
         Py_END_ALLOW_THREADS
         /* Re-acquire so lock stays in locked state for next wait. */
         PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+    }
+
+    /* LMDB requires all transactions to be closed before mdb_env_close,
+     * and a write transaction belongs to the OS thread that began it
+     * (with MDB_NOTLS, lmdb.h: "serialize the write transactions in an
+     * OS thread, since LMDB's write locking is unaware of the user
+     * threads").  On Linux the write mutex is a robust process-shared
+     * pthread mutex linked into that thread's robust list, and can only
+     * be unlocked by that thread.  If another thread closes the env
+     * while a write txn is still open elsewhere, aborting it here (the
+     * wrong thread) cannot release the mutex, and unmapping the lock
+     * file underneath it strands a dangling entry on the owning thread's
+     * robust list -> SIGSEGV in a later mdb_txn_begin on aarch64 (glibc
+     * tolerates this on x86_64).  Honor the contract: wait (bounded) for
+     * the owning thread to release the write txn so its mutex is
+     * unlocked on the correct thread before we tear the mapping down.
+     * Issue #465. */
+    {
+        unsigned long me = (unsigned long) PyThread_get_thread_ident();
+        int spins = 0;
+        while(self->write_txn_tid && self->write_txn_tid != me &&
+              spins++ < 5000) {
+            Py_BEGIN_ALLOW_THREADS
+            brief_sleep();
+            Py_END_ALLOW_THREADS
+        }
     }
 
     /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */

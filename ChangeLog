@@ -4,15 +4,18 @@ Unreleased
 Fixes
 -----
 
-- Fix segmentation fault on Linux/aarch64 when opening an
-    ``Environment`` (e.g. ``test_max_readers``). glibc's robust
-    process-shared mutexes leave a dangling entry on the calling
-    thread's robust list under py-lmdb's environment open/close
-    pattern (each environment ``mmap``\ s then ``munmap``\ s its lock
-    file), causing a crash inside ``pthread_mutex_lock`` on a later
-    transaction begin. Robust mutexes are now disabled on aarch64,
-    matching the existing Android carve-out. The corruption is
-    layout-dependent and did not surface on x86_64. (#465)
+- Fix segmentation fault on Linux/aarch64 caused by closing an
+    ``Environment`` from a different thread than the one holding an
+    active write transaction. LMDB requires all transactions to be
+    closed before ``mdb_env_close`` and ties the write lock to the
+    owning OS thread; closing from another thread aborted the write
+    transaction on the wrong thread, which could not release the
+    robust process-shared write mutex, leaving a dangling entry on the
+    owning thread's robust list when the lock file was unmapped. A
+    later ``begin()`` then crashed inside ``pthread_mutex_lock`` (glibc
+    tolerates the dangling entry on x86_64 but faults on aarch64).
+    ``Environment.close()`` now waits for the owning thread to release
+    an active write transaction before tearing down the mapping. (#465)
 
 
 2026-03-29 2.2.0

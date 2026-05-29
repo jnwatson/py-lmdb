@@ -142,7 +142,6 @@ if patch_lmdb_source:
         'validate-md-depth',
         'validate-md-root',
         'win32-sparse-file',
-        'disable-robust-mutex-aarch64',
     ]
 
     if sys.platform.startswith('win'):
