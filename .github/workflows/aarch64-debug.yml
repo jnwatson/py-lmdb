@@ -172,6 +172,74 @@ jobs:
           git commit -m "debug #465 robust-list detector output"
           git push -f origin HEAD:claude/465-logs-detector
 
+  # Blame test: walk the thread's ACTUAL kernel robust list before every
+  # lock and flag any entry whose memory is unmapped. x86_64 shows ZERO
+  # such entries across the suite (robust list stays clean after LMDB's
+  # balanced unlock+munmap). If aarch64 shows a dangling entry, the
+  # defect is in aarch64 glibc's robust-mutex bookkeeping, not LMDB.
+  aarch64-robust-walker:
+    name: aarch64 robust-list walker
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with: { python-version: '3.11' }
+      - name: Build (robust ON, debug)
+        env: { LMDB_FORCE_CPYTHON: '1', CFLAGS: '-g -O0 -fno-omit-frame-pointer' }
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest cffi patch-ng setuptools
+          # Build the unpatched-on-aarch64 way: temporarily drop our fix so
+          # robust mutexes are ON, to observe the native glibc behaviour.
+          sed -i '/disable-robust-mutex-aarch64/d' setup.py
+          python setup.py develop
+      - name: Build walker shim
+        run: |
+          cat > /tmp/rwalk.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <stdint.h>
+          #include <errno.h>
+          #include <sys/mman.h>
+          #include <sys/syscall.h>
+          #include <execinfo.h>
+          #include <pthread.h>
+          struct rl{struct rl*next;}; struct rlh{struct rl*list;long off;struct rl*pending;};
+          static __thread int guard; static int(*r_lock)(pthread_mutex_t*); static long nd=0;
+          __attribute__((constructor)) static void init(void){r_lock=dlsym(RTLD_NEXT,"pthread_mutex_lock");}
+          static int unmapped(void*p){uintptr_t pg=(uintptr_t)p&~(uintptr_t)4095;unsigned char v;return mincore((void*)pg,1,&v)==-1&&errno==ENOMEM;}
+          static void check(void){struct rlh*h=0;size_t l=0;if(syscall(SYS_get_robust_list,0,&h,&l)||!h)return;struct rl*c=h->list;int n=0;
+            while(c&&c!=(struct rl*)h&&n++<2000){if(unmapped(c)){if(++nd<=6){fprintf(stderr,"\n*** DANGLING ROBUST-LIST ENTRY %p — UNMAPPED ***\n",(void*)c);void*bt[30];int k=backtrace(bt,30);backtrace_symbols_fd(bt,k,2);}return;}c=c->next;}}
+          int pthread_mutex_lock(pthread_mutex_t*m){if(!guard){guard=1;check();guard=0;}return r_lock(m);}
+          EOF
+          gcc -O0 -g -shared -fPIC /tmp/rwalk.c -o /tmp/rwalk.so -ldl
+      - name: Run suite under walker
+        run: |
+          LD_PRELOAD=/tmp/rwalk.so pytest tests/ -q -p no:cacheprovider \
+            >/tmp/w.out 2>/tmp/w.err || true
+          {
+            echo "## dangling count:"; grep -c "DANGLING ROBUST-LIST" /tmp/w.err || true
+            echo "## first dangling entries + backtraces:"
+            grep -A8 "DANGLING ROBUST-LIST" /tmp/w.err | head -80
+            echo "## pytest tail:"; tail -8 /tmp/w.out
+          } > /tmp/walker.txt
+          cat /tmp/walker.txt
+      - name: Push walker result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/walker.txt /tmp/keep.txt
+          git checkout --orphan logs-walker
+          git reset
+          cp /tmp/keep.txt walker.txt
+          git add -f walker.txt
+          git commit -m "debug #465 robust-list walker (robust ON)"
+          git push -f origin HEAD:claude/465-logs-walker
+
   # Fix hypothesis: the crash is glibc's robust process-shared mutex
   # walking a dangling robust-list entry left by a munmap'd lock file.
   # Building liblmdb with MDB_USE_ROBUST=0 removes the robust machinery.
