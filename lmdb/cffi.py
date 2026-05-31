@@ -734,6 +734,10 @@ class Environment:
         self._creating_db_in_readonly = False
         self._write_txn_tid = 0
         self._close_lock = threading.RLock()
+        # Signalled by the owning thread when it releases a write txn, so
+        # close() on another thread can block (no polling) until the
+        # robust write mutex is unlocked on its owning thread.  #465.
+        self._write_txn_cond = threading.Condition()
 
         self.set_mapsize(map_size)
 
@@ -917,6 +921,26 @@ class Environment:
         <http://lmdb.tech/doc/group__mdb.html#ga4366c43ada8874588b6a62fbda2d1e95>`_
         """
         if self._env:
+            # Issue #465: LMDB requires all transactions closed before
+            # mdb_env_close, and a write transaction belongs to the OS
+            # thread that began it (MDB_NOTLS).  On Linux its robust
+            # process-shared write mutex can only be released by that
+            # thread.  If close() runs on a different thread while a write
+            # txn is still open, wait (bounded) for the owning thread to
+            # release it first, so the mutex is unlocked on its own thread
+            # before mdb_env_close unmaps the lock file; otherwise it is
+            # left dangling on the owning thread's robust list and a later
+            # begin() crashes inside pthread_mutex_lock on aarch64.  The
+            # wait MUST be outside _close_lock — the owning thread needs
+            # that lock to abort.  Block on the condition (woken by the
+            # owning thread when it clears _write_txn_tid); _close_lock
+            # then serialises that abort's mutex unlock ahead of our
+            # mdb_env_close.  No polling.
+            me = threading.get_ident()
+            with self._write_txn_cond:
+                while self._write_txn_tid and self._write_txn_tid != me:
+                    self._write_txn_cond.wait()
+
             with self._close_lock:
                 if not self._env:
                     return
@@ -1553,6 +1577,8 @@ class Transaction:
                 if rc:
                     if not parent:
                         env._write_txn_tid = 0
+                        with env._write_txn_cond:
+                            env._write_txn_cond.notify_all()
                     raise _error("mdb_txn_begin", rc)
                 self._txn = txnpp[0]
                 self._write = True
@@ -1692,6 +1718,8 @@ class Transaction:
                 self._txn = _invalid
                 if self._write and not self._parent:
                     self.env._write_txn_tid = 0
+                    with self.env._write_txn_cond:
+                        self.env._write_txn_cond.notify_all()
                 if not self.env._env:
                     raise _error("env has been closed", _lib.EINVAL)
                 rc = _lib.mdb_txn_commit(txn)
@@ -1717,6 +1745,8 @@ class Transaction:
                     self._txn = _invalid
                     if self._write and not self._parent:
                         self.env._write_txn_tid = 0
+                        with self.env._write_txn_cond:
+                            self.env._write_txn_cond.notify_all()
                     if not self.env._env:
                         self._invalidate()
                         return

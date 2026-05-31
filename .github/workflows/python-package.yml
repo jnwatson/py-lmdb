@@ -26,6 +26,12 @@ jobs:
           # Linux - pure variant on latest Python only
           - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: pure}
           - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: pure}
+          # Linux aarch64 (native ARM runners) - guards against
+          # architecture-specific crashes such as issue #465, which the
+          # x86_64 and macOS-arm64 (POSIX semaphore) jobs do not exercise.
+          - {os: ubuntu-24.04-arm, python-version: '3.11', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.14', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.14', impl: cffi, purity: patched}
           # Windows - newest + one older, both impls
           - {os: windows-latest, python-version: '3.11', impl: cpython, purity: patched}
           - {os: windows-latest, python-version: '3.14', impl: cpython, purity: patched}
@@ -73,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-latest, macos-latest]
         python-version: ['3.11', '3.13', '3.14']
         impl: [cpython, cffi]
         purity: [patched, pure]
