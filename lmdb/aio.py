@@ -37,7 +37,7 @@ Usage::
 import asyncio
 import functools
 
-from lmdb import Cursor, Environment, Transaction
+from . import Cursor, Environment, Transaction
 
 
 def wrap(env, executor=None):
