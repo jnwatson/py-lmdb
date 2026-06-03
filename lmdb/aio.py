@@ -37,18 +37,7 @@ Usage::
 import asyncio
 import functools
 
-
-# Methods that are cheap, pure-Python accessors — no I/O, no GIL release.
-# Calling these through run_in_executor would just add overhead.
-_ENV_SYNC = frozenset({'path', 'max_key_size', 'max_readers', 'flags'})
-_TXN_SYNC = frozenset({'id'})
-_CURSOR_SYNC = frozenset({'key', 'value', 'item'})
-
-# Iterator methods return generators — must be consumed in the executor.
-_CURSOR_ITERS = frozenset({
-    'iternext', 'iternext_dup', 'iternext_nodup',
-    'iterprev', 'iterprev_dup', 'iterprev_nodup',
-})
+from lmdb import Cursor, Environment, Transaction
 
 
 def wrap(env, executor=None):
@@ -86,6 +75,61 @@ class _AsyncContextWrapper:
         return await self._result.__aexit__(exc_type, exc_val, exc_tb)
 
 
+# ---------------------------------------------------------------------------
+# Proxy method factories
+# ---------------------------------------------------------------------------
+
+def _sync_method(sync):
+    """Return a method that calls *sync* directly, without an executor."""
+    @functools.wraps(sync)
+    def method(self, *args, **kwargs):
+        return sync(getattr(self, self._WRAPS), *args, **kwargs)
+    return method
+
+
+def _async_method(sync):
+    """Return a coroutine method that calls *sync* in the executor."""
+    @functools.wraps(sync)
+    async def method(self, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            functools.partial(sync, getattr(self, self._WRAPS), *args, **kwargs),
+        )
+    return method
+
+
+def _async_method_locked(sync):
+    """Like :func:`_async_method`, but acquires ``self._lock`` first."""
+    @functools.wraps(sync)
+    async def method(self, *args, **kwargs):
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                self._executor,
+                functools.partial(sync, getattr(self, self._WRAPS), *args, **kwargs),
+            )
+    return method
+
+
+def _collect_locked(sync):
+    """Like :func:`_async_method_locked`, but *sync* returns an iterator
+    consumed in the executor and returned as a list."""
+    @functools.wraps(sync)
+    async def method(self, *args, **kwargs):
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                self._executor,
+                lambda: list(sync(getattr(self, self._WRAPS), *args, **kwargs)),
+            )
+    return method
+
+
+# ---------------------------------------------------------------------------
+# Async wrappers
+# ---------------------------------------------------------------------------
+
 class AsyncEnvironment:
     """Async wrapper for :py:class:`lmdb.Environment`.
 
@@ -100,6 +144,8 @@ class AsyncEnvironment:
     """
 
     __slots__ = ('_env', '_executor')
+
+    _WRAPS = '_env'
 
     def __init__(self, env, executor=None):
         self._env = env
@@ -133,15 +179,32 @@ class AsyncEnvironment:
             return AsyncTransaction(txn, self._executor)
         return _AsyncContextWrapper(_begin())
 
-    # -- attribute proxy ---------------------------------------------------
+    # -- proxied methods --------------------------------------------------
+
+    path = _sync_method(Environment.path)
+    max_key_size = _sync_method(Environment.max_key_size)
+    max_readers = _sync_method(Environment.max_readers)
+    flags = _sync_method(Environment.flags)
+
+    stat = _async_method(Environment.stat)
+    info = _async_method(Environment.info)
+    close = _async_method(Environment.close)
+    copy = _async_method(Environment.copy)
+    copyfd = _async_method(Environment.copyfd)
+    sync = _async_method(Environment.sync)
+    readers = _async_method(Environment.readers)
+    reader_check = _async_method(Environment.reader_check)
+    set_mapsize = _async_method(Environment.set_mapsize)
+    open_db = _async_method(Environment.open_db)
+    dbs = _async_method(Environment.dbs)
+
+    # -- attribute fallback -----------------------------------------------
 
     def __getattr__(self, name):
         attr = getattr(self._env, name)
-        if not callable(attr):
-            return attr
-        if name in _ENV_SYNC:
-            return attr
-        return _async_method(attr, self._executor)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr
 
 
 class AsyncTransaction:
@@ -159,6 +222,8 @@ class AsyncTransaction:
     """
 
     __slots__ = ('_txn', '_executor', '_lock')
+
+    _WRAPS = '_txn'
 
     def __init__(self, txn, executor=None):
         self._txn = txn
@@ -200,15 +265,27 @@ class AsyncTransaction:
             return AsyncCursor(cur, self._executor, self._lock)
         return _AsyncContextWrapper(_cursor())
 
-    # -- attribute proxy ---------------------------------------------------
+    # -- proxied methods --------------------------------------------------
+
+    id = _sync_method(Transaction.id)
+
+    stat = _async_method_locked(Transaction.stat)
+    drop = _async_method_locked(Transaction.drop)
+    commit = _async_method_locked(Transaction.commit)
+    abort = _async_method_locked(Transaction.abort)
+    get = _async_method_locked(Transaction.get)
+    put = _async_method_locked(Transaction.put)
+    replace = _async_method_locked(Transaction.replace)
+    pop = _async_method_locked(Transaction.pop)
+    delete = _async_method_locked(Transaction.delete)
+
+    # -- attribute fallback -----------------------------------------------
 
     def __getattr__(self, name):
         attr = getattr(self._txn, name)
-        if not callable(attr):
-            return attr
-        if name in _TXN_SYNC:
-            return attr
-        return _async_method_locked(attr, self._executor, self._lock)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr
 
 
 class AsyncCursor:
@@ -228,6 +305,8 @@ class AsyncCursor:
 
     __slots__ = ('_cursor', '_executor', '_lock')
 
+    _WRAPS = '_cursor'
+
     def __init__(self, cursor, executor=None, lock=None):
         self._cursor = cursor
         self._executor = executor
@@ -241,81 +320,47 @@ class AsyncCursor:
     async def __aexit__(self, *_exc):
         self._cursor.close()
 
-    # -- iterators: consume in the executor and return a list -------------
+    # -- proxied methods --------------------------------------------------
 
-    async def iternext(self, **kw):
-        return await _collect_locked(
-            self._cursor.iternext, kw, self._executor, self._lock)
+    key = _sync_method(Cursor.key)
+    value = _sync_method(Cursor.value)
+    item = _sync_method(Cursor.item)
 
-    async def iternext_dup(self, **kw):
-        return await _collect_locked(
-            self._cursor.iternext_dup, kw, self._executor, self._lock)
+    close = _async_method_locked(Cursor.close)
+    first = _async_method_locked(Cursor.first)
+    first_dup = _async_method_locked(Cursor.first_dup)
+    last = _async_method_locked(Cursor.last)
+    last_dup = _async_method_locked(Cursor.last_dup)
+    prev = _async_method_locked(Cursor.prev)
+    prev_dup = _async_method_locked(Cursor.prev_dup)
+    prev_nodup = _async_method_locked(Cursor.prev_nodup)
+    next = _async_method_locked(Cursor.next)
+    next_dup = _async_method_locked(Cursor.next_dup)
+    next_nodup = _async_method_locked(Cursor.next_nodup)
+    set_key = _async_method_locked(Cursor.set_key)
+    set_key_dup = _async_method_locked(Cursor.set_key_dup)
+    set_range = _async_method_locked(Cursor.set_range)
+    set_range_dup = _async_method_locked(Cursor.set_range_dup)
+    delete = _async_method_locked(Cursor.delete)
+    count = _async_method_locked(Cursor.count)
+    put = _async_method_locked(Cursor.put)
+    putmulti = _async_method_locked(Cursor.putmulti)
+    replace = _async_method_locked(Cursor.replace)
+    pop = _async_method_locked(Cursor.pop)
+    get = _async_method_locked(Cursor.get)
+    getmulti = _async_method_locked(Cursor.getmulti)
 
-    async def iternext_nodup(self, **kw):
-        return await _collect_locked(
-            self._cursor.iternext_nodup, kw, self._executor, self._lock)
+    iternext = _collect_locked(Cursor.iternext)
+    iternext_dup = _collect_locked(Cursor.iternext_dup)
+    iternext_nodup = _collect_locked(Cursor.iternext_nodup)
+    iterprev = _collect_locked(Cursor.iterprev)
+    iterprev_dup = _collect_locked(Cursor.iterprev_dup)
+    iterprev_nodup = _collect_locked(Cursor.iterprev_nodup)
 
-    async def iterprev(self, **kw):
-        return await _collect_locked(
-            self._cursor.iterprev, kw, self._executor, self._lock)
-
-    async def iterprev_dup(self, **kw):
-        return await _collect_locked(
-            self._cursor.iterprev_dup, kw, self._executor, self._lock)
-
-    async def iterprev_nodup(self, **kw):
-        return await _collect_locked(
-            self._cursor.iterprev_nodup, kw, self._executor, self._lock)
-
-    # -- attribute proxy ---------------------------------------------------
+    # -- attribute fallback -----------------------------------------------
 
     def __getattr__(self, name):
         attr = getattr(self._cursor, name)
-        if not callable(attr):
-            return attr
-        if name in _CURSOR_SYNC:
-            return attr
-        if name in _CURSOR_ITERS:
-            return functools.partial(
-                _collect_locked, attr, {}, self._executor, self._lock)
-        return _async_method_locked(attr, self._executor, self._lock)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _async_method(method, executor):
-    """Return a coroutine function that calls *method* in *executor*."""
-    @functools.wraps(method)
-    async def wrapper(*args, **kwargs):
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            executor,
-            functools.partial(method, *args, **kwargs),
-        )
-    return wrapper
-
-
-def _async_method_locked(method, executor, lock):
-    """Like :func:`_async_method`, but acquires *lock* first."""
-    @functools.wraps(method)
-    async def wrapper(*args, **kwargs):
-        async with lock:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                executor,
-                functools.partial(method, *args, **kwargs),
-            )
-    return wrapper
-
-
-async def _collect_locked(iter_method, kwargs, executor, lock):
-    """Call an iterator method in the executor and return a list."""
-    loop = asyncio.get_running_loop()
-
-    def _consume():
-        return list(iter_method(**kwargs))
-
-    async with lock:
-        return await loop.run_in_executor(executor, _consume)
+        if callable(attr):
+            raise AttributeError(name)
+        return attr

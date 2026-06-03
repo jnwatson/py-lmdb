@@ -8,6 +8,7 @@
 """Tests for lmdb.aio async wrappers."""
 
 import asyncio
+import inspect
 import unittest
 
 import lmdb
@@ -334,6 +335,67 @@ class AsyncConcurrencyTest(testlib.LmdbTest):
             for i, val in enumerate(results):
                 self.assertEqual(val, str(i).encode())
 
+        run(go())
+
+
+class IntrospectionTest(unittest.TestCase):
+    """Proxied methods must be real class attributes (dir/inspect/stubtest)."""
+
+    def test_methods_are_real_attributes(self):
+        for cls, names in (
+            (lmdb.aio.AsyncEnvironment, ('path', 'stat', 'info')),
+            (lmdb.aio.AsyncTransaction, ('id', 'get', 'put', 'commit')),
+            (lmdb.aio.AsyncCursor, ('key', 'get', 'iternext', 'getmulti')),
+        ):
+            for name in names:
+                self.assertIn(name, dir(cls))
+                self.assertIn(name, vars(cls))
+
+    def test_all_public_methods_proxied(self):
+        for wrapped, wrapper in (
+            (lmdb.Environment, lmdb.aio.AsyncEnvironment),
+            (lmdb.Transaction, lmdb.aio.AsyncTransaction),
+            (lmdb.Cursor, lmdb.aio.AsyncCursor),
+        ):
+            public = {
+                n for n in dir(wrapped)
+                if not n.startswith('_') and callable(getattr(wrapped, n))
+            }
+            missing = public - set(vars(wrapper))
+            self.assertFalse(missing, f"missing: {sorted(missing)}")
+
+    def test_async_method_metadata(self):
+        get = vars(lmdb.aio.AsyncTransaction)['get']
+        self.assertTrue(inspect.iscoroutinefunction(get))
+        self.assertIs(get.__wrapped__, lmdb.Transaction.get)
+        self.assertEqual(get.__doc__, lmdb.Transaction.get.__doc__)
+
+    def test_passthrough_is_not_a_coroutine(self):
+        path = vars(lmdb.aio.AsyncEnvironment)['path']
+        self.assertFalse(inspect.iscoroutinefunction(path))
+        self.assertIs(path.__wrapped__, lmdb.Environment.path)
+
+
+class GetattrFallbackTest(testlib.LmdbTest):
+    """Non-callable attributes proxy through `__getattr__` (CFFI-only)."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_fallback(self):
+        _, env = testlib.temp_env()
+        if not hasattr(env, 'readonly'):
+            self.skipTest('CFFI-only')
+
+        aenv = lmdb.aio.wrap(env)
+        self.assertEqual(getattr(aenv, 'readonly'), env.readonly)
+
+        async def go():
+            async with aenv.begin() as txn:
+                self.assertIs(txn.env, txn._txn.env)
+                async with txn.cursor() as cur:
+                    self.assertIs(cur.db, cur._cursor.db)
+                    self.assertIs(cur.txn, cur._cursor.txn)
         run(go())
 
 
