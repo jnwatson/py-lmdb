@@ -1,21 +1,47 @@
-Unreleased
-##########
+2026-06-03 2.2.1
+#################
+
+Improvements
+------------
+
+- ``lmdb.aio`` async wrapper methods (on ``AsyncEnvironment``,
+    ``AsyncTransaction``, and ``AsyncCursor``) are now real class
+    attributes rather than synthesized by ``__getattr__``, making them
+    visible to ``dir()``, ``inspect.signature()``, ``help()``, IPython,
+    and stubtest. Non-callable attributes still proxy through.
+    (#460, contributed by jorenham)
+
+- Added type stubs for the ``lmdb.aio`` module.
+    (#455, contributed by jorenham)
 
 Fixes
 -----
 
-- Fix segmentation fault on Linux/aarch64 caused by closing an
-    ``Environment`` from a different thread than the one holding an
-    active write transaction. LMDB requires all transactions to be
-    closed before ``mdb_env_close`` and ties the write lock to the
-    owning OS thread; closing from another thread aborted the write
-    transaction on the wrong thread, which could not release the
-    robust process-shared write mutex, leaving a dangling entry on the
-    owning thread's robust list when the lock file was unmapped. A
-    later ``begin()`` then crashed inside ``pthread_mutex_lock`` (glibc
-    tolerates the dangling entry on x86_64 but faults on aarch64).
-    ``Environment.close()`` now waits for the owning thread to release
-    an active write transaction before tearing down the mapping. (#465)
+- Fix a segmentation fault on Linux/aarch64 when an ``Environment`` is
+    closed from a different thread than the one holding an active write
+    transaction. ``Environment.close()`` now waits for the owning thread
+    to release the write transaction before unmapping the lock file.
+    (#465, reported by sdvillal)
+
+- Reject adversarial on-disk values that could overflow size arithmetic
+    or cause implementation-defined narrowing of ``mv_size`` when reading
+    crafted databases. (#462, #463)
+
+- Fix crashes on out-of-memory conditions in the CPython extension's
+    error paths. (#453)
+
+- Fix and modernize the type stubs, including ``__all__`` exports and the
+    ``Cursor.iter*`` parameter defaults in ``__init__.pyi``.
+    (#454, #457, #459, contributed by jorenham)
+
+Other
+-----
+
+- Remove remaining Python 2 compatibility code.
+    (#456, contributed by jorenham)
+
+- Run the test suite natively on Linux/aarch64 in CI; previously aarch64
+    wheels were built but never tested. (#465)
 
 
 2026-03-29 2.2.0
