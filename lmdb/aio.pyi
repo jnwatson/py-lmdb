@@ -19,6 +19,7 @@ from . import (
 
 _DefaultT = TypeVar("_DefaultT", default=None)
 _T_co = TypeVar("_T_co", covariant=True)
+_VT = TypeVar("_VT", bound=bytes | memoryview)
 _VT_co = TypeVar(
     "_VT_co",
     bound=bytes | memoryview,
@@ -96,6 +97,33 @@ class AsyncEnvironment:
 
     async def stat(self) -> _StatDict: ...
     async def info(self) -> _InfoDict: ...
+    async def close(self) -> None: ...
+    async def copy(
+        self, path: str, compact: bool = False, txn: Transaction | None = None
+    ) -> None: ...
+    async def copyfd(
+        self, fd: int, compact: bool = False, txn: Transaction | None = None
+    ) -> None: ...
+    async def sync(self, force: bool = False) -> None: ...
+    async def readers(self) -> str: ...
+    async def reader_check(self) -> int: ...
+    async def set_mapsize(self, map_size: int) -> None: ...
+    async def open_db(
+        self,
+        key: bytes | None = None,
+        txn: Transaction | None = None,
+        reverse_key: bool = False,
+        dupsort: bool = False,
+        create: bool = True,
+        integerkey: bool = False,
+        integerdup: bool = False,
+        dupfixed: bool = False,
+    ) -> _Database: ...
+    #
+    @overload
+    async def dbs(self, txn: None = None) -> list[bytes]: ...
+    @overload
+    async def dbs(self, txn: Transaction[_VT]) -> list[_VT]: ...
 
 class AsyncTransaction(Generic[_VT_co]):
     __slots__ = "_txn", "_executor", "_lock"
