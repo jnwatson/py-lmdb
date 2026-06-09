@@ -86,7 +86,7 @@ O_0755 = int('0755', 8)
 
 # Global set of canonical paths for open environments, to prevent
 # opening the same environment twice in one process (causes segfaults).
-_open_env_paths = set()
+_open_env_paths: set[str] = set()
 O_0111 = int('0111', 8)
 EMPTY_BYTES = b""
 
@@ -520,7 +520,7 @@ if not lmdb._reading_docs():
     _error_map = {}
     for obj in list(globals().values()):
         if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
-            _error_map[getattr(_lib, obj.MDB_NAME)] = obj
+            _error_map[getattr(_lib, getattr(obj, 'MDB_NAME'))] = obj
     del obj
 
 def _error(what, rc):
@@ -1535,7 +1535,7 @@ class Transaction:
     _mutations = 0
 
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
-        self.env = env  # hold ref
+        self._pyenv = env  # hold ref
         self._db = db or env._db
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
@@ -1607,14 +1607,14 @@ class Transaction:
     def _invalidate(self):
         if self._txn:
             self.abort()
-        deps = self.env._deps
+        deps = self._pyenv._deps
         if deps is not None:
             deps.discard(self)
         self._parent = None
         self._env = _invalid
 
     def __del__(self):
-        if _cached_pid != self.env._pid:
+        if _cached_pid != self._pyenv._pid:
             return
         self.abort()
 
@@ -1654,7 +1654,7 @@ class Transaction:
         rc = _lib.mdb_stat(self._txn, db._dbi, st)
         if rc:
             raise _error('mdb_stat', rc)
-        return self.env._convert_stat(st)
+        return self._pyenv._convert_stat(st)
 
     def drop(self, db, delete=True):
         """Delete all keys in a named database and optionally delete the named
@@ -1670,8 +1670,8 @@ class Transaction:
         self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
-        if db._name in self.env._dbs:
-            del self.env._dbs[db._name]
+        if db._name in self._pyenv._dbs:
+            del self._pyenv._dbs[db._name]
 
     def _cache_spare(self):
         # In order to avoid taking and maintaining a lock, a race is allowed
@@ -1679,21 +1679,21 @@ class Transaction:
         # unlikely the race could ever result in a large amount of spare txns,
         # and in any case a correctly configured program should not be opening
         # more read-only transactions than there are configured spares.
-        spare_txns = self.env._spare_txns
-        if spare_txns is not None and self.env._max_spare_txns > 0:
-            with self.env._close_lock:
+        spare_txns = self._pyenv._spare_txns
+        if spare_txns is not None and self._pyenv._max_spare_txns > 0:
+            with self._pyenv._close_lock:
                 # Grab and clear _txn inside the lock so that a concurrent
                 # close() will see _txn as valid and properly abort it
                 # before freeing the env.  Issue #180.
                 txn = self._txn
                 self._txn = _invalid
-                if not self.env._env:
+                if not self._pyenv._env:
                     return True
                 _lib.mdb_txn_reset(txn)
                 # Append inside the lock so env.close() can't miss this
                 # handle between our unlock and the append.
                 spare_txns.append(txn)
-                self.env._max_spare_txns -= 1
+                self._pyenv._max_spare_txns -= 1
             self._invalidate()
             return True
 
@@ -1713,14 +1713,14 @@ class Transaction:
             # and properly abort it before freeing the env.  If the env
             # was already closed, the txn was freed by _invalidate();
             # skip the C call.  Issue #180.
-            with self.env._close_lock:
+            with self._pyenv._close_lock:
                 txn = self._txn
                 self._txn = _invalid
                 if self._write and not self._parent:
-                    self.env._write_txn_tid = 0
-                    with self.env._write_txn_cond:
-                        self.env._write_txn_cond.notify_all()
-                if not self.env._env:
+                    self._pyenv._write_txn_tid = 0
+                    with self._pyenv._write_txn_cond:
+                        self._pyenv._write_txn_cond.notify_all()
+                if not self._pyenv._env:
                     raise _error("env has been closed", _lib.EINVAL)
                 rc = _lib.mdb_txn_commit(txn)
             if rc:
@@ -1740,14 +1740,14 @@ class Transaction:
             while self._deps:
                 self._deps.pop()._invalidate()
             if self._write or not self._cache_spare():
-                with self.env._close_lock:
+                with self._pyenv._close_lock:
                     txn = self._txn
                     self._txn = _invalid
                     if self._write and not self._parent:
-                        self.env._write_txn_tid = 0
-                        with self.env._write_txn_cond:
-                            self.env._write_txn_cond.notify_all()
-                    if not self.env._env:
+                        self._pyenv._write_txn_tid = 0
+                        with self._pyenv._write_txn_cond:
+                            self._pyenv._write_txn_cond.notify_all()
+                    if not self._pyenv._env:
                         self._invalidate()
                         return
                     _lib.mdb_txn_abort(txn)
@@ -1963,8 +1963,8 @@ class Cursor:
     def __init__(self, db, txn):
         db._deps.add(self)
         txn._deps.add(self)
-        self.db = db # hold ref
-        self.txn = txn # hold ref
+        self._pydb = db # hold ref
+        self._pytxn = txn # hold ref
         self._dbi = db._dbi
         self._txn = txn._txn
         self._key = _ffi.new('MDB_val *')
@@ -1989,7 +1989,7 @@ class Cursor:
             # in-flight cursor ops (which also hold _close_lock)
             # before freeing cursor memory.  Issue #180.
             try:
-                lock = self.txn.env._close_lock
+                lock = self._pytxn._pyenv._close_lock
             except (AttributeError, TypeError):
                 lock = None
             cur = self._cur
@@ -2000,8 +2000,8 @@ class Cursor:
                         _lib.mdb_cursor_close(cur)
                 else:
                     _lib.mdb_cursor_close(cur)
-            self.db._deps.discard(self)
-            self.txn._deps.discard(self)
+            self._pydb._deps.discard(self)
+            self._pytxn._deps.discard(self)
             self._dbi = _invalid
             self._txn = _invalid
 
@@ -2021,14 +2021,14 @@ class Cursor:
     def key(self):
         """Return the current key."""
         # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self.txn._mutations:
+        if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
         return self._to_py(self._key)
 
     def value(self):
         """Return the current value."""
         # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self.txn._mutations:
+        if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
         preload(self._val)
         return self._to_py(self._val)
@@ -2036,7 +2036,7 @@ class Cursor:
     def item(self):
         """Return the current `(key, value)` pair."""
         # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self.txn._mutations:
+        if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
         preload(self._val)
         return self._to_py(self._key), self._to_py(self._val)
@@ -2165,13 +2165,13 @@ class Cursor:
         # Hold _close_lock to prevent concurrent txn.abort() from
         # calling mdb_txn_abort (which frees cursor memory) while
         # mdb_cursor_get is running.  Issue #180.
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
             rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
-        self._last_mutation = self.txn._mutations
+        self._last_mutation = self._pytxn._mutations
         if rc:
             self._key.mv_size = 0
             self._val.mv_size = 0
@@ -2181,7 +2181,7 @@ class Cursor:
         return v
 
     def _cursor_get_kv(self, op, k, v):
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
@@ -2512,12 +2512,12 @@ class Cursor:
         v = self._valid
         if v:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
-            with self.txn.env._close_lock:
+            with self._pytxn._pyenv._close_lock:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
                 rc = _lib.mdb_cursor_del(self._cur, flags)
-            self.txn._mutations += 1
+            self._pytxn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
             self._cursor_get(_lib.MDB_GET_CURRENT)
@@ -2533,7 +2533,7 @@ class Cursor:
         <http://lmdb.tech/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
         """
         countp = _ffi.new('size_t *')
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
@@ -2579,17 +2579,17 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self.txn._db._flags & _lib.MDB_DUPSORT:
+            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
 
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
             rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
-        self.txn._mutations += 1
+        self._pytxn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
                 return False
@@ -2633,7 +2633,7 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self.txn._db._flags & _lib.MDB_DUPSORT:
+            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
@@ -2641,13 +2641,13 @@ class Cursor:
         added = 0
         skipped = 0
         for key, value in items:
-            with self.txn.env._close_lock:
+            with self._pytxn._pyenv._close_lock:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
                 rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
                                            value, len(value), flags)
-            self.txn._mutations += 1
+            self._pytxn._mutations += 1
             added += 1
             if rc:
                 if rc == _lib.MDB_KEYEXIST:
@@ -2673,7 +2673,7 @@ class Cursor:
             `value`:
                 Bytestring value to store.
         """
-        if self.db._flags & _lib.MDB_DUPSORT:
+        if self._pydb._flags & _lib.MDB_DUPSORT:
             if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
                 preload(self._val)
                 old = _mvstr(self._val)
@@ -2685,12 +2685,12 @@ class Cursor:
 
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
             rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
-        self.txn._mutations += 1
+        self._pytxn._mutations += 1
         if not rc:
             return
         if rc != _lib.MDB_KEYEXIST:
@@ -2699,12 +2699,12 @@ class Cursor:
         self._cursor_get(_lib.MDB_GET_CURRENT)
         preload(self._val)
         old = _mvstr(self._val)
-        with self.txn.env._close_lock:
+        with self._pytxn._pyenv._close_lock:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
             rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
-        self.txn._mutations += 1
+        self._pytxn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
         self._cursor_get(_lib.MDB_GET_CURRENT)
@@ -2724,12 +2724,12 @@ class Cursor:
         if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
             preload(self._val)
             old = _mvstr(self._val)
-            with self.txn.env._close_lock:
+            with self._pytxn._pyenv._close_lock:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
                 rc = _lib.mdb_cursor_del(self._cur, 0)
-            self.txn._mutations += 1
+            self._pytxn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
             self._cursor_get(_lib.MDB_GET_CURRENT)

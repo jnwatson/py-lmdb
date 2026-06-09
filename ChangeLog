@@ -1,3 +1,22 @@
+unreleased
+##########
+
+Improvements
+------------
+
+- The unit test suite is now type-checked in CI with both mypy and pyright,
+    and the shipped stubs are validated against the runtime module with
+    stubtest, so the public typed API stays usable regardless of which type
+    checker downstream users run. (#469)
+
+- ``lmdb.version(subpatch=True)`` is now correctly typed via overloads,
+    returning a 4-tuple instead of a 3-tuple. (#469)
+
+- The CFFI backend's internal reference-holding attributes ``Transaction.env``,
+    ``Cursor.db``, and ``Cursor.txn`` are now private (``_pyenv``, ``_pydb``,
+    ``_pytxn``). They were never exposed by the CPython extension, so this
+    aligns the two backends. These were undocumented implementation details.
+
 2026-06-03 2.2.1
 #################
 

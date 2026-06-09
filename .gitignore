@@ -6,7 +6,11 @@ docs/_build
 ll.sh
 lmdb.egg-info
 lmdb/_config.py
+lmdb/*.so
+lmdb/*.pyd
+lmdb/*.dll
 lo.sh
 old
 .tox/
 tests/test.py
+.mypy_cache

@@ -391,11 +391,16 @@ class GetattrFallbackTest(testlib.LmdbTest):
         self.assertEqual(getattr(aenv, 'readonly'), env.readonly)
 
         async def go():
+            # Non-callable attributes are reached dynamically via __getattr__;
+            # the underlying ref-holders are private (_pyenv/_pydb/_pytxn).
             async with aenv.begin() as txn:
-                self.assertIs(txn.env, txn._txn.env)
+                self.assertIs(getattr(txn, '_pyenv'),
+                              getattr(txn._txn, '_pyenv'))
                 async with txn.cursor() as cur:
-                    self.assertIs(cur.db, cur._cursor.db)
-                    self.assertIs(cur.txn, cur._cursor.txn)
+                    self.assertIs(getattr(cur, '_pydb'),
+                                  getattr(cur._cursor, '_pydb'))
+                    self.assertIs(getattr(cur, '_pytxn'),
+                                  getattr(cur._cursor, '_pytxn'))
         run(go())
 
 

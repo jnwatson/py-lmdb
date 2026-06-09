@@ -81,6 +81,7 @@ import string
 import struct
 import sys
 import time
+from io import BufferedReader
 from io import BytesIO as StringIO
 from typing import NoReturn
 
@@ -492,6 +493,7 @@ def cmd_warm(opts, args):
         fp = open(opts.env, 'rb', bufsize)
     else:
         fp = open(opts.env + '/data.mdb', 'rb', bufsize)
+    assert isinstance(fp, BufferedReader)
     while fp.tell() < last_offset:
         fp.readinto(buf)
     print('Warmed %.2fmb in %dms' %

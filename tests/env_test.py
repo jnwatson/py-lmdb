@@ -33,7 +33,7 @@ from testlib import INT_TYPES
 import lmdb
 
 # Whether we have the patch that allows env.copy* to take a txn
-have_txn_patch = lmdb.version(subpatch=True)[3]  # type: ignore[call-arg]
+have_txn_patch = lmdb.version(subpatch=True)[3]
 
 NO_READERS = str('(no active readers)\n')
 
@@ -54,7 +54,7 @@ class VersionTest(unittest.TestCase):
         assert all(i >= 0 for i in ver)
 
     def test_version_subpatch(self):
-        ver = lmdb.version(subpatch=True)  # type: ignore[call-arg]
+        ver = lmdb.version(subpatch=True)
         assert len(ver) == 4
         assert all(isinstance(i, INT_TYPES) for i in ver)
         assert all(i >= 0 for i in ver)

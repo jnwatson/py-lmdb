@@ -147,11 +147,6 @@ class AsyncTransaction(Generic[_VT_co]):
         self, db: _Database | None = None
     ) -> _AsyncContextWrapper[AsyncCursor[_VT_co]]: ...
 
-    # proxied attributes
-
-    @property
-    def env(self) -> Environment: ...
-
     # proxied sync methods
 
     def id(self) -> int: ...
@@ -291,13 +286,6 @@ class AsyncCursor(Generic[_VT_co]):
     async def iterprev_nodup(
         self, *, keys: Literal[False], values: Literal[True]
     ) -> list[_VT_co]: ...
-
-    # proxied attributes
-
-    @property
-    def db(self) -> _Database: ...
-    @property
-    def txn(self) -> Transaction[_VT_co]: ...
 
     # proxied sync methods
 
