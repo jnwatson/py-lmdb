@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
@@ -311,6 +314,7 @@ jobs:
   publish-to-test-pypi:
     name: Publish wheels to Test PyPI
     permissions:
+      contents: read
       id-token: write
     needs: [build_cpython_wheels, build_pypy_wheel]
     runs-on: ubuntu-24.04
@@ -350,6 +354,7 @@ jobs:
   publish:
     name: Publish wheels
     permissions:
+      contents: read
       id-token: write
     needs: [build_cpython_wheels, build_pypy_wheel]
     runs-on: ubuntu-24.04
