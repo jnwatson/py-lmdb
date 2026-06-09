@@ -1,0 +1,11 @@
+# Pinned tooling for the `type-check` CI job (issue #469).  Both mypy and
+# pyright are run against the test suite, plus mypy's stubtest against the
+# shipped stubs.  Pinned so local runs match CI.
+mypy==1.19.1
+pyright==1.1.408
+types-cffi
+# Imported by the tests / package and needed for clean type resolution.
+pytest
+cffi
+patch-ng
+typing_extensions

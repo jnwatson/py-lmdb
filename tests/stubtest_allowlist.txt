@@ -1,0 +1,26 @@
+# Allowlist for `python -m mypy.stubtest lmdb` (issue #469).
+#
+# stubtest compares the shipped stubs (lmdb/__init__.pyi, lmdb/aio.pyi)
+# against the importable runtime module.  The entries below are known,
+# intentional discrepancies rather than stub drift.
+
+# `python -m lmdb` runs the CLI, which calls sys.exit() during import.
+# stubtest imports every submodule, so importing __main__ raises SystemExit.
+lmdb.__main__
+
+# The compiled C extension submodule has no separate cpython.pyi; the public
+# API it implements is stubbed at package level in lmdb/__init__.pyi.
+lmdb.cpython
+
+# Module-level loop variable in cffi.py's error-map construction; it is
+# `del`-ed after use, but stubtest still infers it as a module global.
+lmdb.cffi.obj
+
+# Cross-implementation gap: the cffi backend (lmdb/cffi.py) exposes these as
+# attributes on Transaction/Cursor, but the cpython C extension does not, so
+# the aio wrappers cannot delegate to them when running on cpython.  The stubs
+# follow the cffi surface; stubtest run against a cpython build flags them as
+# missing.  Tracked separately from this test-typing work.
+lmdb.aio.AsyncCursor.db
+lmdb.aio.AsyncCursor.txn
+lmdb.aio.AsyncTransaction.env

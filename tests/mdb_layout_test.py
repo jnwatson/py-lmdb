@@ -742,9 +742,13 @@ class NestedTxnDataLayoutTest(testlib.LmdbTest):
 
             child.commit()
         with env.begin() as txn:
-            self.assertEqual(len(txn.get(B('L0'))), 32)
-            self.assertEqual(len(txn.get(B('L1'))), psize + 1)
-            self.assertEqual(len(txn.get(B('L2'))), psize * 3 + 1)
+            v0 = txn.get(B('L0'))
+            v1 = txn.get(B('L1'))
+            v2 = txn.get(B('L2'))
+            assert v0 is not None and v1 is not None and v2 is not None
+            self.assertEqual(len(v0), 32)
+            self.assertEqual(len(v1), psize + 1)
+            self.assertEqual(len(v2), psize * 3 + 1)
 
     def test_three_levels_middle_abort(self):
         """Three levels — middle aborts, only L0 persists."""

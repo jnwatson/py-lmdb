@@ -72,6 +72,7 @@ class _AsyncContextWrapper:
         return self._result
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        assert self._result is not None  # set by __aenter__
         return await self._result.__aexit__(exc_type, exc_val, exc_tb)
 
 

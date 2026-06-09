@@ -86,7 +86,7 @@ O_0755 = int('0755', 8)
 
 # Global set of canonical paths for open environments, to prevent
 # opening the same environment twice in one process (causes segfaults).
-_open_env_paths = set()
+_open_env_paths: set[str] = set()
 O_0111 = int('0111', 8)
 EMPTY_BYTES = b""
 
@@ -520,7 +520,7 @@ if not lmdb._reading_docs():
     _error_map = {}
     for obj in list(globals().values()):
         if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
-            _error_map[getattr(_lib, obj.MDB_NAME)] = obj
+            _error_map[getattr(_lib, getattr(obj, 'MDB_NAME'))] = obj
     del obj
 
 def _error(what, rc):

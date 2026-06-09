@@ -6,6 +6,23 @@ build-backend = "setuptools.build_meta"
 markers = ["mdb_layout: low-level LMDB data layout validation tests"]
 addopts = "-m 'not mdb_layout'"
 
+[tool.mypy]
+# Type-check the unit tests so the public, stubbed API stays usable for
+# downstream users regardless of which type checker they run (see issue #469).
+python_version = "3.9"
+files = ["tests"]
+# Different checkers emit different error codes, so a code-specific ignore that
+# satisfies one can be flagged "unused" by another.  Don't police unused
+# ignores here; pyright handles its own.
+warn_unused_ignores = false
+
+# pytest ships py.typed but its internals use syntax newer than our minimum
+# (3.9) target; treat it as untyped rather than analysing its source.
+[[tool.mypy.overrides]]
+module = ["pytest", "_pytest.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.cibuildwheel]
 build-verbosity = 1
 skip = "*-musllinux_*"

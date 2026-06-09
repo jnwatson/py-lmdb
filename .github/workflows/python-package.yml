@@ -72,6 +72,38 @@ jobs:
     - name: Test with pytest
       run: pytest
 
+  type-check:
+    name: Type-check tests and stubs
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-typecheck.txt
+        python setup.py develop
+      env:
+        LMDB_FORCE_CPYTHON: 1
+
+    # Different type checkers report different things, so the test suite is
+    # validated against both mypy and pyright (issue #469).  stubtest checks
+    # the shipped stubs against the importable module.
+    - name: mypy
+      run: mypy
+
+    - name: pyright
+      run: pyright
+
+    - name: stubtest
+      run: python -m mypy.stubtest lmdb --allowlist tests/stubtest_allowlist.txt
+
   test-full:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
     if: github.event_name == 'push'
