@@ -9,3 +9,5 @@ pytest
 cffi
 patch-ng
 typing_extensions
+# Needed to build the extension via `setup.py develop` (not bundled on 3.12+).
+setuptools
