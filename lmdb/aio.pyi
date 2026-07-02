@@ -126,14 +126,19 @@ class AsyncEnvironment:
     async def dbs(self, txn: Transaction[_VT]) -> list[_VT]: ...
 
 class AsyncTransaction(Generic[_VT_co]):
-    __slots__ = "_txn", "_executor", "_lock"
+    __slots__ = "_txn", "_executor", "_lock", "_owns_executor", "_done"
 
     _txn: Transaction[_VT_co]
     _executor: Final[Executor | None]
     _lock: Final[asyncio.Lock]
+    _owns_executor: bool
+    _done: bool
 
     def __init__(
-        self, txn: Transaction[_VT_co], executor: Executor | None = None
+        self,
+        txn: Transaction[_VT_co],
+        executor: Executor | None = None,
+        owns_executor: bool = False,
     ) -> None: ...
     async def __aenter__(self) -> Self: ...
     async def __aexit__(

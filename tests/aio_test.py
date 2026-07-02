@@ -338,6 +338,123 @@ class AsyncConcurrencyTest(testlib.LmdbTest):
         run(go())
 
 
+class WriteExecutorTest(testlib.LmdbTest):
+    """Write txns must run entirely on one OS thread (issue #465).
+
+    LMDB ties a write transaction — and, on Linux, its robust process-shared
+    write mutex — to the thread that began it.  The wrapper therefore gives
+    each write txn a private single-thread executor rather than dispatching
+    its begin/op/commit across a shared, multi-threaded executor.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_write_txn_gets_private_single_thread_executor(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        async def go():
+            _, env = testlib.temp_env()
+            pool = ThreadPoolExecutor(4)  # deliberately multi-threaded
+            aenv = lmdb.aio.wrap(env, executor=pool)
+            async with aenv.begin(write=True) as txn:
+                self.assertTrue(txn._owns_executor)
+                self.assertIsNot(txn._executor, pool)
+                self.assertIsInstance(txn._executor, ThreadPoolExecutor)
+                self.assertEqual(txn._executor._max_workers, 1)
+                # A cursor inherits the txn's private executor, so its
+                # operations stay on the same thread as the write txn.
+                async with txn.cursor() as cur:
+                    self.assertIs(cur._executor, txn._executor)
+            pool.shutdown(wait=False)
+
+        run(go())
+
+    def test_read_txn_uses_env_executor(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        async def go():
+            _, env = testlib.temp_env()
+            pool = ThreadPoolExecutor(4)
+            aenv = lmdb.aio.wrap(env, executor=pool)
+            async with aenv.begin() as txn:  # read-only
+                self.assertFalse(txn._owns_executor)
+                self.assertIs(txn._executor, pool)
+            pool.shutdown(wait=False)
+
+        run(go())
+
+    def test_private_executor_released_on_commit(self):
+        async def go():
+            _, env = testlib.temp_env()
+            aenv = lmdb.aio.wrap(env)
+            async with aenv.begin(write=True) as txn:
+                await txn.put(b'k', b'v')
+                priv = txn._executor
+            # Left the block cleanly -> committed -> private pool shut down.
+            with self.assertRaises(RuntimeError):
+                priv.submit(lambda: None)
+            self.assertFalse(txn._owns_executor)
+
+        run(go())
+
+    def test_private_executor_released_on_abort(self):
+        async def go():
+            _, env = testlib.temp_env()
+            aenv = lmdb.aio.wrap(env)
+            priv = None
+            try:
+                async with aenv.begin(write=True) as txn:
+                    priv = txn._executor
+                    await txn.put(b'k', b'v')
+                    raise ValueError('boom')
+            except ValueError:
+                pass
+            # Exception -> aborted -> private pool shut down; data not written.
+            with self.assertRaises(RuntimeError):
+                priv.submit(lambda: None)
+            async with aenv.begin() as txn:
+                self.assertIsNone(await txn.get(b'k'))
+
+        run(go())
+
+    def test_explicit_commit_then_context_exit_is_noop(self):
+        """commit()/abort() finalize the txn; __aexit__ must not commit again."""
+        async def go():
+            _, env = testlib.temp_env()
+            aenv = lmdb.aio.wrap(env)
+            async with aenv.begin(write=True) as txn:
+                await txn.put(b'k', b'v')
+                await txn.commit()
+                self.assertTrue(txn._done)
+                # __aexit__ runs next; a second commit on the underlying txn
+                # would raise, so a clean exit proves it was a no-op.
+            async with aenv.begin() as txn:
+                self.assertEqual(await txn.get(b'k'), b'v')
+
+        run(go())
+
+    def test_writes_with_multithread_env_executor(self):
+        """Repeated write txns through a multi-threaded env executor must not
+        release the write mutex on the wrong thread."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        async def go():
+            _, env = testlib.temp_env()
+            pool = ThreadPoolExecutor(8)
+            aenv = lmdb.aio.wrap(env, executor=pool)
+            for i in range(50):
+                async with aenv.begin(write=True) as txn:
+                    await txn.put(str(i).encode(), str(i).encode())
+            async with aenv.begin() as txn:
+                for i in range(50):
+                    self.assertEqual(
+                        await txn.get(str(i).encode()), str(i).encode())
+            pool.shutdown(wait=False)
+
+        run(go())
+
+
 class IntrospectionTest(unittest.TestCase):
     """Proxied methods must be real class attributes (dir/inspect/stubtest)."""
 

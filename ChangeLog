@@ -1,6 +1,18 @@
 unreleased
 ##########
 
+Bug fixes
+---------
+
+- ``lmdb.aio``: an async write transaction is now pinned to a private
+    single-thread executor, so its ``begin``, operations, and
+    ``commit``/``abort`` all run on one OS thread. Previously they were
+    dispatched across the shared, multi-threaded default executor, which could
+    release LMDB's thread-bound robust write mutex on the wrong thread (the
+    failure mode of #465). ``AsyncCursor``/``AsyncEnvironment`` close on
+    context exit now also acquire the lock and run on the executor, so closing
+    can no longer race an in-flight operation on the same transaction.
+
 Improvements
 ------------
 
