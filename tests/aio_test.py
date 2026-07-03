@@ -359,9 +359,10 @@ class WriteExecutorTest(testlib.LmdbTest):
             aenv = lmdb.aio.wrap(env, executor=pool)
             async with aenv.begin(write=True) as txn:
                 self.assertTrue(txn._owns_executor)
-                self.assertIsNot(txn._executor, pool)
-                self.assertIsInstance(txn._executor, ThreadPoolExecutor)
-                self.assertEqual(txn._executor._max_workers, 1)
+                private = txn._executor
+                self.assertIsNot(private, pool)
+                assert isinstance(private, ThreadPoolExecutor)
+                self.assertEqual(private._max_workers, 1)
                 # A cursor inherits the txn's private executor, so its
                 # operations stay on the same thread as the write txn.
                 async with txn.cursor() as cur:
@@ -391,6 +392,7 @@ class WriteExecutorTest(testlib.LmdbTest):
             async with aenv.begin(write=True) as txn:
                 await txn.put(b'k', b'v')
                 priv = txn._executor
+                assert priv is not None  # write txns own a private pool
             # Left the block cleanly -> committed -> private pool shut down.
             with self.assertRaises(RuntimeError):
                 priv.submit(lambda: None)
@@ -411,6 +413,7 @@ class WriteExecutorTest(testlib.LmdbTest):
             except ValueError:
                 pass
             # Exception -> aborted -> private pool shut down; data not written.
+            assert priv is not None  # write txns own a private pool
             with self.assertRaises(RuntimeError):
                 priv.submit(lambda: None)
             async with aenv.begin() as txn:
