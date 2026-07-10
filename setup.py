@@ -144,6 +144,7 @@ if patch_lmdb_source:
         'win32-sparse-file',
         'fix-large-write',
         'fix-win-flush-large-write',
+        'fix-overflow-page-size-mul',
     ]
 
     if sys.platform.startswith('win'):

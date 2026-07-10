@@ -1,0 +1,21 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -2455,7 +2455,7 @@
+ 				if (!np)
+ 					return ENOMEM;
+ 				if (num > 1)
+-					memcpy(np, mp, num * env->me_psize);
++					memcpy(np, mp, (size_t)num * env->me_psize);
+ 				else
+ 					mdb_page_copy(np, mp, env->me_psize);
+ 			}
+@@ -9580,7 +9580,7 @@
+ 						my->mc_next_pgno += omp->mp_pages;
+ 						my->mc_wlen[toggle] += my->mc_env->me_psize;
+ 						if (omp->mp_pages > 1) {
+-							my->mc_olen[toggle] = my->mc_env->me_psize * (omp->mp_pages - 1);
++							my->mc_olen[toggle] = (size_t)my->mc_env->me_psize * (omp->mp_pages - 1);
+ 							my->mc_over[toggle] = (char *)omp + my->mc_env->me_psize;
+ 							rc = mdb_env_cthr_toggle(my, 1);
+ 							if (rc)
