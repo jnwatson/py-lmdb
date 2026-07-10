@@ -40,6 +40,7 @@ class OverflowCompactCopyTest(testlib.LmdbTest):
         try:
             with dst.begin() as txn:
                 got = txn.get(b'k')
+                assert got is not None
                 self.assertEqual(len(got), len(value))
                 self.assertEqual(got, value)
         finally:
