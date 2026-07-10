@@ -142,6 +142,7 @@ if patch_lmdb_source:
         'validate-md-depth',
         'validate-md-root',
         'win32-sparse-file',
+        'fix-large-write',
     ]
 
     if sys.platform.startswith('win'):
