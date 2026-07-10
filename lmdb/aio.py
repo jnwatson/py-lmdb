@@ -36,6 +36,7 @@ Usage::
 
 import asyncio
 import functools
+from concurrent.futures import ThreadPoolExecutor
 
 from . import Cursor, Environment, Transaction
 
@@ -158,7 +159,8 @@ class AsyncEnvironment:
         return self
 
     async def __aexit__(self, *_exc):
-        self._env.close()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(self._executor, self._env.close)
 
     # -- methods that return wrapped objects -------------------------------
 
@@ -170,14 +172,34 @@ class AsyncEnvironment:
 
             async with aenv.begin(write=True) as txn:
                 await txn.put(b'key', b'value')
+
+        A **write** transaction is given its own private single-thread
+        executor, so ``begin``, every operation, and ``commit``/``abort`` all
+        run on one OS thread.  LMDB ties a write transaction (and, on Linux,
+        its robust process-shared write mutex) to the thread that began it, so
+        dispatching its operations across a shared multi-threaded executor
+        could release the mutex on the wrong thread (see issue #465).  Read
+        transactions are safe to migrate between threads under ``MDB_NOTLS``
+        and use the environment's executor.
         """
+        # begin(db=None, parent=None, write=False, buffers=False)
+        write = bool(kwargs.get('write', args[2] if len(args) > 2 else False))
+
         async def _begin():
+            private = ThreadPoolExecutor(max_workers=1) if write else None
+            executor = private if private is not None else self._executor
             loop = asyncio.get_running_loop()
-            txn = await loop.run_in_executor(
-                self._executor,
-                functools.partial(self._env.begin, *args, **kwargs),
-            )
-            return AsyncTransaction(txn, self._executor)
+            try:
+                txn = await loop.run_in_executor(
+                    executor,
+                    functools.partial(self._env.begin, *args, **kwargs),
+                )
+            except BaseException:
+                if private is not None:
+                    private.shutdown(wait=False)
+                raise
+            return AsyncTransaction(
+                txn, executor, owns_executor=private is not None)
         return _AsyncContextWrapper(_begin())
 
     # -- proxied methods --------------------------------------------------
@@ -222,14 +244,26 @@ class AsyncTransaction:
     and aborted on exception.
     """
 
-    __slots__ = ('_txn', '_executor', '_lock')
+    __slots__ = ('_txn', '_executor', '_lock', '_owns_executor', '_done')
 
     _WRAPS = '_txn'
 
-    def __init__(self, txn, executor=None):
+    def __init__(self, txn, executor=None, owns_executor=False):
         self._txn = txn
         self._executor = executor
+        # True for write transactions, whose *executor* is a private
+        # single-thread pool created by :py:meth:`AsyncEnvironment.begin` and
+        # torn down when the transaction finishes.
+        self._owns_executor = owns_executor
+        self._done = False
         self._lock = asyncio.Lock()
+
+    def _shutdown_executor(self):
+        if self._owns_executor:
+            self._owns_executor = False
+            executor = self._executor
+            assert executor is not None  # an owned executor is a real pool
+            executor.shutdown(wait=False)
 
     # -- context manager --------------------------------------------------
 
@@ -238,11 +272,20 @@ class AsyncTransaction:
 
     async def __aexit__(self, exc_type, _exc_val, _exc_tb):
         async with self._lock:
-            if exc_type:
-                self._txn.abort()
-            else:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(self._executor, self._txn.commit)
+            # An explicit commit()/abort() may already have finished the txn.
+            if self._done:
+                return
+            self._done = True
+            loop = asyncio.get_running_loop()
+            try:
+                # abort, like commit, must run on the executor so that a
+                # write txn releases its thread-bound mutex on its own thread.
+                if exc_type:
+                    await loop.run_in_executor(self._executor, self._txn.abort)
+                else:
+                    await loop.run_in_executor(self._executor, self._txn.commit)
+            finally:
+                self._shutdown_executor()
 
     # -- methods that return wrapped objects -------------------------------
 
@@ -272,13 +315,31 @@ class AsyncTransaction:
 
     stat = _async_method_locked(Transaction.stat)
     drop = _async_method_locked(Transaction.drop)
-    commit = _async_method_locked(Transaction.commit)
-    abort = _async_method_locked(Transaction.abort)
     get = _async_method_locked(Transaction.get)
     put = _async_method_locked(Transaction.put)
     replace = _async_method_locked(Transaction.replace)
     pop = _async_method_locked(Transaction.pop)
     delete = _async_method_locked(Transaction.delete)
+
+    async def commit(self):
+        """Commit the transaction and release its executor if privately owned."""
+        async with self._lock:
+            self._done = True
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(self._executor, self._txn.commit)
+            finally:
+                self._shutdown_executor()
+
+    async def abort(self):
+        """Abort the transaction and release its executor if privately owned."""
+        async with self._lock:
+            self._done = True
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(self._executor, self._txn.abort)
+            finally:
+                self._shutdown_executor()
 
     # -- attribute fallback -----------------------------------------------
 
@@ -319,7 +380,12 @@ class AsyncCursor:
         return self
 
     async def __aexit__(self, *_exc):
-        self._cursor.close()
+        # Serialize with sibling operations on the shared transaction and run
+        # on the executor, so closing never races an in-flight op in a worker
+        # thread (which would touch the same MDB_txn concurrently).
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(self._executor, self._cursor.close)
 
     # -- proxied methods --------------------------------------------------
 
