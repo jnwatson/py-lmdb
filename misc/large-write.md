@@ -36,6 +36,15 @@ Before the fix the commit fails with `mdb_txn_commit: Input/output error` on
 Linux; after the fix both succeed.  It is skipped by default because it needs
 >2 GiB of RAM and disk.
 
+`misc/large-write-repro.c` is a standalone C reproducer against the raw
+LMDB API (for reporting upstream): it commits a 2.25 GiB value and prints
+`BUG REPRODUCED` (EIO) on unpatched LMDB, or `OK` once fixed.
+
+```
+gcc -O2 -o repro large-write-repro.c mdb.c midl.c -lpthread
+./repro /path/to/scratch
+```
+
 ## Verification
 
 Verified end-to-end on both Linux and Windows: the opt-in test (a 2.25 GiB
