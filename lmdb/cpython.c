@@ -55,7 +55,6 @@
 
 #ifndef _WIN32
 #include <pthread.h>
-#include <unistd.h> /* usleep */
 #endif
 
 #include "lmdb.h"
@@ -193,23 +192,10 @@ struct EnvObject {
     unsigned long write_txn_tid;
     /** Resolved path used to track this env in open_env_paths. */
     PyObject *open_path;
-    /** Count of in-flight LMDB operations (GIL released).  env_clear waits
-     *  for this to reach 0 before calling mdb_env_close.  Issue #180. */
+    /** Count of in-flight LMDB operations (GIL released).  env_clear and
+     *  set_mapsize wait for this to reach 0 before closing/remapping the
+     *  env.  Issue #180. */
     int active_ops;
-    /** Lock used to block-wait for active_ops to reach 0 instead of
-     *  spinning.  Allocated in locked state; released when active_ops
-     *  decrements to 0 and active_ops_waiter is set.  Issue #180. */
-    PyThread_type_lock active_ops_lock;
-    /** 1 if a thread is blocked waiting for active_ops to reach 0. */
-    int active_ops_waiter;
-    /** Lock used to block-wait in close() for another thread to release
-     *  an active write transaction (so its robust write mutex is unlocked
-     *  on the owning thread before the lock file is unmapped).  Allocated
-     *  in locked state; released by the owning thread after it aborts or
-     *  commits the write txn, when write_txn_waiter is set.  Issue #465. */
-    PyThread_type_lock write_txn_lock;
-    /** 1 if a thread is blocked in close() waiting for the write txn. */
-    int write_txn_waiter;
     /** 1 while set_mapsize() is inside its invalidate/remap critical
      *  section.  New GIL-releasing LMDB operations fail fast with EINVAL
      *  until the resize completes (see ENV_RESIZE_BLOCKED).  Issue #475. */
@@ -218,6 +204,28 @@ struct EnvObject {
      *  re-entry (e.g. a destructor running during invalidation, while the
      *  old map is still valid) passes through instead of failing. */
     unsigned long resize_tid;
+    /** 1 once ops_mutex/ops_cond below are initialized (guards teardown
+     *  on env_new error paths). */
+    int ops_sync_ready;
+    /** Mutex + condition variable guarding writes to active_ops,
+     *  write_txn_tid and resizing, and waking their waiters: env_clear's
+     *  operation drain, its issue-#465 write-txn wait and its wait for a
+     *  concurrent resize, trans_abort's child-operation wait, and
+     *  set_mapsize's drains.  A condition variable (rather than the
+     *  previous single-slot PyThread lock handoff) supports multiple
+     *  concurrent waiters: e.g. a write-transaction abort and a
+     *  set_mapsize can drain simultaneously without a lost wakeup.
+     *  Broadcasts happen when active_ops reaches 0, when write_txn_tid
+     *  clears, and when a resize completes.  All writes to the guarded
+     *  fields also happen with the GIL held, so GIL-holding readers need
+     *  not take the mutex.  Issues #180, #465, #475. */
+#ifdef _WIN32
+    CRITICAL_SECTION ops_mutex;
+    CONDITION_VARIABLE ops_cond;
+#else
+    pthread_mutex_t ops_mutex;
+    pthread_cond_t ops_cond;
+#endif
 };
 
 /** TransObject.flags bitfield values. */
@@ -761,57 +769,92 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
     out = (e); \
     Py_END_ALLOW_THREADS
 
-/* ACTIVE_OPS_DEC: decrement active_ops and signal the waiter lock if it
- * reaches 0 and someone is waiting.  Must be called with the GIL held.
- * Issue #180. */
-#define ACTIVE_OPS_DEC(_env) \
+/* Primitive wrappers for the env's ops_mutex/ops_cond (see EnvObject).
+ * The mutex is a leaf lock: held only for brief field updates or inside
+ * ENV_WAIT_WHILE — never while acquiring the GIL or calling into LMDB or
+ * Python, so no lock-order cycle with the GIL is possible. */
+#ifdef _WIN32
+#define ENV_SYNC_LOCK(_env)      EnterCriticalSection(&(_env)->ops_mutex)
+#define ENV_SYNC_UNLOCK(_env)    LeaveCriticalSection(&(_env)->ops_mutex)
+#define ENV_SYNC_WAIT(_env) \
+    SleepConditionVariableCS(&(_env)->ops_cond, &(_env)->ops_mutex, INFINITE)
+#define ENV_SYNC_BROADCAST(_env) WakeAllConditionVariable(&(_env)->ops_cond)
+#else
+#define ENV_SYNC_LOCK(_env)      pthread_mutex_lock(&(_env)->ops_mutex)
+#define ENV_SYNC_UNLOCK(_env)    pthread_mutex_unlock(&(_env)->ops_mutex)
+#define ENV_SYNC_WAIT(_env) \
+    pthread_cond_wait(&(_env)->ops_cond, &(_env)->ops_mutex)
+#define ENV_SYNC_BROADCAST(_env) pthread_cond_broadcast(&(_env)->ops_cond)
+#endif
+
+/* ENV_WAIT_WHILE: block (GIL released) until `cond` becomes false.  `cond`
+ * is evaluated under ops_mutex, so it may only reference fields whose
+ * writes take the mutex (active_ops, write_txn_tid, resizing/resize_tid)
+ * and thread-locals.  Multiple threads may wait concurrently; every state
+ * change broadcasts.  On return the GIL has been reacquired, and GIL-
+ * guarded state may have changed meanwhile — callers needing a GIL-stable
+ * predicate must re-check and loop.  Issues #180, #465, #475. */
+#define ENV_WAIT_WHILE(_env, cond) \
     do { \
-        if(--(_env)->active_ops == 0 && (_env)->active_ops_waiter) { \
-            (_env)->active_ops_waiter = 0; \
-            PyThread_release_lock((_env)->active_ops_lock); \
+        Py_BEGIN_ALLOW_THREADS \
+        ENV_SYNC_LOCK(_env); \
+        while(cond) { \
+            ENV_SYNC_WAIT(_env); \
         } \
+        ENV_SYNC_UNLOCK(_env); \
+        Py_END_ALLOW_THREADS \
     } while(0)
 
-/* NOTIFY_WRITE_TXN_DONE: wake a thread blocked in env_clear waiting for
- * this (owning) thread to release its write transaction.  MUST be called
- * with the GIL held and only AFTER the write txn's mutex has been
- * released (i.e. after mdb_txn_abort/commit completes), so the waiter
- * does not unmap the lock file while the robust mutex is still held.
- * Issue #465. */
-#define NOTIFY_WRITE_TXN_DONE(_env) \
+/* ACTIVE_OPS_INC/DEC: adjust the in-flight operation count.  Must be
+ * called with the GIL held; the mutex makes the update visible to
+ * non-GIL-holding waiters in ENV_WAIT_WHILE.  Issue #180. */
+#define ACTIVE_OPS_INC(_env) \
     do { \
-        if((_env)->write_txn_waiter) { \
-            (_env)->write_txn_waiter = 0; \
-            PyThread_release_lock((_env)->write_txn_lock); \
+        ENV_SYNC_LOCK(_env); \
+        (_env)->active_ops++; \
+        ENV_SYNC_UNLOCK(_env); \
+    } while(0)
+
+#define ACTIVE_OPS_DEC(_env) \
+    do { \
+        ENV_SYNC_LOCK(_env); \
+        if(--(_env)->active_ops == 0) { \
+            ENV_SYNC_BROADCAST(_env); \
         } \
+        ENV_SYNC_UNLOCK(_env); \
+    } while(0)
+
+/* CLEAR_WRITE_TXN_TID: record that this thread's write transaction is
+ * fully released, waking env_clear's issue-#465 wait and set_mapsize's
+ * drain.  MUST be called with the GIL held and only AFTER the write txn's
+ * mutex has been released (i.e. after mdb_txn_abort/commit completes), so
+ * a waiter does not unmap the lock file, or remap the data file, while
+ * the transaction is still live.  Issues #465, #475. */
+#define CLEAR_WRITE_TXN_TID(_env) \
+    do { \
+        ENV_SYNC_LOCK(_env); \
+        (_env)->write_txn_tid = 0; \
+        ENV_SYNC_BROADCAST(_env); \
+        ENV_SYNC_UNLOCK(_env); \
+    } while(0)
+
+/* SET_WRITE_TXN_TID: record this thread as the write-txn owner.  Must be
+ * called with the GIL held; mutex-protected for ENV_WAIT_WHILE readers. */
+#define SET_WRITE_TXN_TID(_env) \
+    do { \
+        ENV_SYNC_LOCK(_env); \
+        (_env)->write_txn_tid = (unsigned long) PyThread_get_thread_ident(); \
+        ENV_SYNC_UNLOCK(_env); \
     } while(0)
 
 /* ENV_UNLOCKED: release GIL for an LMDB call, holding the env's active_ops
  * counter to prevent env_clear from closing the env underneath us.  The
  * counter is incremented while the GIL is still held (so env_clear can't
  * start between our valid-check and the increment), and decremented after
- * we reacquire the GIL.  See issue #180. */
-/* ENV_UNLOCKED: release GIL for an LMDB call.  The _env expression is
- * evaluated once while the GIL is held and saved to a local, so pointer
- * chains like self->trans->env remain valid for ACTIVE_OPS_DEC even if
- * another thread NULLs an intermediate pointer during the GIL release.
- * Issue #180. */
-/* MILLISLEEP: sleep ~1ms with the GIL released; used by polling waits. */
-#ifdef _WIN32
-#define MILLISLEEP() \
-    do { \
-        Py_BEGIN_ALLOW_THREADS \
-        Sleep(1); \
-        Py_END_ALLOW_THREADS \
-    } while(0)
-#else
-#define MILLISLEEP() \
-    do { \
-        Py_BEGIN_ALLOW_THREADS \
-        usleep(1000); \
-        Py_END_ALLOW_THREADS \
-    } while(0)
-#endif
+ * we reacquire the GIL.  The _env expression is evaluated once while the
+ * GIL is held and saved to a local, so pointer chains like
+ * self->trans->env remain valid for ACTIVE_OPS_DEC even if another thread
+ * NULLs an intermediate pointer during the GIL release.  Issue #180. */
 
 /* ENV_RESIZE_BLOCKED: true when another thread is inside set_mapsize()'s
  * invalidate/remap critical section.  A new GIL-releasing LMDB operation
@@ -834,7 +877,7 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
             out = EINVAL; \
         } \
         else { \
-            _saved_env->active_ops++; \
+            ACTIVE_OPS_INC(_saved_env); \
             Py_BEGIN_ALLOW_THREADS \
             out = (e); \
             Py_END_ALLOW_THREADS \
@@ -857,7 +900,7 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
     do { \
         EnvObject *_saved_env = (_env); \
         if(! _saved_env->resizing) { \
-            _saved_env->active_ops++; \
+            ACTIVE_OPS_INC(_saved_env); \
             Py_BEGIN_ALLOW_THREADS \
             preload(_rc, _data, _size); \
             Py_END_ALLOW_THREADS \
@@ -1172,7 +1215,7 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
             if(rc) {
                 return err_set("mdb_txn_begin", rc);
             }
-            env->write_txn_tid = PyThread_get_thread_ident();
+            SET_WRITE_TXN_TID(env);
         } else {
             /* Read txns and child txns: hold GIL during mdb_txn_begin to
              * prevent race with env_clear.  Issue #180. */
@@ -1186,9 +1229,8 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
     if(! ((self = PyObject_New(TransObject, &PyTransaction_Type)))) {
         mdb_txn_abort(txn);
         if(write && !parent) {
-            env->write_txn_tid = 0;
-            /* Mutex released; wake any close() waiting on it.  #465. */
-            NOTIFY_WRITE_TXN_DONE(env);
+            /* Mutex released; wakes any close() waiting on it.  #465. */
+            CLEAR_WRITE_TXN_TID(env);
         }
         return NULL;
     }
@@ -1441,17 +1483,19 @@ static int
 env_clear(EnvObject *self)
 {
     MDB_txn * txn;
+    unsigned long me = (unsigned long) PyThread_get_thread_ident();
 
     MDEBUG("env_clear")
 
     /* If another thread is inside set_mapsize's critical section, wait
-     * (by polling — the active_ops waiter protocol is single-waiter) for
-     * it to finish before tearing the env down, so the two invalidation
-     * walks cannot interleave.  Same-thread re-entry (a destructor during
-     * the resize's invalidation phase) passes through.  set_mapsize never
-     * waits on close, so this cannot deadlock.  Issue #475. */
+     * for it to finish before tearing the env down, so the two
+     * invalidation walks cannot interleave.  Same-thread re-entry (a
+     * destructor during the resize's invalidation phase) passes through.
+     * set_mapsize never waits on close, so this cannot deadlock.  The
+     * outer loop re-checks under the GIL in case a new resize started
+     * between the wait ending and us reacquiring the GIL.  Issue #475. */
     while(ENV_RESIZE_BLOCKED(self)) {
-        MILLISLEEP();
+        ENV_WAIT_WHILE(self, self->resizing && self->resize_tid != me);
     }
 
     self->valid = 0;
@@ -1459,16 +1503,10 @@ env_clear(EnvObject *self)
      * This prevents any descendant from starting new LMDB operations. */
     INVALIDATE_MARK(self)
 
-    /* Wait for in-flight LMDB operations to complete.  active_ops is
-     * incremented/decremented under the GIL.  ACTIVE_OPS_DEC releases
-     * the lock when active_ops reaches 0, waking us.  Issue #180. */
+    /* Wait for in-flight LMDB operations to complete.  self->valid = 0
+     * above (GIL held) prevents new ones from starting.  Issue #180. */
     if(self->active_ops > 0) {
-        self->active_ops_waiter = 1;
-        Py_BEGIN_ALLOW_THREADS
-        PyThread_acquire_lock(self->active_ops_lock, WAIT_LOCK);
-        Py_END_ALLOW_THREADS
-        /* Re-acquire so lock stays in locked state for next wait. */
-        PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+        ENV_WAIT_WHILE(self, self->active_ops > 0);
     }
 
     /* LMDB requires all transactions to be closed before mdb_env_close,
@@ -1483,18 +1521,14 @@ env_clear(EnvObject *self)
      * file underneath it strands a dangling entry on the owning thread's
      * robust list -> SIGSEGV in a later mdb_txn_begin on aarch64 (glibc
      * tolerates this on x86_64).  Honor the contract: block until the
-     * owning thread releases the write txn (it signals write_txn_lock
-     * after its abort/commit unlocks the mutex on the correct thread),
-     * then tear the mapping down.  We check write_txn_tid under the GIL
-     * and set the waiter flag before releasing it, so the owning thread
-     * (which needs the GIL to run its teardown) cannot signal before we
-     * are registered -- no lost wakeup, no polling.  Issue #465. */
-    if(self->write_txn_tid &&
-       self->write_txn_tid != (unsigned long) PyThread_get_thread_ident()) {
-        self->write_txn_waiter = 1;
-        Py_BEGIN_ALLOW_THREADS
-        PyThread_acquire_lock(self->write_txn_lock, WAIT_LOCK);
-        Py_END_ALLOW_THREADS
+     * owning thread releases the write txn, then tear the mapping down.
+     * The owning thread broadcasts on ops_cond after its abort/commit
+     * unlocks the mutex (CLEAR_WRITE_TXN_TID); the condition variable
+     * re-checks the predicate under ops_mutex, so there is no lost
+     * wakeup and no polling.  Issue #465. */
+    if(self->write_txn_tid && self->write_txn_tid != me) {
+        ENV_WAIT_WHILE(self,
+            self->write_txn_tid && self->write_txn_tid != me);
     }
 
     /* Phase 2: actual cleanup (may release GIL for txn_abort etc.) */
@@ -1524,7 +1558,7 @@ env_clear(EnvObject *self)
          * reference and freeing the EnvObject while mdb_env_close is
          * still running.  Issue #180, #418. */
         Py_INCREF((PyObject *)self);
-        self->active_ops++;
+        ACTIVE_OPS_INC(self);
         Py_BEGIN_ALLOW_THREADS
         mdb_env_close(env);
         Py_END_ALLOW_THREADS
@@ -1557,13 +1591,15 @@ env_dealloc(EnvObject *self)
      * env_clear drops it to 1, not 0. */
     Py_SET_REFCNT((PyObject *)self, 1);
     env_clear(self);
-    if(self->active_ops_lock) {
-        PyThread_free_lock(self->active_ops_lock);
-        self->active_ops_lock = NULL;
-    }
-    if(self->write_txn_lock) {
-        PyThread_free_lock(self->write_txn_lock);
-        self->write_txn_lock = NULL;
+    if(self->ops_sync_ready) {
+        self->ops_sync_ready = 0;
+#ifdef _WIN32
+        DeleteCriticalSection(&self->ops_mutex);
+        /* CONDITION_VARIABLEs need no explicit destruction. */
+#else
+        pthread_mutex_destroy(&self->ops_mutex);
+        pthread_cond_destroy(&self->ops_cond);
+#endif
     }
     PyObject_Del(self);
 }
@@ -1652,29 +1688,27 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->pid = _cached_pid;
     self->write_txn_tid = 0;
     self->active_ops = 0;
-    self->active_ops_waiter = 0;
-    self->write_txn_waiter = 0;
-    self->write_txn_lock = NULL;
     self->resizing = 0;
     self->resize_tid = 0;
-    self->active_ops_lock = PyThread_allocate_lock();
-    if(! self->active_ops_lock) {
-        PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
+    self->ops_sync_ready = 0;
+#ifdef _WIN32
+    InitializeCriticalSection(&self->ops_mutex);
+    InitializeConditionVariable(&self->ops_cond);
+#else
+    if(pthread_mutex_init(&self->ops_mutex, NULL)) {
+        PyErr_SetString(PyExc_MemoryError, "unable to initialize mutex");
         Py_DECREF(self);
         return NULL;
     }
-    /* Acquire immediately so waiters will block until signaled. */
-    PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
-
-    self->write_txn_lock = PyThread_allocate_lock();
-    if(! self->write_txn_lock) {
-        PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
+    if(pthread_cond_init(&self->ops_cond, NULL)) {
+        pthread_mutex_destroy(&self->ops_mutex);
+        PyErr_SetString(PyExc_MemoryError,
+                        "unable to initialize condition variable");
         Py_DECREF(self);
         return NULL;
     }
-    /* Acquire immediately so a close() waiter blocks until the owning
-     * thread releases its write transaction. */
-    PyThread_acquire_lock(self->write_txn_lock, NOWAIT_LOCK);
+#endif
+    self->ops_sync_ready = 1;
 
     if((rc = mdb_env_create(&self->env))) {
         err_set("mdb_env_create", rc);
@@ -2437,8 +2471,10 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * concurrently with the remap.  GIL-held LMDB calls need no gate —
      * the remap below also runs with the GIL held, so they cannot
      * overlap it.  Issue #475. */
+    ENV_SYNC_LOCK(self);
     self->resizing = 1;
     self->resize_tid = (unsigned long) PyThread_get_thread_ident();
+    ENV_SYNC_UNLOCK(self);
 
     /* Phase 1: quickly mark open transactions (and their cursors) invalid so
      * no new LMDB operations can start on them.  Database handles are left
@@ -2446,15 +2482,14 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * stays valid (we do NOT set self->valid = 0). */
     INVALIDATE_MARK_TXNS(self)
 
-    /* Wait for in-flight LMDB operations to complete, by polling.  The
-     * active_ops_waiter protocol is single-waiter: trans_abort (and
-     * env_clear) may be blocked in it concurrently — e.g. a write
-     * transaction abort waiting out a child operation, having already
-     * cleared write_txn_tid — and a second waiter on the same lock loses
-     * the wakeup and deadlocks.  Polling has no such collision, and a
-     * resize is rare and heavyweight anyway.  Issue #475. */
+    /* Wait for in-flight LMDB operations to complete.  The condition
+     * variable supports multiple waiters, so this cannot collide with a
+     * trans_abort or env_clear draining concurrently.  The outer loop
+     * re-checks under the GIL: trans_dealloc on another thread can
+     * increment active_ops (it does not pass the resize gate) between the
+     * wait ending and us reacquiring the GIL.  Issue #475. */
     while(self->active_ops > 0) {
-        MILLISLEEP();
+        ENV_WAIT_WHILE(self, self->active_ops > 0);
     }
 
     /* Phase 2: abort all child transactions and close cursors.  This must
@@ -2466,20 +2501,25 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * holding active_ops: trans_abort() NULLs self->txn on entry (so the
      * invalidation above skipped it) and may sit in its child-op wait
      * before performing the real mdb_txn_abort.  Such a transaction keeps
-     * write_txn_tid set until the abort completes, and either the tid is
-     * still set or its final abort/dealloc is in flight under active_ops —
-     * both observable here.  Wait them out, or the remap below would find
-     * the transaction undead and fail with EINVAL.  New write transactions
-     * cannot start: begins fail fast on the resize gate.  Issue #475. */
+     * write_txn_tid set until the abort completes (CLEAR_WRITE_TXN_TID
+     * broadcasts), and either the tid is still set or its final
+     * abort/dealloc is in flight under active_ops — both observable here.
+     * Wait them out, or the remap below would find the transaction undead
+     * and fail with EINVAL.  New write transactions cannot start: begins
+     * fail fast on the resize gate.  Issue #475. */
     while(self->active_ops > 0 || self->write_txn_tid) {
-        MILLISLEEP();
+        ENV_WAIT_WHILE(self,
+            self->active_ops > 0 || self->write_txn_tid);
     }
 
     /* A destructor triggered during invalidation may have closed the env
      * on this thread (same-thread re-entry passes the resize gate).
      * Don't remap a closed env. */
     if(! self->valid || ! self->env) {
+        ENV_SYNC_LOCK(self);
         self->resizing = 0;
+        ENV_SYNC_BROADCAST(self);
+        ENV_SYNC_UNLOCK(self);
         return err_invalid();
     }
 
@@ -2503,7 +2543,12 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         self->valid = 0;
     }
 
+    /* Leave the critical section; wake an env_clear waiting for the
+     * resize to finish. */
+    ENV_SYNC_LOCK(self);
     self->resizing = 0;
+    ENV_SYNC_BROADCAST(self);
+    ENV_SYNC_UNLOCK(self);
 
     if(rc) {
         return err_set("mdb_env_set_mapsize", rc);
@@ -2714,7 +2759,7 @@ _cursor_get_c(CursorObject *self, enum MDB_cursor_op op)
 {
     int rc;
 
-    self->trans->env->active_ops++;
+    ACTIVE_OPS_INC(self->trans->env);
     Py_BEGIN_ALLOW_THREADS;
     rc = mdb_cursor_get(self->curs, &self->key, &self->val, op);
     Py_END_ALLOW_THREADS;
@@ -4084,7 +4129,10 @@ trans_clear(TransObject *self)
         self->txn = NULL;  /* Prevent double-abort from concurrent
                             * trans_clear calls (issue #180). */
         if(self->env && !(self->flags & TRANS_RDONLY)) {
-            self->env->write_txn_tid = 0;
+            /* The abort below runs with the GIL held, so a #465 waiter
+             * (which needs the GIL to proceed) cannot act on the cleared
+             * tid before the write mutex is actually released. */
+            CLEAR_WRITE_TXN_TID(self->env);
         }
         /* Don't release the GIL here — trans_clear is called from
          * invalidate() while iterating the children list, and releasing
@@ -4142,15 +4190,16 @@ trans_dealloc(TransObject *self)
              * this abort is in flight.  Issue #180. */
             self->txn = NULL;
             if(self->env) {
-                self->env->write_txn_tid = 0;
                 if(self->env->env) {
-                    self->env->active_ops++;
+                    ACTIVE_OPS_INC(self->env);
                     txn_abort(txn);
                     ACTIVE_OPS_DEC(self->env);
-                    /* Mutex released on this (owning) thread; wake a
-                     * close() blocked waiting for it.  Issue #465. */
-                    NOTIFY_WRITE_TXN_DONE(self->env);
                 }
+                /* Mutex released on this (owning) thread; wakes a
+                 * close() blocked waiting for it.  Cleared after the
+                 * abort so waiters never observe tid == 0 while the
+                 * transaction is still live.  Issues #465, #475. */
+                CLEAR_WRITE_TXN_TID(self->env);
             }
         }
         MDEBUG("deleting trans")
@@ -4244,27 +4293,22 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                  * invalidation pass skips this txn because self->txn was
                  * already NULLed above).  Issues #465, #475. */
                 if(env->active_ops > 0) {
-                    env->active_ops_waiter = 1;
-                    Py_BEGIN_ALLOW_THREADS
-                    PyThread_acquire_lock(env->active_ops_lock, WAIT_LOCK);
-                    Py_END_ALLOW_THREADS
-                    PyThread_acquire_lock(env->active_ops_lock, NOWAIT_LOCK);
+                    ENV_WAIT_WHILE(env, env->active_ops > 0);
                 }
-                env->active_ops++;
+                ACTIVE_OPS_INC(env);
                 Py_BEGIN_ALLOW_THREADS
                 mdb_txn_abort(txn);
                 Py_END_ALLOW_THREADS
                 ACTIVE_OPS_DEC(env);
-                env->write_txn_tid = 0;
-                /* Mutex released on this (owning) thread; wake a close()
+                /* Mutex released on this (owning) thread; wakes a close()
                  * blocked waiting for it.  Issue #465. */
-                NOTIFY_WRITE_TXN_DONE(env);
+                CLEAR_WRITE_TXN_TID(env);
             } else {
                 if(txn) {
                     mdb_txn_abort(txn);
                 }
                 if(env) {
-                    env->write_txn_tid = 0;
+                    CLEAR_WRITE_TXN_TID(env);
                 }
             }
         }
@@ -4305,16 +4349,17 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         EnvObject *env = self->env;
         self->txn = NULL;
         Py_INCREF((PyObject *) env);
-        env->write_txn_tid = 0;
         DEBUG("committing")
-        env->active_ops++;
+        ACTIVE_OPS_INC(env);
         Py_BEGIN_ALLOW_THREADS
         rc = mdb_txn_commit(txn);
         Py_END_ALLOW_THREADS
         ACTIVE_OPS_DEC(env);
-        /* Mutex released on this (owning) thread; wake a close() blocked
-         * waiting for it.  Issue #465. */
-        NOTIFY_WRITE_TXN_DONE(env);
+        /* Mutex released on this (owning) thread; wakes a close() blocked
+         * waiting for it.  Cleared after the commit so waiters never
+         * observe tid == 0 while the transaction is still live.
+         * Issues #465, #475. */
+        CLEAR_WRITE_TXN_TID(env);
         Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
@@ -4460,7 +4505,7 @@ trans_get(TransObject *self, PyObject *args, PyObject *kwds)
         goto out;
     }
 
-    self->env->active_ops++;
+    ACTIVE_OPS_INC(self->env);
     Py_BEGIN_ALLOW_THREADS
     rc = mdb_get(self->txn, arg.db->dbi, &arg.key, &val);
     preload(rc, val.mv_data, val.mv_size);
