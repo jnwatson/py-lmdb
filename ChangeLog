@@ -1,5 +1,5 @@
-unreleased
-##########
+2026-07-12 2.3.0
+#################
 
 Bug fixes
 ---------
@@ -11,7 +11,32 @@ Bug fixes
     release LMDB's thread-bound robust write mutex on the wrong thread (the
     failure mode of #465). ``AsyncCursor``/``AsyncEnvironment`` close on
     context exit now also acquire the lock and run on the executor, so closing
-    can no longer race an in-flight operation on the same transaction.
+    can no longer race an in-flight operation on the same transaction. (#471)
+
+- Fix committing values larger than ~2 GiB. A single LMDB value is written
+    in one call, exceeding per-call platform write limits: on POSIX,
+    ``write()`` returns a short count that was treated as fatal, so the
+    commit failed with ``mdb_txn_commit: Input/output error``; the bundled
+    liblmdb now resumes after short writes. On Windows, the compacting-copy
+    writer thread passed the full length to ``WriteFile``, whose 32-bit
+    length truncates; it now caps each write at 1 GiB. (#474; patch to the
+    bundled liblmdb — not applied when building with ``LMDB_PURE`` or a
+    system liblmdb)
+
+- Fix silent data loss on Windows committing values near the 4 GiB maximum.
+    ``mdb_page_flush`` wrote each overflow extent with a single ``WriteFile``
+    whose 32-bit length truncates — an extent of exactly 4 GiB wrote nothing
+    at all, committing a value of zeroes. Writes are now chunked with the
+    bytes-written count checked. (#476; patch to the bundled liblmdb — not
+    applied when building with ``LMDB_PURE`` or a system liblmdb)
+
+- Fix 32-bit overflow in the bundled liblmdb's overflow-page byte-length
+    math. For values within one page of the 4 GiB maximum, the products
+    ``num * me_psize`` (dirty-page spill) and ``me_psize * (mp_pages - 1)``
+    (compacting copy) wrapped on 64-bit builds, truncating the copied value
+    or crashing. Both multiplications are widened to ``size_t``. (#473;
+    patch to the bundled liblmdb — not applied when building with
+    ``LMDB_PURE`` or a system liblmdb)
 
 - Fix ``Environment.set_mapsize()`` invalidating open database handles.
     Since 2.2.0 (#443), calling ``set_mapsize()`` between transactions
@@ -35,7 +60,9 @@ Bug fixes
     ``stat``/``drop`` and the environment-level ``stat``/``info``/``sync``/
     ``copy``/``copyfd``/``readers``/``reader_check`` against
     ``close()``/``set_mapsize()``, closing long-standing crash races with
-    ``close()`` as well. (#475)
+    ``close()`` as well. Operations racing a ``set_mapsize()`` on another
+    thread now raise a transient ``lmdb.Error`` (CPython) or the CFFI
+    invalid-handle ``TypeError`` instead of crashing or deadlocking. (#475)
 
 Improvements
 ------------
@@ -43,7 +70,10 @@ Improvements
 - The unit test suite is now type-checked in CI with both mypy and pyright,
     and the shipped stubs are validated against the runtime module with
     stubtest, so the public typed API stays usable regardless of which type
-    checker downstream users run. (#469)
+    checker downstream users run. (#469, #470)
+
+- Add missing ``lmdb.aio.AsyncEnvironment`` method stubs.
+    (#468, contributed by jorenham)
 
 - ``lmdb.version(subpatch=True)`` is now correctly typed via overloads,
     returning a 4-tuple instead of a 3-tuple. (#469)
@@ -52,6 +82,7 @@ Improvements
     ``Cursor.db``, and ``Cursor.txn`` are now private (``_pyenv``, ``_pydb``,
     ``_pytxn``). They were never exposed by the CPython extension, so this
     aligns the two backends. These were undocumented implementation details.
+    (#469, #470)
 
 2026-06-03 2.2.1
 #################
@@ -80,7 +111,8 @@ Fixes
 
 - Reject adversarial on-disk values that could overflow size arithmetic
     or cause implementation-defined narrowing of ``mv_size`` when reading
-    crafted databases. (#462, #463)
+    crafted databases. (#462, #463; patches to the bundled liblmdb — not
+    applied when building with ``LMDB_PURE`` or a system liblmdb)
 
 - Fix crashes on out-of-memory conditions in the CPython extension's
     error paths. (#453)
@@ -121,7 +153,8 @@ New features
     and cursors before remapping, preventing use-after-free crashes. (#443)
 
 - Enable sparse files on Windows so NTFS does not preallocate the full
-    ``map_size`` on disk. (#444)
+    ``map_size`` on disk. (#444; patch to the bundled liblmdb — not applied
+    when building with ``LMDB_PURE`` or a system liblmdb)
 
 Bug fixes
 ---------
@@ -177,7 +210,9 @@ Security fixes
 The bundled LMDB 0.9.35 trusts many on-disk fields without validation. A
 crafted `data.mdb` file can exploit this to crash the process, read arbitrary
 memory, or corrupt the heap. These are all upstream LMDB bugs; py-lmdb ships
-patches to address them.
+patches to the bundled liblmdb to address them. **None of these fixes apply
+when building with `LMDB_PURE` or against a system liblmdb** — such builds
+remain vulnerable.
 
 - **CVE-2019-16224**: heap buffer overflow via `MDB_DUPFIXED` without
     `MDB_DUPSORT` in on-disk `md_flags`. (#429)
@@ -314,11 +349,16 @@ Other
 - Fix Windows heap corruption caused by recursive write mutex. Replace
     Windows Mutex objects with Semaphores for LMDB's read and write locks,
     preventing concurrent write transactions on the same thread.
-    Reported by @RogueZamboni (#394).
+    Reported by @RogueZamboni (#394). (Shipped as a patch to the bundled
+    liblmdb — not applied when building with ``LMDB_PURE`` or a system
+    liblmdb. Upstream rejected the patch (ITS#10463); since 2.0.0 py-lmdb
+    prevents the recursion in its own code instead and no longer applies
+    the patch.)
 
 - Fix infinite loop with next_nodup/prev_nodup on the sole key in a
     dupsort database after delete+put.
-    Reported by @RogerMarsh (#388).
+    Reported by @RogerMarsh (#388). (Patch to the bundled liblmdb — not
+    applied when building with ``LMDB_PURE`` or a system liblmdb.)
 
 - Fix METH_NOARGS function signatures to include the required second
     parameter (CPython 3.14 compatibility).
@@ -363,7 +403,8 @@ Other
 
 - Rewrite CI to use cibuildwheel.
 
-- Update bundled LMDB to 0.9.33, plus a patch to fix ITS#10346.
+- Update bundled LMDB to 0.9.33, plus a patch to fix ITS#10346 (not
+    applied when building with ``LMDB_PURE`` or a system liblmdb).
 
 - Prevent some accidental use of LMDB objects by child processes.
     Contributed by Callum Walker.
