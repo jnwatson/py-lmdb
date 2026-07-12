@@ -388,6 +388,106 @@ class SetMapSizeTest(unittest.TestCase):
                 assert txn.get(str(i).encode()) == b'word'
 
 
+class SetMapSizeConcurrencyTest(unittest.TestCase):
+    """Stress set_mapsize() against concurrent environment operations.
+
+    set_mapsize's invalidate/remap critical section must exclude new LMDB
+    operations (they block until the resize completes) while draining
+    in-flight ones.  Concurrent operations may observe an invalidated
+    transaction (lmdb.Error) but must never crash, corrupt, or deadlock.
+    Issue #475."""
+
+    DURATION = 2.0
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_resize_vs_ops_stress(self):
+        import threading
+        import time
+
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 64)
+        with env.begin(write=True) as txn:
+            for i in range(512):
+                txn.put(str(i).encode(), b'x' * 64)
+
+        stop = threading.Event()
+        failures = []
+
+        def tolerated(e):
+            """A handle invalidated by a concurrent resize surfaces as
+            lmdb.Error (CPython backend) or as a TypeError mentioning the
+            _invalid sentinel (CFFI backend)."""
+            return (isinstance(e, lmdb.Error) or
+                    (isinstance(e, TypeError) and
+                     '_LMDB_Resource' in str(e)))
+
+        def worker_read():
+            while not stop.is_set():
+                try:
+                    with env.begin() as txn:
+                        txn.get(b'1')
+                except Exception as e:
+                    if not tolerated(e):
+                        failures.append(e)
+                        return
+
+        def worker_env_ops():
+            while not stop.is_set():
+                try:
+                    env.stat()
+                    env.info()
+                except Exception as e:
+                    if not tolerated(e):
+                        failures.append(e)
+                        return
+
+        def worker_write():
+            while not stop.is_set():
+                try:
+                    with env.begin(write=True) as txn:
+                        txn.put(b'wkey', b'wval')
+                except Exception as e:
+                    if not tolerated(e):
+                        failures.append(e)
+                        return
+
+        threads = [threading.Thread(target=t) for t in
+                   (worker_read, worker_read, worker_env_ops, worker_write)]
+        for t in threads:
+            t.start()
+
+        size = PAGE_SIZE * 64
+        deadline = time.time() + self.DURATION
+        resizes = 0
+        try:
+            while time.time() < deadline:
+                size += PAGE_SIZE * 8
+                try:
+                    env.set_mapsize(size)
+                    resizes += 1
+                except lmdb.Error:
+                    # A write txn was active, or another resize raced us.
+                    pass
+        finally:
+            stop.set()
+            for t in threads:
+                # A generous timeout: a deadlocked gate shows up here.
+                t.join(timeout=30)
+
+        for t in threads:
+            self.assertFalse(t.is_alive(), "worker deadlocked")
+        self.assertEqual(failures, [])
+        self.assertGreater(resizes, 0)
+
+        # Environment remains fully usable afterward.
+        with env.begin(write=True) as txn:
+            txn.put(b'after', b'ok')
+        with env.begin() as txn:
+            assert txn.get(b'after') == b'ok'
+            assert txn.get(b'1') == b'x' * 64
+
+
 class CloseTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
