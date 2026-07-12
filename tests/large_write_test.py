@@ -46,6 +46,7 @@ class LargeWriteTest(testlib.LmdbTest):
         with env.begin(buffers=True) as txn:
             got = txn.get(b'big')
             self.assertIsNotNone(got)
+            assert got is not None  # narrow Optional for type-checkers
             self.assertEqual(len(got), _SIZE)
             self.assertEqual(bytes(got[0:4]), b'HEAD')
             self.assertEqual(bytes(got[_SIZE - 4:_SIZE]), b'TAIL')
@@ -61,10 +62,32 @@ class LargeWriteTest(testlib.LmdbTest):
             with denv.begin(buffers=True) as txn:
                 got = txn.get(b'big')
                 self.assertIsNotNone(got)
+                assert got is not None  # narrow Optional for type-checkers
                 self.assertEqual(len(got), _SIZE)
                 self.assertEqual(bytes(got[_SIZE - 4:_SIZE]), b'TAIL')
         finally:
             denv.close()
+
+    # A value whose overflow extent (psize * mp_pages) reaches 2**32 exercises
+    # the per-call write-length limit differently on each platform: the Linux
+    # ~2 GiB write() short-count (handled by mdb_page_flush's loop) and, on
+    # Windows, mdb_page_flush's single WriteFile whose length is a 32-bit DWORD
+    # -- 2**32 truncates to 0, so the whole page is written as 0 bytes and the
+    # value is lost.  Needs ~4 GiB of RAM/disk.
+    _EXTENT_SIZE = 0xFFFFF000  # psize*mp_pages == 2**32 for 4K/16K/64K pages
+
+    def test_commit_extent_at_2gib_boundary(self):
+        size = self._EXTENT_SIZE
+        _, env = testlib.temp_env(map_size=size + (256 << 20))
+        with env.begin(write=True) as txn:
+            self.assertTrue(txn.put(b'ext', _make_value(size)))
+        with env.begin(buffers=True) as txn:
+            got = txn.get(b'ext')
+            self.assertIsNotNone(got)
+            assert got is not None  # narrow Optional for type-checkers
+            self.assertEqual(len(got), size)
+            self.assertEqual(bytes(got[0:4]), b'HEAD')
+            self.assertEqual(bytes(got[size - 4:size]), b'TAIL')
 
 
 if __name__ == '__main__':
