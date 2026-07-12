@@ -853,11 +853,14 @@ class Environment:
             if self._env is _invalid:
                 raise Error("environment is closed")
 
-            # Phase 1: invalidate all child handles (txns, cursors).
-            # Mirrors close()'s Phase 1 but leaves _env valid.
+            # Phase 1: invalidate open transactions and cursors only.
+            # _Database handles are also env deps, but their MDB_dbi stays
+            # valid across the remap, so they must survive (issue #475).
             txn_handles = []
             if self._deps:
                 for dep in self._deps:
+                    if isinstance(dep, _Database):
+                        continue
                     if hasattr(dep, '_deps') and dep._deps:
                         for child in dep._deps:
                             if hasattr(child, '_cur'):
@@ -871,9 +874,11 @@ class Environment:
                     if hasattr(dep, '_dbi'):
                         dep._dbi = _invalid
                 for dep in list(self._deps):
+                    if isinstance(dep, _Database):
+                        continue
                     if hasattr(dep, '_deps') and dep._deps:
                         dep._deps.clear()
-                self._deps.clear()
+                    self._deps.discard(dep)
 
             # Phase 2: abort collected txns.
             for txn in txn_handles:
@@ -884,33 +889,14 @@ class Environment:
                 while self._spare_txns:
                     _lib.mdb_txn_abort(self._spare_txns.pop())
 
-            # Clear cached DB handles — they reference the old mapping.
-            if self._dbs:
-                self._dbs.clear()
-            self._db = None
-
-            # Now safe to remap.
+            # Now safe to remap.  Cached DB handles (_dbs/_db) are preserved:
+            # mdb_env_set_mapsize does not touch the dbi table.
             rc = _lib.mdb_env_set_mapsize(self._env, map_size)
             if rc:
                 # Remap failed — env is unusable.
                 self._env = _invalid
                 raise _error("mdb_env_set_mapsize", rc)
 
-            # Re-initialize deps tracking and re-open the main DB handle.
-            self._deps = set()
-            with self.begin(db=object()) as txn:
-                self._db = _Database(
-                    env=self,
-                    txn=txn,
-                    name=None,
-                    reverse_key=False,
-                    dupsort=False,
-                    create=True,
-                    integerkey=False,
-                    integerdup=False,
-                    dupfixed=False
-                )
-            self._dbs = {None: self._db}
             self._spare_txns = []
 
     def close(self):

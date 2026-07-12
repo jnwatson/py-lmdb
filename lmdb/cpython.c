@@ -381,6 +381,53 @@ static void invalidate_mark(struct lmdb_object *parent)
 #define INVALIDATE(parent) invalidate((void *)parent);
 #define INVALIDATE_MARK(parent) invalidate_mark((void *)parent);
 
+/**
+ * Like invalidate()/invalidate_mark(), but restricted to transaction children
+ * (and, recursively, their cursors).  Named- and main-database handles
+ * (DbObject) are also direct children of the environment, but they hold only
+ * an integer MDB_dbi that stays valid across mdb_env_set_mapsize's
+ * munmap/mmap.  Only transactions and cursors hold pointers into the old
+ * mapping, so only they must be invalidated on resize.  Invalidating a
+ * database handle would set db->env = NULL and break the caller's still-valid
+ * handle.  Issue #475.
+ */
+static void invalidate_mark_txns(struct lmdb_object *parent)
+{
+    struct lmdb_object *child = parent->children.next;
+    while(child) {
+        if(Py_TYPE(child) == &PyTransaction_Type) {
+            child->valid = 0;
+            invalidate_mark(child);
+        }
+        child = child->siblings.next;
+    }
+}
+
+static void invalidate_txns(struct lmdb_object *parent)
+{
+    struct lmdb_object *child = parent->children.next;
+    PyObject *held_ref = NULL;
+    while(child) {
+        struct lmdb_object *next = child->siblings.next;
+        /* tp_clear may release the GIL, allowing another thread to
+         * Py_DECREF both `child` and `next` to zero.  Hold temporary
+         * references to prevent use-after-free (see invalidate()). */
+        Py_XINCREF((PyObject *) next);
+        Py_INCREF((PyObject *) child);
+        if(Py_TYPE(child) == &PyTransaction_Type) {
+            Py_TYPE(child)->tp_clear((PyObject *) child);
+        }
+        Py_DECREF((PyObject *) child);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
+        child = next;
+    }
+    Py_XDECREF(held_ref);
+}
+
+#define INVALIDATE_TXNS(parent) invalidate_txns((void *)parent);
+#define INVALIDATE_MARK_TXNS(parent) invalidate_mark_txns((void *)parent);
+
 
 /* ---------- */
 /* Exceptions */
@@ -2295,10 +2342,11 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    /* Phase 1: quickly mark all children invalid so no new LMDB operations
-     * can start on existing transactions/cursors.  The env itself stays
-     * valid (we do NOT set self->valid = 0). */
-    INVALIDATE_MARK(self)
+    /* Phase 1: quickly mark open transactions (and their cursors) invalid so
+     * no new LMDB operations can start on them.  Database handles are left
+     * valid — their MDB_dbi survives the remap (issue #475).  The env itself
+     * stays valid (we do NOT set self->valid = 0). */
+    INVALIDATE_MARK_TXNS(self)
 
     /* Wait for in-flight LMDB operations to complete.  Same pattern as
      * env_clear — see issue #180. */
@@ -2312,9 +2360,8 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
 
     /* Phase 2: abort all child transactions and close cursors.  This must
      * happen while the old mmap is still valid so mdb_txn_abort can
-     * safely touch the pages it needs to. */
-    INVALIDATE(self)
-    Py_CLEAR(self->main_db);
+     * safely touch the pages it needs to.  Database handles are preserved. */
+    INVALIDATE_TXNS(self)
 
     /* Abort the spare read-only transaction — it holds references to the
      * old memory map. */
@@ -2331,13 +2378,6 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
          * so subsequent operations raise a clear error. */
         self->valid = 0;
         return err_set("mdb_env_set_mapsize", rc);
-    }
-
-    /* Re-create the main database handle for the new mapping. */
-    self->main_db = txn_db_from_name(self, NULL, 0);
-    if(! self->main_db) {
-        self->valid = 0;
-        return NULL;
     }
 
     Py_RETURN_NONE;
