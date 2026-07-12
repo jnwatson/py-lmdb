@@ -13,6 +13,15 @@ Bug fixes
     context exit now also acquire the lock and run on the executor, so closing
     can no longer race an in-flight operation on the same transaction.
 
+- Fix ``Environment.set_mapsize()`` invalidating open database handles.
+    Since 2.2.0 (#443), calling ``set_mapsize()`` between transactions
+    invalidated all named- and main-database handles, so a handle opened
+    before the resize raised ``lmdb.Error: Database handle belongs to
+    another environment`` (CPython) or an invalid-dbi ``TypeError`` (CFFI)
+    on next use. Database handles hold only an integer ``MDB_dbi`` that
+    stays valid across the remap, so they are now preserved; only open
+    transactions and cursors are invalidated. (#475)
+
 Improvements
 ------------
 

@@ -349,6 +349,44 @@ class SetMapSizeTest(unittest.TestCase):
             assert txn.get(b'key') == b'val'
         assert env.info()['map_size'] == PAGE_SIZE * 32
 
+    def test_retained_named_db_handle_survives_resize(self):
+        """A named-db handle opened before set_mapsize stays usable after it.
+
+        Regression for issue #475: set_mapsize invalidated database handles,
+        so a retained handle raised "Database handle belongs to another
+        environment" (cpython) or an invalid-dbi error (cffi)."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8, max_dbs=4)
+        db = env.open_db(b'mydb')
+        with env.begin(write=True, db=db) as txn:
+            txn.put(b'k', b'v')
+
+        env.set_mapsize(PAGE_SIZE * 16)
+
+        # Reuse the ORIGINAL handle — do not re-open.
+        with env.begin(write=True, db=db) as txn:
+            with txn.cursor(db) as cursor:
+                assert cursor.set_key(b'k')
+                assert cursor.value() == b'v'
+            txn.put(b'k2', b'v2', db=db)
+        with env.begin(db=db) as txn:
+            assert txn.get(b'k') == b'v'
+            assert txn.get(b'k2') == b'v2'
+
+    def test_retained_main_db_handle_survives_resize(self):
+        """The default (main) database is usable through repeated resizes,
+        mirroring the report in issue #475 (commit, resize, keep writing)."""
+        _, env = testlib.temp_env(map_size=PAGE_SIZE * 8)
+        for i in range(4):
+            with env.begin(write=True) as txn:
+                with txn.cursor() as cursor:
+                    cursor.put(str(i).encode(), b'word', overwrite=False)
+            map_pages = env.info()['last_pgno'] + 1
+            env.set_mapsize((map_pages + 8) * PAGE_SIZE)
+
+        with env.begin() as txn:
+            for i in range(4):
+                assert txn.get(str(i).encode()) == b'word'
+
 
 class CloseTest(unittest.TestCase):
     def tearDown(self):
