@@ -3176,7 +3176,7 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         default:
             Py_DECREF(item);
             Py_DECREF(iter);
-            return err_format(rc, "mdb_cursor_put() element #%d", consumed);
+            return err_format(rc, "mdb_cursor_put() element #%zd", consumed);
         }
 
         Py_DECREF(item);
