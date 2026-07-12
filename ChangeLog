@@ -22,6 +22,21 @@ Bug fixes
     stays valid across the remap, so they are now preserved; only open
     transactions and cursors are invalidated. (#475)
 
+- Fix races between ``Environment.set_mapsize()`` and concurrent operations
+    on other threads. An operation starting during the resize's remap window
+    could touch the old memory map after ``munmap`` (crash or corruption); a
+    write-transaction abort racing the resize could deadlock it or leave a
+    transaction alive at remap time (failing the resize and invalidating the
+    environment); and in the CFFI backend a write transaction beginning
+    during the resize could orphan its thread-id record, deadlocking a later
+    ``close()``. LMDB operations that would race a resize now fail fast with
+    ``lmdb.Error`` instead; retry them after the resize completes. The CFFI
+    backend now also serializes ``Transaction.get``/``put``/``delete``/
+    ``stat``/``drop`` and the environment-level ``stat``/``info``/``sync``/
+    ``copy``/``copyfd``/``readers``/``reader_check`` against
+    ``close()``/``set_mapsize()``, closing long-standing crash races with
+    ``close()`` as well. (#475)
+
 Improvements
 ------------
 

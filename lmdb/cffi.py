@@ -853,6 +853,16 @@ class Environment:
             if self._env is _invalid:
                 raise Error("environment is closed")
 
+            # Re-check under _close_lock: a write transaction begin holds
+            # the lock, so one may have completed between the unlocked
+            # check above and our acquisition.  Invalidating a write txn
+            # here would leave its _write_txn_tid orphaned — the owner's
+            # abort() sees _txn falsy (_invalid) and returns without
+            # clearing it, deadlocking a later close().  Issue #475.
+            if self._write_txn_tid:
+                raise Error(
+                    "Cannot set_mapsize while a write transaction is active")
+
             # Phase 1: invalidate open transactions and cursors only.
             # _Database handles are also env deps, but their MDB_dbi stays
             # valid across the remap, so they must survive (issue #475).
@@ -1032,14 +1042,17 @@ class Environment:
             raise TypeError("txn argument only compatible with compact=True")
 
         encoded = path.encode(sys.getfilesystemencoding())
-        if _have_patched_lmdb:
-            rc = _lib.mdb_env_copy3(self._env, encoded, flags, txn._txn if txn else _ffi.NULL)
-            if rc:
-                raise _error("mdb_env_copy3", rc)
-        else:
-            rc = _lib.mdb_env_copy2(self._env, encoded, flags)
-            if rc:
-                raise _error("mdb_env_copy2", rc)
+        # Hold _close_lock so close() or set_mapsize() cannot free/remap the
+        # environment while the copy is reading it.  Issue #475.
+        with self._close_lock:
+            if _have_patched_lmdb:
+                rc = _lib.mdb_env_copy3(self._env, encoded, flags, txn._txn if txn else _ffi.NULL)
+                if rc:
+                    raise _error("mdb_env_copy3", rc)
+            else:
+                rc = _lib.mdb_env_copy2(self._env, encoded, flags)
+                if rc:
+                    raise _error("mdb_env_copy2", rc)
 
     def copyfd(self, fd, compact=False, txn=None):
         """Copy a consistent version of the environment to file descriptor
@@ -1070,14 +1083,17 @@ class Environment:
         if txn and not flags:
             raise TypeError("txn argument only compatible with compact=True")
 
-        if _have_patched_lmdb:
-            rc = _lib.mdb_env_copyfd3(self._env, fd, flags, txn._txn if txn else _ffi.NULL)
-            if rc:
-                raise _error("mdb_env_copyfd3", rc)
-        else:
-            rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
-            if rc:
-                raise _error("mdb_env_copyfd2", rc)
+        # Hold _close_lock so close() or set_mapsize() cannot free/remap the
+        # environment while the copy is reading it.  Issue #475.
+        with self._close_lock:
+            if _have_patched_lmdb:
+                rc = _lib.mdb_env_copyfd3(self._env, fd, flags, txn._txn if txn else _ffi.NULL)
+                if rc:
+                    raise _error("mdb_env_copyfd3", rc)
+            else:
+                rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
+                if rc:
+                    raise _error("mdb_env_copyfd2", rc)
 
     def sync(self, force=False):
         """Flush the data buffers to disk.
@@ -1095,9 +1111,12 @@ class Environment:
             environment was opened with `sync=False` the flushes will be
             omitted, and with `map_async=True` they will be asynchronous.
         """
-        rc = _lib.mdb_env_sync(self._env, force)
-        if rc:
-            raise _error("mdb_env_sync", rc)
+        # Hold _close_lock so close()/set_mapsize() cannot free or remap the
+        # environment during the flush.  Issue #475.
+        with self._close_lock:
+            rc = _lib.mdb_env_sync(self._env, force)
+            if rc:
+                raise _error("mdb_env_sync", rc)
 
     def _convert_stat(self, st):
         """Convert a MDB_stat to a dict.
@@ -1134,9 +1153,11 @@ class Environment:
         <http://lmdb.tech/doc/group__mdb.html#gaf881dca452050efbd434cd16e4bae255>`_
         """
         st = _ffi.new('MDB_stat *')
-        rc = _lib.mdb_env_stat(self._env, st)
-        if rc:
-            raise _error("mdb_env_stat", rc)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            rc = _lib.mdb_env_stat(self._env, st)
+            if rc:
+                raise _error("mdb_env_stat", rc)
         return self._convert_stat(st)
 
     def info(self):
@@ -1165,9 +1186,11 @@ class Environment:
         <http://lmdb.tech/doc/group__mdb.html#ga18769362c7e7d6cf91889a028a5c5947>`_
         """
         info = _ffi.new('MDB_envinfo *')
-        rc = _lib.mdb_env_info(self._env, info)
-        if rc:
-            raise _error("mdb_env_info", rc)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            rc = _lib.mdb_env_info(self._env, info)
+            if rc:
+                raise _error("mdb_env_info", rc)
         return {
             "map_addr": int(_ffi.cast('long', info.me_mapaddr)),
             "map_size": info.me_mapsize,
@@ -1218,9 +1241,11 @@ class Environment:
         the reader lock table."""
         _callbacks.msg_func = []
         try:
-            rc = _lib.mdb_reader_list(self._env, _msg_func, _ffi.NULL)
-            if rc:
-                raise _error("mdb_reader_list", rc)
+            # Issue #475: serialize against close()/set_mapsize().
+            with self._close_lock:
+                rc = _lib.mdb_reader_list(self._env, _msg_func, _ffi.NULL)
+                if rc:
+                    raise _error("mdb_reader_list", rc)
             return "".join(_callbacks.msg_func)
         finally:
             del _callbacks.msg_func
@@ -1230,9 +1255,11 @@ class Environment:
         crashed process. Returns the number of stale entries that were cleared.
         """
         reaped = _ffi.new('int[]', 1)
-        rc = _lib.mdb_reader_check(self._env, reaped)
-        if rc:
-            raise _error('mdb_reader_check', rc)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            rc = _lib.mdb_reader_check(self._env, reaped)
+            if rc:
+                raise _error('mdb_reader_check', rc)
         return reaped[0]
 
     def open_db(self, key=None, txn=None, reverse_key=False, dupsort=False,
@@ -1625,7 +1652,9 @@ class Transaction:
         read-only transaction, this corresponds to the snapshot being read;
         concurrent readers will frequently have the same transaction ID.
         """
-        return _lib.mdb_txn_id(self._txn)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._pyenv._close_lock:
+            return _lib.mdb_txn_id(self._txn)
 
     def stat(self, db=None):
         """stat(db=None)
@@ -1637,7 +1666,9 @@ class Transaction:
         if db is None:
             db = self._db
         st = _ffi.new('MDB_stat *')
-        rc = _lib.mdb_stat(self._txn, db._dbi, st)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._pyenv._close_lock:
+            rc = _lib.mdb_stat(self._txn, db._dbi, st)
         if rc:
             raise _error('mdb_stat', rc)
         return self._pyenv._convert_stat(st)
@@ -1652,7 +1683,9 @@ class Transaction:
         """
         while db._deps:
             db._deps.pop()._invalidate()
-        rc = _lib.mdb_drop(self._txn, db._dbi, delete)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._pyenv._close_lock:
+            rc = _lib.mdb_drop(self._txn, db._dbi, delete)
         self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
@@ -1747,15 +1780,18 @@ class Transaction:
         Equivalent to `mdb_get()
         <http://lmdb.tech/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
         """
-        rc = _lib.pymdb_get(self._txn, (db or self._db)._dbi,
-                            key, len(key), self._val)
-        if rc:
-            if rc == _lib.MDB_NOTFOUND:
-                return default
-            raise _error("mdb_cursor_get", rc)
+        # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
+        # remap the environment during the C call.  Issue #475.
+        with self._pyenv._close_lock:
+            rc = _lib.pymdb_get(self._txn, (db or self._db)._dbi,
+                                key, len(key), self._val)
+            if rc:
+                if rc == _lib.MDB_NOTFOUND:
+                    return default
+                raise _error("mdb_cursor_get", rc)
 
-        preload(self._val)
-        return self._to_py(self._val)
+            preload(self._val)
+            return self._to_py(self._val)
 
     def put(self, key, value, dupdata=True, overwrite=True, append=False,
             db=None):
@@ -1799,8 +1835,11 @@ class Transaction:
         if append:
             flags |= _lib.MDB_APPEND
 
-        rc = _lib.pymdb_put(self._txn, (db or self._db)._dbi,
-                            key, len(key), value, len(value), flags)
+        # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
+        # remap the environment during the C call.  Issue #475.
+        with self._pyenv._close_lock:
+            rc = _lib.pymdb_put(self._txn, (db or self._db)._dbi,
+                                key, len(key), value, len(value), flags)
         self._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -1847,8 +1886,11 @@ class Transaction:
         if value is None:  # for bug-compatibility with cpython impl
             value = EMPTY_BYTES
 
-        rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
-                            key, len(key), value, len(value))
+        # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
+        # remap the environment during the C call.  Issue #475.
+        with self._pyenv._close_lock:
+            rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
+                                key, len(key), value, len(value))
         self._mutations += 1
         if rc:
             if rc == _lib.MDB_NOTFOUND:

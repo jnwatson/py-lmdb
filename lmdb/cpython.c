@@ -55,6 +55,7 @@
 
 #ifndef _WIN32
 #include <pthread.h>
+#include <unistd.h> /* usleep */
 #endif
 
 #include "lmdb.h"
@@ -209,6 +210,14 @@ struct EnvObject {
     PyThread_type_lock write_txn_lock;
     /** 1 if a thread is blocked in close() waiting for the write txn. */
     int write_txn_waiter;
+    /** 1 while set_mapsize() is inside its invalidate/remap critical
+     *  section.  New GIL-releasing LMDB operations fail fast with EINVAL
+     *  until the resize completes (see ENV_RESIZE_BLOCKED).  Issue #475. */
+    int resizing;
+    /** Thread ID of the thread performing the resize, so same-thread
+     *  re-entry (e.g. a destructor running during invalidation, while the
+     *  old map is still valid) passes through instead of failing. */
+    unsigned long resize_tid;
 };
 
 /** TransObject.flags bitfield values. */
@@ -787,14 +796,50 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
  * chains like self->trans->env remain valid for ACTIVE_OPS_DEC even if
  * another thread NULLs an intermediate pointer during the GIL release.
  * Issue #180. */
+/* MILLISLEEP: sleep ~1ms with the GIL released; used by polling waits. */
+#ifdef _WIN32
+#define MILLISLEEP() \
+    do { \
+        Py_BEGIN_ALLOW_THREADS \
+        Sleep(1); \
+        Py_END_ALLOW_THREADS \
+    } while(0)
+#else
+#define MILLISLEEP() \
+    do { \
+        Py_BEGIN_ALLOW_THREADS \
+        usleep(1000); \
+        Py_END_ALLOW_THREADS \
+    } while(0)
+#endif
+
+/* ENV_RESIZE_BLOCKED: true when another thread is inside set_mapsize()'s
+ * invalidate/remap critical section.  A new GIL-releasing LMDB operation
+ * must not start then: the remap invalidates in-flight pointers, and any
+ * txn/cursor arguments the operation captured were (or are about to be)
+ * invalidated by the resize.  The operation fails fast with EINVAL instead
+ * of blocking — its handles are dead either way, and failing under the GIL
+ * (set_mapsize sets `resizing` under the GIL too) needs no lock protocol.
+ * Same-thread re-entry (a destructor invoked during the resize's
+ * invalidation phase, while the old map is still valid) passes through.
+ * Issue #475. */
+#define ENV_RESIZE_BLOCKED(_env) \
+    ((_env)->resizing && \
+     (_env)->resize_tid != (unsigned long) PyThread_get_thread_ident())
+
 #define ENV_UNLOCKED(_env, out, e) \
     do { \
         EnvObject *_saved_env = (_env); \
-        _saved_env->active_ops++; \
-        Py_BEGIN_ALLOW_THREADS \
-        out = (e); \
-        Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_saved_env); \
+        if(ENV_RESIZE_BLOCKED(_saved_env)) { \
+            out = EINVAL; \
+        } \
+        else { \
+            _saved_env->active_ops++; \
+            Py_BEGIN_ALLOW_THREADS \
+            out = (e); \
+            Py_END_ALLOW_THREADS \
+            ACTIVE_OPS_DEC(_saved_env); \
+        } \
     } while(0)
 
 #define PRELOAD_UNLOCKED(_rc, _data, _size) \
@@ -802,14 +847,22 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
     preload(_rc, _data, _size); \
     Py_END_ALLOW_THREADS
 
+/* ENV_PRELOAD_UNLOCKED: preload faults data pages in with the GIL released.
+ * If a resize is pending, skip it WITHOUT releasing the GIL: _data points
+ * into the current map, and the caller's subsequent GIL-held copies from it
+ * are only safe as long as the resize thread (which needs the GIL for its
+ * remap) cannot run.  preload is purely an optimization, so skipping is
+ * always correct.  Issue #475. */
 #define ENV_PRELOAD_UNLOCKED(_env, _rc, _data, _size) \
     do { \
         EnvObject *_saved_env = (_env); \
-        _saved_env->active_ops++; \
-        Py_BEGIN_ALLOW_THREADS \
-        preload(_rc, _data, _size); \
-        Py_END_ALLOW_THREADS \
-        ACTIVE_OPS_DEC(_saved_env); \
+        if(! _saved_env->resizing) { \
+            _saved_env->active_ops++; \
+            Py_BEGIN_ALLOW_THREADS \
+            preload(_rc, _data, _size); \
+            Py_END_ALLOW_THREADS \
+            ACTIVE_OPS_DEC(_saved_env); \
+        } \
     } while(0)
 
 /* ---------------- */
@@ -1078,6 +1131,14 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         return err_set(msg, EACCES);
     }
 
+    /* Fail fast while another thread is inside set_mapsize's critical
+     * section: a txn begun now would reference the map about to be
+     * unmapped.  The GIL-held read path needs this explicit check; the
+     * write path would be caught by ENV_UNLOCKED anyway.  Issue #475. */
+    if(ENV_RESIZE_BLOCKED(env)) {
+        return err_set("mdb_txn_begin", EINVAL);
+    }
+
     if(write && !parent &&
        env->write_txn_tid == PyThread_get_thread_ident()) {
         const char *msg =
@@ -1251,6 +1312,13 @@ txn_db_from_name(EnvObject *env, const char *name,
     DbObject *dbo;
 
     int begin_flags = (name == NULL || env->readonly) ? MDB_RDONLY : 0;
+
+    /* Fail fast while another thread is remapping (issue #475); the txn
+     * begun below would reference the map being replaced. */
+    if(ENV_RESIZE_BLOCKED(env)) {
+        err_set("mdb_txn_begin", EINVAL);
+        return NULL;
+    }
     /* Hold GIL: see make_trans comment and issue #180. */
     rc = mdb_txn_begin(env->env, NULL, begin_flags, &txn);
     if(rc) {
@@ -1375,6 +1443,16 @@ env_clear(EnvObject *self)
     MDB_txn * txn;
 
     MDEBUG("env_clear")
+
+    /* If another thread is inside set_mapsize's critical section, wait
+     * (by polling — the active_ops waiter protocol is single-waiter) for
+     * it to finish before tearing the env down, so the two invalidation
+     * walks cannot interleave.  Same-thread re-entry (a destructor during
+     * the resize's invalidation phase) passes through.  set_mapsize never
+     * waits on close, so this cannot deadlock.  Issue #475. */
+    while(ENV_RESIZE_BLOCKED(self)) {
+        MILLISLEEP();
+    }
 
     self->valid = 0;
     /* Phase 1: quickly mark all descendants invalid (no I/O, GIL held).
@@ -1577,6 +1655,8 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->active_ops_waiter = 0;
     self->write_txn_waiter = 0;
     self->write_txn_lock = NULL;
+    self->resizing = 0;
+    self->resize_tid = 0;
     self->active_ops_lock = PyThread_allocate_lock();
     if(! self->active_ops_lock) {
         PyErr_SetString(PyExc_MemoryError, "unable to allocate lock");
@@ -2342,26 +2422,66 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
+    /* Reject overlapping resizes.  Cannot be our own thread (no Python runs
+     * between the flag being set and cleared except destructors during
+     * invalidation, and re-entering set_mapsize from one is degenerate). */
+    if(self->resizing) {
+        PyErr_Format(Error,
+            "Cannot set_mapsize: another set_mapsize is in progress");
+        return NULL;
+    }
+
+    /* Enter the resize critical section: from here until the flag is
+     * cleared, new GIL-releasing LMDB operations on this env fail fast
+     * with EINVAL (see ENV_RESIZE_BLOCKED), so nothing new can run
+     * concurrently with the remap.  GIL-held LMDB calls need no gate —
+     * the remap below also runs with the GIL held, so they cannot
+     * overlap it.  Issue #475. */
+    self->resizing = 1;
+    self->resize_tid = (unsigned long) PyThread_get_thread_ident();
+
     /* Phase 1: quickly mark open transactions (and their cursors) invalid so
      * no new LMDB operations can start on them.  Database handles are left
      * valid — their MDB_dbi survives the remap (issue #475).  The env itself
      * stays valid (we do NOT set self->valid = 0). */
     INVALIDATE_MARK_TXNS(self)
 
-    /* Wait for in-flight LMDB operations to complete.  Same pattern as
-     * env_clear — see issue #180. */
-    if(self->active_ops > 0) {
-        self->active_ops_waiter = 1;
-        Py_BEGIN_ALLOW_THREADS
-        PyThread_acquire_lock(self->active_ops_lock, WAIT_LOCK);
-        Py_END_ALLOW_THREADS
-        PyThread_acquire_lock(self->active_ops_lock, NOWAIT_LOCK);
+    /* Wait for in-flight LMDB operations to complete, by polling.  The
+     * active_ops_waiter protocol is single-waiter: trans_abort (and
+     * env_clear) may be blocked in it concurrently — e.g. a write
+     * transaction abort waiting out a child operation, having already
+     * cleared write_txn_tid — and a second waiter on the same lock loses
+     * the wakeup and deadlocks.  Polling has no such collision, and a
+     * resize is rare and heavyweight anyway.  Issue #475. */
+    while(self->active_ops > 0) {
+        MILLISLEEP();
     }
 
     /* Phase 2: abort all child transactions and close cursors.  This must
      * happen while the old mmap is still valid so mdb_txn_abort can
      * safely touch the pages it needs to.  Database handles are preserved. */
     INVALIDATE_TXNS(self)
+
+    /* A write transaction may still be dying on another thread without
+     * holding active_ops: trans_abort() NULLs self->txn on entry (so the
+     * invalidation above skipped it) and may sit in its child-op wait
+     * before performing the real mdb_txn_abort.  Such a transaction keeps
+     * write_txn_tid set until the abort completes, and either the tid is
+     * still set or its final abort/dealloc is in flight under active_ops —
+     * both observable here.  Wait them out, or the remap below would find
+     * the transaction undead and fail with EINVAL.  New write transactions
+     * cannot start: begins fail fast on the resize gate.  Issue #475. */
+    while(self->active_ops > 0 || self->write_txn_tid) {
+        MILLISLEEP();
+    }
+
+    /* A destructor triggered during invalidation may have closed the env
+     * on this thread (same-thread re-entry passes the resize gate).
+     * Don't remap a closed env. */
+    if(! self->valid || ! self->env) {
+        self->resizing = 0;
+        return err_invalid();
+    }
 
     /* Abort the spare read-only transaction — it holds references to the
      * old memory map. */
@@ -2371,12 +2491,21 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
         mdb_txn_abort(txn);
     }
 
-    /* Now safe to remap. */
+    /* Now safe to remap: in-flight operations have drained, new ones fail
+     * fast on the resize gate, and this call itself runs with the GIL
+     * held. */
     rc = mdb_env_set_mapsize(self->env, arg.map_size);
+
     if(rc) {
         /* Remap failed — env is in an unusable state.  Mark it invalid
-         * so subsequent operations raise a clear error. */
+         * (BEFORE clearing the gate, so operations observe it and bail
+         * out instead of calling into the unusable env). */
         self->valid = 0;
+    }
+
+    self->resizing = 0;
+
+    if(rc) {
         return err_set("mdb_env_set_mapsize", rc);
     }
 
@@ -4101,14 +4230,19 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
             }
             self->flags |= TRANS_SPARE;
         } else {
-            if(env) {
-                env->write_txn_tid = 0;
-            }
             if(txn && env) {
                 DEBUG("aborting")
                 /* Wait for child ops (e.g. child commit) to finish before
                  * aborting, since LMDB doesn't allow concurrent access to
-                 * parent+child txns.  Issue #180. */
+                 * parent+child txns.  Issue #180.
+                 *
+                 * write_txn_tid stays set until the abort completes: the
+                 * waits below release the GIL while the MDB txn (and the
+                 * writer mutex) is still live, and clearing the tid early
+                 * would let a concurrent set_mapsize() pass its write-txn
+                 * check and then find the txn undead at remap time (its
+                 * invalidation pass skips this txn because self->txn was
+                 * already NULLed above).  Issues #465, #475. */
                 if(env->active_ops > 0) {
                     env->active_ops_waiter = 1;
                     Py_BEGIN_ALLOW_THREADS
@@ -4121,11 +4255,17 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                 mdb_txn_abort(txn);
                 Py_END_ALLOW_THREADS
                 ACTIVE_OPS_DEC(env);
+                env->write_txn_tid = 0;
                 /* Mutex released on this (owning) thread; wake a close()
                  * blocked waiting for it.  Issue #465. */
                 NOTIFY_WRITE_TXN_DONE(env);
-            } else if(txn) {
-                mdb_txn_abort(txn);
+            } else {
+                if(txn) {
+                    mdb_txn_abort(txn);
+                }
+                if(env) {
+                    env->write_txn_tid = 0;
+                }
             }
         }
         Py_XDECREF((PyObject *) env);
