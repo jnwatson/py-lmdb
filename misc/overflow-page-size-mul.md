@@ -42,23 +42,26 @@ POSIX (`write()` takes `size_t`).
 
 ## Reproducing
 
-The wrap only triggers for a value within one page of `MAXDATASIZE`, which is
-awkward to exercise end-to-end because committing / copying a ~4 GiB single
-value runs into *separate*, pre-existing large-single-write limitations that
-are **out of scope** for this fix:
+The wrap only triggers for a value within one page of `MAXDATASIZE`, so a
+reproducer needs a ~4 GiB value (and a >4 GiB map).  `tests/overflow_test.py`
+`HugeValueCompactCopyTest` (opt-in, `LMDB_TEST_HUGE=1`) commits such a value
+and round-trips it through a compacting copy:
 
-* **POSIX**: `mdb_page_flush` / `mdb_env_copythr` issue a single `write()` for
-  the whole overflow extent.  Linux `write()` caps a single call at ~2 GiB and
-  returns a short count; the flush of a >2 GiB overflow page fails with `EIO`
-  at `mdb_txn_commit` before a copy is ever attempted.
-* **Windows**: `mdb_env_copythr`'s `DO_WRITE` passes the `size_t` length to
-  `WriteFile`, whose `nNumberOfBytesToWrite` is a 32-bit `DWORD`.  A length of
-  exactly `2^32` truncates to `0`, so the compacting copy fails with `EIO`.
+* Without this fix, `me_psize * (mp_pages - 1)` in `mdb_env_cwalk` wraps to 0,
+  so the overflow tail is skipped -- the copy truncates the value or walks off
+  the end of the map (observed as `SIGBUS`).
+* With the fix the value round-trips byte-for-byte.
 
-Because of those adjacent issues a full ~4 GiB round-trip is not a practical
-CI test.  `tests/overflow_test.py` instead exercises the same overflow-copy
-code path (compacting copy of multi-page overflow values) at ordinary sizes,
-which guards against the `size_t` widening regressing the common case.
+It is skipped by default (needs ~4 GiB of RAM and disk).  The non-huge tests
+in the same file exercise the same overflow-copy code path at ordinary sizes
+to guard the common case against regression.
 
-The adjacent large-write limitations above are noted here as follow-up work;
-they are not addressed by this patch.
+Committing a ~4 GiB value in the first place depends on the large-single-write
+fix (PR #474): Linux `write()`/`pwrite()` transfers at most `0x7ffff000` bytes
+per call, and the flush/copy writers must loop over the short count.
+
+The huge test runs on Linux and Windows.  Committing such a value on Windows
+also needs the `WriteFile` `DWORD`-length fix (PR #476): `mdb_page_flush` writes
+each overflow page in one call whose length is a 32-bit `DWORD`, and for a value
+near `MAXDATASIZE` the extent `psize * mp_pages` exceeds `2^32` and truncates.
+With #476 and this fix both applied the value round-trips on both platforms.
