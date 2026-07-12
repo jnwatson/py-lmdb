@@ -1,0 +1,40 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -3457,13 +3457,29 @@
+ 		 * system call.
+ 		 */
+ 		DPRINTF(("committing page %"Z"u", pgno));
+-		memset(&ov, 0, sizeof(ov));
+-		ov.Offset = pos & 0xffffffff;
+-		ov.OffsetHigh = pos >> 16 >> 16;
+-		if (!WriteFile(env->me_fd, dp, size, NULL, &ov)) {
+-			rc = ErrCode();
+-			DPRINTF(("WriteFile: %d", rc));
+-			return rc;
++		/* WriteFile length is a 32-bit DWORD, and a single overflow page can
++		 * exceed 4 GiB (size == psize * mp_pages for a value near
++		 * MAXDATASIZE), which would truncate.  Write in chunks of at most
++		 * MAX_WRITE, advancing the file offset each time. */
++		{
++			char *wptr = (char *)dp;
++			size_t wleft = size;
++			size_t wpos = pos;
++			while (wleft) {
++				DWORD wchunk = wleft > MAX_WRITE ? (DWORD)MAX_WRITE : (DWORD)wleft;
++				DWORD wdone = 0;
++				memset(&ov, 0, sizeof(ov));
++				ov.Offset = (DWORD)(wpos & 0xffffffff);
++				ov.OffsetHigh = (DWORD)(wpos >> 16 >> 16);
++				if (!WriteFile(env->me_fd, wptr, wchunk, &wdone, &ov)) {
++					rc = ErrCode();
++					DPRINTF(("WriteFile: %d", rc));
++					return rc;
++				}
++				wptr += wdone;
++				wleft -= wdone;
++				wpos += wdone;
++			}
+ 		}
+ #else
+ 		/* Write up to MDB_COMMIT_PAGES dirty pages at a time. */
