@@ -388,11 +388,14 @@ class SetMapSizeTest(unittest.TestCase):
                 assert txn.get(str(i).encode()) == b'word'
 
 
+@unittest.skipIf(os.getenv('LMDB_PURE') or os.getenv('LMDB_FORCE_SYSTEM'),
+                 'requires patched LMDB: unpatched mdb_env_set_mapsize can '
+                 'fail under concurrent load, invalidating the environment')
 class SetMapSizeConcurrencyTest(unittest.TestCase):
     """Stress set_mapsize() against concurrent environment operations.
 
     set_mapsize's invalidate/remap critical section must exclude new LMDB
-    operations (they block until the resize completes) while draining
+    operations (they fail fast until the resize completes) while draining
     in-flight ones.  Concurrent operations may observe an invalidated
     transaction (lmdb.Error) but must never crash, corrupt, or deadlock.
     Issue #475."""
