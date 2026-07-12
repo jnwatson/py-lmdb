@@ -1,0 +1,50 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -3489,16 +3489,32 @@
+ 				}
+ #endif
+ 				if (wres != wsize) {
++					ssize_t rem;
++					int k;
+ 					if (wres < 0) {
+ 						rc = ErrCode();
+ 						if (rc == EINTR)
+ 							goto retry_write;
+ 						DPRINTF(("Write error: %s", strerror(rc)));
+-					} else {
+-						rc = EIO; /* TODO: Use which error code? */
+-						DPUTS("short write, filesystem full?");
++						return rc;
+ 					}
+-					return rc;
++					rem = wres;
++					k = 0;
++					while (k < n && rem >= (ssize_t)iov[k].iov_len) {
++						rem -= (ssize_t)iov[k].iov_len;
++						k++;
++					}
++					if (k) {
++						memmove(iov, iov + k, (n - k) * sizeof(iov[0]));
++						n -= k;
++					}
++					if (n) {
++						iov[0].iov_base = (char *)iov[0].iov_base + rem;
++						iov[0].iov_len -= (size_t)rem;
++					}
++					wpos += wres;
++					wsize -= wres;
++					goto retry_write;
+ 				}
+ 				n = 0;
+ 			}
+@@ -9400,7 +9416,8 @@
+ again:
+ 		rc = MDB_SUCCESS;
+ 		while (wsize > 0 && !my->mc_error) {
+-			DO_WRITE(rc, my->mc_fd, ptr, wsize, len);
++			size_t w2 = wsize > MAX_WRITE ? MAX_WRITE : wsize;
++			DO_WRITE(rc, my->mc_fd, ptr, w2, len);
+ 			if (!rc) {
+ 				rc = ErrCode();
+ #if defined(SIGPIPE) && !defined(_WIN32)
