@@ -57,6 +57,22 @@
 #include <pthread.h>
 #endif
 
+/* Sequentially-consistent atomic counter primitives.  INCR/DECR return the
+ * new value.  seq_cst keeps the waiter-registration protocol (see
+ * ACTIVE_OPS_DEC / ENV_WAIT_WHILE) simple to reason about, and costs the
+ * same as acq_rel on x86 for the RMW operations. */
+#ifdef _WIN32
+typedef volatile LONG lmdb_atomic_t;
+#define LMDB_ATOMIC_INCR(p) InterlockedIncrement(p)
+#define LMDB_ATOMIC_DECR(p) InterlockedDecrement(p)
+#define LMDB_ATOMIC_LOAD(p) InterlockedCompareExchange((p), 0, 0)
+#else
+typedef int lmdb_atomic_t;
+#define LMDB_ATOMIC_INCR(p) __atomic_add_fetch((p), 1, __ATOMIC_SEQ_CST)
+#define LMDB_ATOMIC_DECR(p) __atomic_sub_fetch((p), 1, __ATOMIC_SEQ_CST)
+#define LMDB_ATOMIC_LOAD(p) __atomic_load_n((p), __ATOMIC_SEQ_CST)
+#endif
+
 #include "lmdb.h"
 #include "preload.h"
 
@@ -194,8 +210,15 @@ struct EnvObject {
     PyObject *open_path;
     /** Count of in-flight LMDB operations (GIL released).  env_clear and
      *  set_mapsize wait for this to reach 0 before closing/remapping the
-     *  env.  Issue #180. */
-    int active_ops;
+     *  env.  Modified with atomics (LMDB_ATOMIC_*) — the inc/dec is on
+     *  the per-operation hot path, so it must not take ops_mutex.
+     *  Issue #180. */
+    lmdb_atomic_t active_ops;
+    /** Count of threads inside ENV_WAIT_WHILE.  Registered under
+     *  ops_mutex before the predicate check; read lock-free by
+     *  ACTIVE_OPS_DEC to skip the broadcast when nobody is draining
+     *  (the common case). */
+    lmdb_atomic_t ops_waiters;
     /** 1 while set_mapsize() is inside its invalidate/remap critical
      *  section.  New GIL-releasing LMDB operations fail fast with EINVAL
      *  until the resize completes (see ENV_RESIZE_BLOCKED).  Issue #475. */
@@ -788,40 +811,51 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 #endif
 
 /* ENV_WAIT_WHILE: block (GIL released) until `cond` becomes false.  `cond`
- * is evaluated under ops_mutex, so it may only reference fields whose
- * writes take the mutex (active_ops, write_txn_tid, resizing/resize_tid)
- * and thread-locals.  Multiple threads may wait concurrently; every state
- * change broadcasts.  On return the GIL has been reacquired, and GIL-
- * guarded state may have changed meanwhile — callers needing a GIL-stable
- * predicate must re-check and loop.  Issues #180, #465, #475. */
+ * is evaluated under ops_mutex, so it may only reference thread-locals,
+ * fields whose writes take the mutex (write_txn_tid, resizing/resize_tid),
+ * and atomics read via LMDB_ATOMIC_LOAD (active_ops).  Multiple threads
+ * may wait concurrently; every state change wakes them.  The waiter is
+ * counted in ops_waiters BEFORE the predicate check: ACTIVE_OPS_DEC reads
+ * the count lock-free after its decrement, so (both accesses being
+ * seq_cst) either this thread's check observes the count already at 0 and
+ * never sleeps, or the decrementer observes our registration and
+ * broadcasts — and since the broadcast is taken under ops_mutex, it
+ * cannot slip between our check and the wait.  No lost wakeup.  On return
+ * the GIL has been reacquired, and GIL-guarded state may have changed
+ * meanwhile — callers needing a GIL-stable predicate must re-check and
+ * loop.  Issues #180, #465, #475. */
 #define ENV_WAIT_WHILE(_env, cond) \
     do { \
         Py_BEGIN_ALLOW_THREADS \
         ENV_SYNC_LOCK(_env); \
+        LMDB_ATOMIC_INCR(&(_env)->ops_waiters); \
         while(cond) { \
             ENV_SYNC_WAIT(_env); \
         } \
+        LMDB_ATOMIC_DECR(&(_env)->ops_waiters); \
         ENV_SYNC_UNLOCK(_env); \
         Py_END_ALLOW_THREADS \
     } while(0)
 
-/* ACTIVE_OPS_INC/DEC: adjust the in-flight operation count.  Must be
- * called with the GIL held; the mutex makes the update visible to
- * non-GIL-holding waiters in ENV_WAIT_WHILE.  Issue #180. */
+/* ACTIVE_OPS_INC/DEC: adjust the in-flight operation count.  This is the
+ * per-operation hot path (twice per cursor step), so it is lock-free: a
+ * single atomic RMW, plus — only on the 0-crossing — a lock-free read of
+ * ops_waiters to decide whether any drainer needs waking.  The mutex is
+ * taken only to deliver that (rare) broadcast, so a waiter between its
+ * predicate check and its wait cannot miss it.  Issues #180, #475. */
 #define ACTIVE_OPS_INC(_env) \
     do { \
-        ENV_SYNC_LOCK(_env); \
-        (_env)->active_ops++; \
-        ENV_SYNC_UNLOCK(_env); \
+        LMDB_ATOMIC_INCR(&(_env)->active_ops); \
     } while(0)
 
 #define ACTIVE_OPS_DEC(_env) \
     do { \
-        ENV_SYNC_LOCK(_env); \
-        if(--(_env)->active_ops == 0) { \
+        if(LMDB_ATOMIC_DECR(&(_env)->active_ops) == 0 && \
+           LMDB_ATOMIC_LOAD(&(_env)->ops_waiters) != 0) { \
+            ENV_SYNC_LOCK(_env); \
             ENV_SYNC_BROADCAST(_env); \
+            ENV_SYNC_UNLOCK(_env); \
         } \
-        ENV_SYNC_UNLOCK(_env); \
     } while(0)
 
 /* CLEAR_WRITE_TXN_TID: record that this thread's write transaction is
@@ -1505,8 +1539,8 @@ env_clear(EnvObject *self)
 
     /* Wait for in-flight LMDB operations to complete.  self->valid = 0
      * above (GIL held) prevents new ones from starting.  Issue #180. */
-    if(self->active_ops > 0) {
-        ENV_WAIT_WHILE(self, self->active_ops > 0);
+    if(LMDB_ATOMIC_LOAD(&self->active_ops) > 0) {
+        ENV_WAIT_WHILE(self, LMDB_ATOMIC_LOAD(&self->active_ops) > 0);
     }
 
     /* LMDB requires all transactions to be closed before mdb_env_close,
@@ -1688,6 +1722,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->pid = _cached_pid;
     self->write_txn_tid = 0;
     self->active_ops = 0;
+    self->ops_waiters = 0;
     self->resizing = 0;
     self->resize_tid = 0;
     self->ops_sync_ready = 0;
@@ -2488,8 +2523,8 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * re-checks under the GIL: trans_dealloc on another thread can
      * increment active_ops (it does not pass the resize gate) between the
      * wait ending and us reacquiring the GIL.  Issue #475. */
-    while(self->active_ops > 0) {
-        ENV_WAIT_WHILE(self, self->active_ops > 0);
+    while(LMDB_ATOMIC_LOAD(&self->active_ops) > 0) {
+        ENV_WAIT_WHILE(self, LMDB_ATOMIC_LOAD(&self->active_ops) > 0);
     }
 
     /* Phase 2: abort all child transactions and close cursors.  This must
@@ -2507,9 +2542,9 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * Wait them out, or the remap below would find the transaction undead
      * and fail with EINVAL.  New write transactions cannot start: begins
      * fail fast on the resize gate.  Issue #475. */
-    while(self->active_ops > 0 || self->write_txn_tid) {
+    while(LMDB_ATOMIC_LOAD(&self->active_ops) > 0 || self->write_txn_tid) {
         ENV_WAIT_WHILE(self,
-            self->active_ops > 0 || self->write_txn_tid);
+            LMDB_ATOMIC_LOAD(&self->active_ops) > 0 || self->write_txn_tid);
     }
 
     /* A destructor triggered during invalidation may have closed the env
@@ -4292,8 +4327,8 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                  * check and then find the txn undead at remap time (its
                  * invalidation pass skips this txn because self->txn was
                  * already NULLed above).  Issues #465, #475. */
-                if(env->active_ops > 0) {
-                    ENV_WAIT_WHILE(env, env->active_ops > 0);
+                if(LMDB_ATOMIC_LOAD(&env->active_ops) > 0) {
+                    ENV_WAIT_WHILE(env, LMDB_ATOMIC_LOAD(&env->active_ops) > 0);
                 }
                 ACTIVE_OPS_INC(env);
                 Py_BEGIN_ALLOW_THREADS
