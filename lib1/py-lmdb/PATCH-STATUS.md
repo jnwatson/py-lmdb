@@ -65,6 +65,13 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
 
 ## Open items
 
+- **Integer-overflow audit of new 1.0 code** — see
+  `docs/lmdb-1.0-overflow-audit.md`. CodeQL raised 20 multiplication-overflow
+  alerts against `lib1/mdb.c`; 13 are in code that does not exist in 0.9.
+  One of them (`mdb_env_incr_loadfd`) **blocks exporting the incremental
+  backup API** and needs a patch first. The rest are deferred, not
+  dismissed: they become reachable if `MDB_REMAP_CHUNKS` is ever exposed.
+
 - **`cve-2019-16225`'s protection is not carried forward.** The patch rejected
   a mapped page claiming `P_DIRTY`, which would otherwise let
   `mdb_page_touch` skip copy-on-write and then write through a `PROT_READ`
