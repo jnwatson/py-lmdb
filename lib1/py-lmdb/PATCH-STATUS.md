@@ -1,61 +1,92 @@
 # py-lmdb patch status against LMDB 1.0.1
 
-Assessment of the 23 patches in `lib/py-lmdb/` against the imported upstream
-LMDB 1.0.1 sources (tag `LMDB_1.0.1`, released 2026-08-06). Line numbers refer
-to pristine 1.0.1 `lib/mdb.c` and shift once earlier patches in `setup.py`'s
-list are applied.
+Outcome of porting the `lib/py-lmdb/` patch series (written against LMDB
+0.9.35) to the bundled LMDB 1.0.1 tree (tag `LMDB_1.0.1`, released
+2026-08-06). The ported series lives alongside this file and is registered in
+`setup.py`'s `ENGINES` table.
 
-Verdicts are based on reading the 1.0.1 code paths; no corrupt-database
-reproducers were run against 1.0.1.
+Each patch here is diffed against the tree state after all preceding patches,
+so the series applies without fuzz. Regenerate with the replay approach
+described under "Maintaining this series" below.
 
-## Drop: fixed upstream or no longer applicable
+## Dropped: fixed upstream or no longer applicable
 
 | Patch | Verdict | Basis |
 | --- | --- | --- |
-| `fix-large-write` | Fixed upstream | ITS#10054 (`b0facd0`) caps every write at `MAX_WRITE` (1GiB) and chunks large overflow pages, mdb.c:4196, 4247. Copy-path hunk landed as ITS#9223 (`e11d5a0`), mdb.c:11248. |
-| `fix-win-flush-large-write` | Fixed upstream | ITS#10538 (`36e581a`) rewrote the Win32 `mdb_page_flush` to chunk writes, mdb.c:4215-4243. |
-| `win32-sparse-file` | No longer applicable | 1.0 defaults to incremental file growth via `NtCreateSection(SEC_RESERVE)` with a NULL section size, mdb.c:5087-5098; full preallocation is now opt-in through `MDB_FIXEDSIZE`. |
-| `cve-2019-16225-reject-dirty-pages` | Not portable as written | The `P_DIRTY` page-header flag no longer exists; dirtiness is derived from `mp_txnid` (`IS_DIRTY_NW`/`IS_MUTABLE`/`IS_WRITABLE`, mdb.c:1153-1157). See "Follow-up" below. |
+| `fix-large-write` | Fixed upstream | ITS#10054 (`b0facd0`) caps every write at `MAX_WRITE` (1GiB) and chunks large overflow pages. The copy-path hunk landed as ITS#9223 (`e11d5a0`). |
+| `fix-win-flush-large-write` | Fixed upstream | ITS#10538 (`36e581a`) rewrote the Win32 `mdb_page_flush` to chunk writes. This was py-lmdb's fix, contributed upstream; it is also in the pending 0.9.36. |
+| `win32-sparse-file` | No longer applicable | 1.0 defaults to incremental file growth via `NtCreateSection(SEC_RESERVE)` with a NULL section size; full preallocation is now opt-in through `MDB_FIXEDSIZE`. |
+| `cve-2019-16225-reject-dirty-pages` | Not portable as written | The `P_DIRTY` page-header flag no longer exists; dirtiness is derived from `mp_txnid` (`IS_DIRTY_NW`/`IS_MUTABLE`/`IS_WRITABLE`). See "Open items" below. |
 
-## Port: still needed
+## Ported with hand-rewriting
 
-Applies with offsets or low fuzz; re-anchor fuzzy hunks rather than shipping
-them fuzzy.
-
-| Patch | Notes |
+| Patch | Change required |
 | --- | --- |
-| `cursor-next-prev-uninitialized` | Applies. `C_DEL` still unconsulted at mdb.c:7874, 7958. |
-| `cve-2019-16224-validate-db-flags` | Applies (one hunk fuzz 2). No `BAD_DB_FLAGS` equivalent upstream. |
-| `cve-2019-16226-validate-node-del-size` | Applies (fuzz 1; BIGDATA branch now uses `sizeof(MDB_ovpage)`). |
-| `cve-2019-16227-guard-xcursor-null` | 8/9 hunks apply. Hunk 7 is comment-only and needs re-anchoring. Hunk 8 is now redundant (mdb.c:10583 already tests `m3->mc_xcursor`) and can be dropped. |
-| `cve-2019-16228-validate-psize` | Applies (fuzz 1). More important than before: ITS#9291 added `fsize / env->me_psize` at mdb.c:5570, so `mm_psize == 0` now divides by zero at env open. |
-| `validate-node-read-size` | Applies (fuzz 2; `mv_size` assignment hoisted above the `F_BIGDATA` branch). |
-| `validate-xcursor-nodedsz` | Applies (fuzz 2). Shares context with `cve-2019-16227` hunk 7; re-anchor together. |
-| `validate-leaf2-keysize` | Applies once `validate-page-bounds` is applied (shares its `psize` local). |
-| `guard-xcursor-null-d3d4` | Applies. Both sites intact at mdb.c:8359 and 9127-9147. |
-| `validate-node-shrink-delta` | Applies. `mdb_node_shrink` unchanged, mdb.c:9513-9524. |
-| `validate-nodedsz-cursor-put` | Applies. mdb.c:8747. |
-| `validate-nodedsz-page-split` | Applies. ITS#10551 (`27b154b`) does *not* supersede it: that fixes even-padding in the split-point estimator (mdb.c:10866-10877), not the node-copy loop at mdb.c:10966-10974. |
-| `validate-md-root` | Applies with fuzz 2; regenerate context. Only `mdb_cassert(mc, root > 1)` at mdb.c:7613, which compiles out under NDEBUG. |
-| `fix-overflow-page-size-mul` | Keep hunk 1 only (`mdb_page_unspill`, mdb.c:2989). Hunk 2 is obsolete: the copy path now uses `MDB_ovpage.op_pages` typed `mdb_size_t` (mdb.c:1163), so the arithmetic promotes to 64-bit. |
+| `env-copy-txn` | 5/6 hunks carried over; the `mdb_env_copy2` hunk was re-anchored on 1.0's new `mdb_env_copy_open()` helper. `mdb_env_copy3`/`mdb_env_copyfd3` are hard dependencies of both binding implementations. |
+| `validate-page-bounds` | 1.0 moved the `MDB_env *env` declaration into an inner block, so the added check uses `txn->mt_env->me_psize`. Note `mdb_page_get` also lost its `int *lvl` out-parameter. |
+| `validate-subpage-bounds` | Re-anchored on `MP_FLAGS(mp) = fp_flags;` — 1.0 dropped `| P_DIRTY` (folded into `P_ADM_FLAGS`) and inserted `md_leaf_pages++` above. Do **not** force this hunk with `-F3`: it then applies silently to the wrong function. |
+| `validate-overflow-pages` | Rewritten for 1.0's `MDB_ovpage {op_pgno, op_pages, op_txnid}` node layout. More important on 1.0 than 0.9: `mdb_drop0` no longer fetches the page at all, so an unvalidated range reaches `mt_free_pgs` directly. `mdb_page_get` validates only the first page and ignores its `numpgs` argument unless `MDB_RPAGE_CACHE` **and** `MDB_REMAP_CHUNKS` are active. |
+| `fix-overflow-page-size-mul` | Hunk 1 only (`mdb_page_unspill`). Hunk 2 is obsolete: the copy path now reads `MDB_ovpage.op_pages` typed `mdb_size_t`, so the arithmetic promotes to 64-bit. |
+| `cve-2019-16227-guard-xcursor-null` | 8/9 hunks carry over. Hunk 7 is comment-only and was re-anchored (1.0's `mdb_xcursor_init1` gained a leading `mc_flags &= ...` line). Hunk 8's guard is redundant on 1.0 — the enclosing condition already tests `m3->mc_xcursor` — but is harmless and was kept for parity with the 0.9 series. |
 
-## Port: needs hand-rewriting
+## Ported mechanically
 
-| Patch | Why |
-| --- | --- |
-| `env-copy-txn` | 5/6 hunks apply. Hunk 6 fails: `mdb_env_copy2` now delegates to a new `mdb_env_copy_open()` helper (mdb.c:11776-11790). This is a feature patch py-lmdb hard-depends on — `mdb_env_copy3`/`mdb_env_copyfd3` are referenced from both `cpython.c` and `cffi.py`, and neither exists upstream. |
-| `validate-page-bounds` | Lands with fuzz 2 but does not compile: 1.0.1 moved the `MDB_env *env` declaration into an inner block (mdb.c:7433). Use `txn->mt_env->me_psize`. `mdb_page_get` also lost its `int *lvl` out-parameter. |
-| `validate-subpage-bounds` | Hunk fails; do not force it (with `-F3` it silently applies to the wrong function). Re-anchor before `MP_FLAGS(mp) = fp_flags;` at mdb.c:8865 (upstream dropped `| P_DIRTY` and inserted a `md_leaf_pages++`). |
-| `validate-overflow-pages` | Both hunks fail. Overflow references now live in the node as `MDB_ovpage {op_pgno, op_pages, op_txnid}` (mdb.c:1163); rewrite in those terms. `mdb_page_get` validates only the first page, and drops `numpgs` entirely unless `MDB_RPAGE_CACHE` *and* `MDB_REMAP_CHUNKS` are active. `mdb_drop0` (mdb.c:12469) no longer fetches the page at all. |
-| `validate-md-depth` | Hunk 1 lands only with fuzz 2 (the `BAD_DB_FLAGS`/`MDB_INVALID` context is gone; 1.0.1 uses `MDB_INCOMPATIBLE` at mdb.c:7594-7600). Hunk 2 fails outright: `mdb_dbi_open` was restructured (mdb.c:12265-12380) and the cleanup must now also undo `mt_dbiseqs[slot]`/`mt_dbflags[slot]`. |
+`cursor-next-prev-uninitialized`, `cve-2019-16224-validate-db-flags`,
+`cve-2019-16226-validate-node-del-size`, `cve-2019-16228-validate-psize`,
+`validate-node-read-size`, `validate-xcursor-nodedsz`,
+`validate-leaf2-keysize`, `guard-xcursor-null-d3d4`,
+`validate-nodedsz-page-split`, `validate-node-shrink-delta`,
+`validate-nodedsz-cursor-put`, `validate-md-depth`, `validate-md-root`.
 
-## Follow-up
+Two notes on these:
 
-`cve-2019-16225-reject-dirty-pages` rejected a page fetched from the map that
-claimed `P_DIRTY`, which would otherwise let `mdb_page_touch` skip
-copy-on-write and then write through a `PROT_READ` mapping. That flag is gone,
-but the same shape appears reachable via `mp_txnid`: no read path validates it,
-and a large value satisfies `IS_WRITABLE` (mdb.c:1155-1157), which makes
-`mdb_page_touch` (mdb.c:3028) return `MDB_SUCCESS` without copying while the
-non-`MDB_WRITEMAP` map stays read-only (mdb.c:5117). Retaining this protection
-needs a new patch, not a rebase. Unverified by reproducer.
+- `validate-nodedsz-page-split` is **not** superseded by ITS#10551 ("fix
+  mdb_page_split nodesize calculation"). That commit fixes even-padding in the
+  split-point estimator; this patch bounds-checks the node-copy loop.
+- `validate-md-depth` needed no hand-porting only because it follows
+  `cve-2019-16224` in the series, which re-creates the `BAD_DB_FLAGS` error
+  block it anchors on. Assessed against a pristine tree it appears to fail.
+
+## Verified
+
+An unvalidated `mm_psize` of 0 read from a crafted `data.mdb` is used as a
+divisor during `mdb_env_open()`, raising SIGFPE. This affects **both** upstream
+release lines, at different sites:
+
+- 0.9.35 — `mdb.c:4552`, `env->me_maxpg = env->me_mapsize / env->me_psize;`
+- 1.0.1 — `mdb.c:5570`, `pgno_t maxpgno = fsize / env->me_psize;` (the
+  ITS#9291 root-page sanity check, which precedes the `me_maxpg` division that
+  1.0 also still has)
+
+`cve-2019-16228-validate-psize` fixes both. Confirmed by C reproducer against
+pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
+1.0 tree returns `MDB_INVALID`. Worth reporting upstream — see
+`docs/upstream-psize-sigfpe.md`.
+
+## Open items
+
+- **`cve-2019-16225`'s protection is not carried forward.** The patch rejected
+  a mapped page claiming `P_DIRTY`, which would otherwise let
+  `mdb_page_touch` skip copy-on-write and then write through a `PROT_READ`
+  mapping. That flag is gone, but the same shape appears reachable via
+  `mp_txnid`: no read path validates it, and a large value satisfies
+  `IS_WRITABLE`, which makes `mdb_page_touch` return `MDB_SUCCESS` without
+  copying. Retaining this protection needs a new patch written against
+  `mp_txnid`. **Unverified by reproducer** — this is code reading only.
+- **`mdb_ovpage_free` remains unchecked** on both lines: it takes `ovpages`
+  from the page header and feeds it to `mdb_midl_append_range` with no bound.
+  Out of scope for this port (the 0.9 patch never covered it), but it is the
+  natural companion to `validate-overflow-pages`.
+- **`tests/cve_test.py` only exercises the 0.9 engine.** Its meta-page offsets
+  are hardcoded for 0.9's 16-byte page header; 1.0's is 24 bytes
+  (`mp_txnid` was added). Porting those 25 tests to run against both engines
+  would give the 1.0 hardening the same coverage the 0.9 hardening has.
+
+## Maintaining this series
+
+When bumping the bundled 1.0 tree, regenerate rather than hand-editing: replay
+the series onto the new tree one patch at a time, snapshotting between steps
+and diffing consecutive snapshots. That keeps every patch's line numbers
+consistent with the state after all preceding patches, which is what
+`setup.py` requires. The four hand-ported hunks above are the ones to re-check
+first.

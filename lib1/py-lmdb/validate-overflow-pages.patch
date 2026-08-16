@@ -1,0 +1,26 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -8986,6 +8986,11 @@
+ 			if ((rc2 = MDB_PAGE_GET(mc, ovp.op_pgno, ovp.op_pages, &omp)) != 0)
+ 				return rc2;
+ 			ovpages = ovp.op_pages;
++			/* Validate overflow extent stays within the database. */
++			if (ovp.op_pgno + ovpages > mc->mc_txn->mt_next_pgno) {
++				mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++				return MDB_CORRUPTED;
++			}
+ 
+ 			/* Is the ov page big enough and from this txn (or a parent)? */
+ 			if (ovpages >= dpages && IS_MUTABLE(mc->mc_txn, omp)) {
+@@ -12621,6 +12626,10 @@
+ 					if (ni->mn_flags & F_BIGDATA) {
+ 						MDB_ovpage ovp;
+ 						memcpy(&ovp, NODEDATA(ni), sizeof(ovp));
++						if (ovp.op_pgno + ovp.op_pages > txn->mt_next_pgno) {
++							rc = MDB_CORRUPTED;
++							goto done;
++						}
+ 						rc = mdb_midl_append_range(&txn->mt_free_pgs,
+ 							ovp.op_pgno, ovp.op_pages);
+ 						if (rc)

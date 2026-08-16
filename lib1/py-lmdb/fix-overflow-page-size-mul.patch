@@ -1,0 +1,12 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -2996,7 +2996,7 @@
+ 				if (!np)
+ 					return ENOMEM;
+ 				if (num > 1)
+-					memcpy(np, mp, num * env->me_psize);
++					memcpy(np, mp, (size_t)num * env->me_psize);
+ 				else
+ 					mdb_page_copy(np, mp, env->me_psize);
+ 			}

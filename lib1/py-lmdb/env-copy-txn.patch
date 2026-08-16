@@ -1,41 +1,7 @@
-diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
-index a1d584d..5fb9826 100644
---- a/libraries/liblmdb/lmdb.h
-+++ b/libraries/liblmdb/lmdb.h
-@@ -780,9 +780,14 @@ int  mdb_env_copyfd(MDB_env *env, mdb_filehandle_t fd);
- 	 *		consumes more CPU and runs more slowly than the default.
- 	 *		Currently it fails if the environment has suffered a page leak.
- 	 * </ul>
-+	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
-+	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
-+	 * flag is set.
-+	 *
- 	 * @return A non-zero error value on failure and 0 on success.
- 	 */
- int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
-+int  mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn);
- 
- 	/** @brief Copy an LMDB environment to the specified file descriptor,
- 	 *	with options.
-@@ -799,9 +804,13 @@ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
- 	 * have already been opened for Write access.
- 	 * @param[in] flags Special options for this operation.
- 	 * See #mdb_env_copy2() for options.
-+	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
-+	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
-+	 * flag is set.
- 	 * @return A non-zero error value on failure and 0 on success.
- 	 */
- int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd, unsigned int flags);
-+int  mdb_env_copyfd3(MDB_env *env, mdb_filehandle_t fd, unsigned int flags, MDB_txn *txn);
- 
- 	/** @brief Perform incremental dump of an LMDB environment to the
- 	 *	specified file descriptor.
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
-index 23c86eb..d50c2c8 100644
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -11508,12 +11508,12 @@ done:
+@@ -11508,12 +11508,12 @@
  
  	/** Copy environment with compaction. */
  static int ESECT
@@ -50,7 +16,7 @@ index 23c86eb..d50c2c8 100644
  	pthread_t thr;
  	pgno_t root, new_root;
  	int rc = MDB_SUCCESS;
-@@ -11543,9 +11543,11 @@ mdb_env_copyfd1(MDB_env *env, HANDLE fd)
+@@ -11543,9 +11543,11 @@
  	if (rc)
  		goto done;
  
@@ -65,7 +31,7 @@ index 23c86eb..d50c2c8 100644
  
  	mp = (MDB_page *)my.mc_wbuf[0];
  	memset(mp, 0, NUM_METAS * env->me_psize);
-@@ -11605,7 +11607,8 @@ finish:
+@@ -11605,7 +11607,8 @@
  		my.mc_error = rc;
  	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
  	rc = THREAD_FINISH(thr);
@@ -75,7 +41,7 @@ index 23c86eb..d50c2c8 100644
  
  done:
  #ifdef _WIN32
-@@ -11744,12 +11747,22 @@ leave:
+@@ -11744,12 +11747,22 @@
  }
  
  int ESECT
@@ -100,20 +66,19 @@ index 23c86eb..d50c2c8 100644
  }
  
  int ESECT
-@@ -11774,6 +11787,12 @@ mdb_env_copy_open(MDB_env *env, const char *path, HANDLE *retfd)
- 
+@@ -11775,13 +11788,19 @@
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
-+{
+ {
 +	return mdb_env_copy3(env, path, flags, NULL);
 +}
 +
 +int ESECT
 +mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn)
- {
++{
  	HANDLE newfd = INVALID_HANDLE_VALUE;
  	int rc;
-@@ -11781,7 +11800,7 @@ mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
+ 
  	rc = mdb_env_copy_open(env, path, &newfd);
  	if (rc)
  		return rc;
@@ -122,3 +87,35 @@ index 23c86eb..d50c2c8 100644
  
  	if (newfd != INVALID_HANDLE_VALUE)
  		if (close(newfd) < 0 && rc == MDB_SUCCESS)
+diff --git a/libraries/liblmdb/lmdb.h b/libraries/liblmdb/lmdb.h
+--- a/libraries/liblmdb/lmdb.h
++++ b/libraries/liblmdb/lmdb.h
+@@ -780,9 +780,14 @@
+ 	 *		consumes more CPU and runs more slowly than the default.
+ 	 *		Currently it fails if the environment has suffered a page leak.
+ 	 * </ul>
++	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
++	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
++	 * flag is set.
++	 *
+ 	 * @return A non-zero error value on failure and 0 on success.
+ 	 */
+ int  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags);
++int  mdb_env_copy3(MDB_env *env, const char *path, unsigned int flags, MDB_txn *txn);
+ 
+ 	/** @brief Copy an LMDB environment to the specified file descriptor,
+ 	 *	with options.
+@@ -799,9 +804,13 @@
+ 	 * have already been opened for Write access.
+ 	 * @param[in] flags Special options for this operation.
+ 	 * See #mdb_env_copy2() for options.
++	 * @param[in] txn Transaction used for the copy.  If NULL, a temporary
++	 * transaction will be used.  This is only valid if the #MDB_CP_COMPACT
++	 * flag is set.
+ 	 * @return A non-zero error value on failure and 0 on success.
+ 	 */
+ int  mdb_env_copyfd2(MDB_env *env, mdb_filehandle_t fd, unsigned int flags);
++int  mdb_env_copyfd3(MDB_env *env, mdb_filehandle_t fd, unsigned int flags, MDB_txn *txn);
+ 
+ 	/** @brief Perform incremental dump of an LMDB environment to the
+ 	 *	specified file descriptor.

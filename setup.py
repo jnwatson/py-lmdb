@@ -115,8 +115,31 @@ ENGINES = [
         tree='lib1',
         dest=os.path.join('build', 'lib10'),
         define='LMDB_ENGINE_V10',
+        # The 1.0 series omits four patches carried for 0.9: the two
+        # large-write fixes landed upstream (ITS#10054, ITS#10538),
+        # win32-sparse-file's defect was designed away by 1.0's incremental
+        # file growth, and cve-2019-16225 keys on the P_DIRTY page flag,
+        # which no longer exists.  See lib1/py-lmdb/PATCH-STATUS.md.
         patch_names=[
             'env-copy-txn',
+            'cursor-next-prev-uninitialized',
+            'cve-2019-16224-validate-db-flags',
+            'cve-2019-16226-validate-node-del-size',
+            'cve-2019-16227-guard-xcursor-null',
+            'cve-2019-16228-validate-psize',
+            'validate-page-bounds',
+            'validate-node-read-size',
+            'validate-subpage-bounds',
+            'validate-xcursor-nodedsz',
+            'validate-leaf2-keysize',
+            'guard-xcursor-null-d3d4',
+            'validate-nodedsz-page-split',
+            'validate-node-shrink-delta',
+            'validate-overflow-pages',
+            'validate-nodedsz-cursor-put',
+            'validate-md-depth',
+            'validate-md-root',
+            'fix-overflow-page-size-mul',
         ],
     ),
 ]
