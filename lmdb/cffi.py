@@ -1336,7 +1336,13 @@ class Environment:
             if rc:
                 raise _error("mdb_env_info", rc)
         return {
-            "map_addr": int(_ffi.cast('long', info.me_mapaddr)),
+            # uintptr_t, not long: on Windows long is 32 bits even in
+            # 64-bit builds, so casting a map address through it truncates
+            # and then reads the result as signed, yielding a negative
+            # address whenever bit 31 happens to be set.  This matches what
+            # the CPython implementation returns, which converts via
+            # intptr_t and emits an unsigned long long.
+            "map_addr": int(_ffi.cast('uintptr_t', info.me_mapaddr)),
             "map_size": info.me_mapsize,
             "last_pgno": info.me_last_pgno,
             "last_txnid": info.me_last_txnid,

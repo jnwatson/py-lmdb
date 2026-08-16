@@ -595,6 +595,28 @@ class InfoMethodsTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.info())
 
+    def test_info_map_addr_is_pointer_sized(self):
+        """info()['map_addr'] must survive a full-width pointer.
+
+        Regression guard for a Windows-only defect: the cffi implementation
+        converted me_mapaddr through C `long`, which is 32 bits on Windows
+        even in 64-bit builds (LLP64), so an address with bit 31 set came
+        back negative.  It could not fail on Linux, where `long` is 64-bit,
+        and on Windows it only failed when ASLR happened to place the
+        mapping accordingly -- so it surfaced as an intermittent CI failure.
+
+        me_mapaddr is NULL unless MDB_FIXEDMAP is used, so this exercises
+        the conversion directly rather than relying on a real mapping.
+        """
+        if lmdb.Environment.__module__ != 'lmdb.cffi':
+            self.skipTest('cffi implementation not in use')
+        from lmdb.cffi import _ffi
+
+        for addr in (0x80320000, 0x7ff680320000):
+            p = _ffi.cast('void *', addr)
+            self.assertEqual(int(_ffi.cast('uintptr_t', p)), addr)
+        self.assertEqual(_ffi.sizeof('uintptr_t'), _ffi.sizeof('void *'))
+
     def test_flags(self):
         _, env = testlib.temp_env()
         info = env.flags()
