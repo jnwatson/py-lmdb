@@ -77,10 +77,22 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
   from the page header and feeds it to `mdb_midl_append_range` with no bound.
   Out of scope for this port (the 0.9 patch never covered it), but it is the
   natural companion to `validate-overflow-pages`.
-- **`tests/cve_test.py` only exercises the 0.9 engine.** Its meta-page offsets
-  are hardcoded for 0.9's 16-byte page header; 1.0's is 24 bytes
-  (`mp_txnid` was added). Porting those 25 tests to run against both engines
-  would give the 1.0 hardening the same coverage the 0.9 hardening has.
+- **`tests/cve_test.py` covers 17 of its 25 cases on the 1.0 engine.** The
+  file now detects `PAGEHDRSZ` and `PAGEBASE` at import and expresses every
+  offset in terms of them, so most corruption recipes work on either engine.
+  Run the suite against 1.0 with `LMDB_DEFAULT_LIB_VERSION=1`.
+
+  Eight cases remain marked `only_v09` (see the decorator's docstring for
+  the per-test reasons). None of them crash on 1.0 — the corruption simply
+  does not reach the same code path — but the hardening they exercise is
+  verified only on 0.9 until each recipe is re-derived. The `P_DIRTY` one
+  cannot be ported at all; it is the same gap as the `cve-2019-16225` item
+  above.
+
+  Note when re-deriving them: **1.0 sets `PAGEBASE = PAGEHDRSZ`**, where 0.9
+  has `PAGEBASE = 0` (ITS#7713 graduated out of `MDB_DEVEL`). That shifts the
+  frame of reference for `mp_lower`, `mp_upper` and every `mp_ptrs` entry —
+  it was the single cause of most of the initial cross-engine failures.
 
 ## Maintaining this series
 

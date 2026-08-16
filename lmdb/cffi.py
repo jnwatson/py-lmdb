@@ -410,8 +410,25 @@ if not lmdb._reading_docs():
         ))
     del _cfg, _l
 
-    # Engine used for new environments when lib_version= is unspecified.
+    # Engine used for new environments when lib_version= is unspecified:
+    # normally the first (oldest) engine, or the engine named by
+    # $LMDB_DEFAULT_LIB_VERSION if that is set to an available LMDB major
+    # version.  The environment variable lets an entire program — notably
+    # the test suite — exercise the newer engine without passing
+    # lib_version= at every call site.
     _default_engine = _engines[0]
+    _want = os.environ.get('LMDB_DEFAULT_LIB_VERSION')
+    if _want:
+        for _e in _engines:
+            if str(_e['major']) == _want:
+                _default_engine = _e
+                break
+        else:
+            sys.stderr.write(
+                'lmdb: ignoring LMDB_DEFAULT_LIB_VERSION=%s: no such engine '
+                'in this build\n' % (_want,))
+        del _e
+    del _want
     # The newest engine's error table is a superset of the others', with
     # identical messages for the shared codes; use it for strerror and
     # engine-independent constants.
@@ -1542,9 +1559,15 @@ class Environment:
                 for key in cursor.iternext(keys=True, values=False):
                     try:
                         self.open_db(key, txn=txn, create=False)
-                        result.append(key)
                     except Error:
-                        pass
+                        continue
+                    # LMDB 1.0 stores sub-database names with a trailing
+                    # NUL, 0.9 without.  Report the name itself, so dbs()
+                    # means the same thing whichever engine backs the
+                    # environment.
+                    if key[-1:] == b'\x00':
+                        key = key[:-1]
+                    result.append(key)
             finally:
                 cursor.close()
             return result

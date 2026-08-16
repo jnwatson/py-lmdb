@@ -105,8 +105,37 @@ static const MdbApi *lmdb_engines[] = {
 /** Engine used for strerror and other engine-independent queries: the last
  * (newest) engine, whose error-code table is a superset of the others'. */
 #define LMDB_NEWEST_API (lmdb_engines[NUM_ENGINES - 1])
-/** Engine used for new environments when `lib_version` is unspecified. */
-#define LMDB_DEFAULT_API (lmdb_engines[0])
+
+/** Engine used for new environments when `lib_version` is unspecified.
+ * Resolved once at module import: normally the first (oldest) engine, or
+ * the engine named by $LMDB_DEFAULT_LIB_VERSION if that is set to an
+ * available LMDB major version.  The environment variable lets an entire
+ * program — notably the test suite — exercise the newer engine without
+ * passing lib_version= at every call site. */
+static const MdbApi *lmdb_default_api;
+#define LMDB_DEFAULT_API (lmdb_default_api)
+
+static void
+init_default_engine(void)
+{
+    const char *s = getenv("LMDB_DEFAULT_LIB_VERSION");
+    lmdb_default_api = lmdb_engines[0];
+    if(s && *s) {
+        char *end;
+        long want = strtol(s, &end, 10);
+        if(! *end) {
+            int i;
+            for(i = 0; i < NUM_ENGINES; i++) {
+                if(lmdb_engines[i]->major == want) {
+                    lmdb_default_api = lmdb_engines[i];
+                    return;
+                }
+            }
+        }
+        fprintf(stderr, "lmdb: ignoring LMDB_DEFAULT_LIB_VERSION=%s: "
+                        "no such engine in this build\n", s);
+    }
+}
 
 
 /* Comment out for copious debug. */
@@ -2520,8 +2549,15 @@ env_dbs(EnvObject *self, PyObject *args, PyObject *kwds)
         free(name);
 
         if(rc == 0) {
-            PyObject *keyobj = PyBytes_FromStringAndSize(key.mv_data,
-                                                         key.mv_size);
+            /* LMDB 1.0 stores sub-database names with a trailing NUL, 0.9
+             * without.  Report the name itself, so dbs() means the same
+             * thing whichever engine backs the environment. */
+            size_t namelen = key.mv_size;
+            PyObject *keyobj;
+            if(namelen && ((char *) key.mv_data)[namelen - 1] == '\0') {
+                namelen--;
+            }
+            keyobj = PyBytes_FromStringAndSize(key.mv_data, namelen);
             if(! keyobj || PyList_Append(list, keyobj)) {
                 Py_XDECREF(keyobj);
                 Py_DECREF(list);
@@ -5352,6 +5388,8 @@ MODINIT_NAME(void)
     if(! ((open_env_paths = PySet_New(NULL)))) {
         MOD_RETURN(NULL);
     }
+
+    init_default_engine();
 
     _cached_pid = getpid();
 #ifndef _WIN32

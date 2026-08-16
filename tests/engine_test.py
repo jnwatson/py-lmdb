@@ -50,6 +50,9 @@ def _engine_majors():
 
 MAJORS = _engine_majors()
 DUAL = MAJORS == {0, 1}
+# The engine new environments get by default, which LMDB_DEFAULT_LIB_VERSION
+# may override for a whole test run.
+DEFAULT_MAJOR = lmdb.version()[0]
 
 
 class VersionReportingTest(unittest.TestCase):
@@ -58,7 +61,7 @@ class VersionReportingTest(unittest.TestCase):
 
     def test_default_version(self):
         # version() reports the engine used for new environments.
-        assert lmdb.version() == lmdb.version(lib_version=min(MAJORS))
+        assert lmdb.version() == lmdb.version(lib_version=DEFAULT_MAJOR)
 
     @unittest.skipUnless(DUAL, 'requires both bundled engines')
     def test_both_engines_report(self):
@@ -81,7 +84,7 @@ class EngineSelectionTest(unittest.TestCase):
 
     def test_new_env_default_engine(self):
         _, env = testlib.temp_env()
-        assert env.lib_version()[0] == 0
+        assert env.lib_version()[0] == DEFAULT_MAJOR
 
     def test_new_env_explicit_v1(self):
         path = testlib.temp_dir()
