@@ -663,7 +663,12 @@ def _sniff_data_version(path, subdir):
     differs between versions and word sizes."""
     import io
     import struct
-    data_path = os.path.join(path, 'data.mdb') if subdir else path
+    if subdir:
+        # `path` may be str or bytes; os.path.join refuses to mix them.
+        data_path = os.path.join(
+            path, b'data.mdb' if isinstance(path, bytes) else 'data.mdb')
+    else:
+        data_path = path
     try:
         # io.open: this module aliases `open` to Environment.
         with io.open(data_path, 'rb') as fp:

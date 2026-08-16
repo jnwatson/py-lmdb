@@ -69,6 +69,42 @@ class OpenTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: lmdb.open(testlib.temp_file()))
 
+    def test_bytes_path(self):
+        """A bytes path must work, including on reopen.
+
+        Regression guard: the engine sniffer joined the incoming path with a
+        str filename, which raises "Can't mix strings and bytes in path
+        components" for bytes paths.  Reopen matters as much as create --
+        the sniffer only reads an existing data file.
+        """
+        path = testlib.temp_dir().encode()
+        env = lmdb.open(path)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(B('a'), B('b'))
+        finally:
+            env.close()
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+        with env.begin() as txn:
+            assert txn.get(B('a')) == B('b')
+
+    def test_bytes_path_nosubdir(self):
+        """As above, for subdir=False, where the path is the data file."""
+        path = testlib.temp_file(create=False).encode()
+        env = lmdb.open(path, subdir=False)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(B('a'), B('b'))
+        finally:
+            env.close()
+
+        env = lmdb.open(path, subdir=False)
+        testlib._cleanups.append(env.close)
+        with env.begin() as txn:
+            assert txn.get(B('a')) == B('b')
+
     def test_ok_path(self):
         path, env = testlib.temp_env()
         assert os.path.exists(path)

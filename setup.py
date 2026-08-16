@@ -24,6 +24,7 @@ import os
 import sys
 import shutil
 import platform
+import subprocess
 
 from setuptools import Extension
 from setuptools import setup
@@ -182,7 +183,7 @@ def prepare_engine_tree(engine, apply_patches):
     if apply_patches:
         if sys.platform.startswith('win'):
             for name in engine['patch_names']:
-                patchfile = tree + '\\py-lmdb\\' + name + '.patch'
+                patchfile = os.path.join(tree, 'py-lmdb', name + '.patch')
                 patchset = patch.fromfile(patchfile)
                 if not patchset:
                     raise Exception('Parsing patch failed: ' + patchfile)
@@ -190,8 +191,13 @@ def prepare_engine_tree(engine, apply_patches):
                     raise Exception('Applying patch failed: ' + patchfile)
         else:
             for name in engine['patch_names']:
-                patchfile = tree + '/py-lmdb/' + name + '.patch'
-                rv = os.system('patch -N -p3 -d ' + plain + ' < ' + patchfile)
+                patchfile = os.path.join(tree, 'py-lmdb', name + '.patch')
+                # Argument vector with the patch on stdin, not a shell
+                # string: the tree and build paths are absolute and may
+                # contain spaces or other characters the shell would split.
+                with open(patchfile, 'rb') as fp:
+                    rv = subprocess.call(['patch', '-N', '-p3', '-d', plain],
+                                         stdin=fp)
                 if rv:
                     raise Exception('Applying patch failed: ' + patchfile)
 
