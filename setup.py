@@ -188,12 +188,14 @@ engine_specs = []
 
 if not use_bundled_lmdb:
     print('py-lmdb: Using system version of liblmdb (single engine).')
-    extra_sources = []
+    # engine.c provides the lmdb_api_sys vtable for the CPython extension;
+    # the cffi implementation talks to the system library directly.
+    extra_sources = [os.path.join('lmdb', 'engine.c')]
     libraries = ['lmdb']
     extra_compile_args += ['-DLMDB_ENGINE_SYS=1']
     engine_specs.append(dict(
         name='sys',
-        sources=['lmdb/engine.c'],
+        sources=[],
         include_dirs=[],
         define='LMDB_ENGINE_SYS',
     ))
@@ -319,7 +321,8 @@ else:
         sys.path.insert(0, _source_dir)
     try:
         import lmdb.cffi
-        ext_modules = [lmdb.cffi._ffi.verifier.get_extension()]
+        # One compiled verifier module per LMDB engine.
+        ext_modules = list(lmdb.cffi._verifier_extensions)
     except ImportError:
         sys.stderr.write('Could not import lmdb; ensure cffi is installed!\n')
         ext_modules = []
