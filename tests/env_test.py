@@ -21,6 +21,7 @@
 #
 
 import os
+import subprocess
 import sys
 import unittest
 import weakref
@@ -867,10 +868,30 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.reader_check() == 0
 
         # Start a child, open a txn, then crash the child.
-        rc = os.spawnl(os.P_WAIT, sys.executable, sys.executable,
-                       __file__, 'test_reader_check_child', path)
+        #
+        # Run it through subprocess rather than os.spawnl so a child that
+        # dies before it ever opens a transaction can say why.  The child
+        # is launched as a script, so Python puts tests/ on its sys.path
+        # rather than the repo root: unless py-lmdb is actually installed
+        # (or the repo root is on PYTHONPATH), the child cannot import
+        # lmdb.  That is a harness problem, not a reader-check failure,
+        # and it used to surface only as a bare "assert 1 == 0".
+        proc = subprocess.run(
+            [sys.executable, __file__, 'test_reader_check_child', path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        rc = proc.returncode
+        stderr = proc.stderr.decode('utf-8', 'replace')
 
-        assert rc == 0
+        if rc != 0 and 'No module named' in stderr and 'lmdb' in stderr:
+            self.skipTest(
+                'child process cannot import lmdb, so this test cannot run. '
+                'Install the package (e.g. "pip install -e .") or put the '
+                'repo root on PYTHONPATH; a child launched as a script only '
+                'gets tests/ on sys.path.\nChild stderr:\n' + stderr)
+
+        assert rc == 0, (
+            'reader-check child exited %d\n--- child stderr ---\n%s'
+            % (rc, stderr or '(none)'))
         assert env.reader_check() == 1
         assert env.reader_check() == 0
         assert env.readers() != NO_READERS
