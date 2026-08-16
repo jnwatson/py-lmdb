@@ -60,32 +60,150 @@ if os.getenv('LMDB_LIBDIR'):
 else:
     extra_library_dirs = []
 
-extra_include_dirs += ['lib/py-lmdb']
+extra_include_dirs += ['lib/py-lmdb', 'lmdb']
 extra_compile_args = []
 
-patch_lmdb_source = True
-if os.getenv('LMDB_FORCE_SYSTEM') is not None:
-    print('py-lmdb: Using system version of liblmdb.')
+#
+# py-lmdb bundles two binary-incompatible LMDB versions (0.9.x, data format
+# v1, in lib/; 1.0.x, data format v3, in lib1/) and links both into one
+# extension module.  Each tree is copied to build/, gets its symbol-rename
+# header prepended (so the two trees' symbols cannot collide), and an
+# engine.c glue TU per tree exports that tree's entry points as an MdbApi
+# vtable.  The binding picks an engine per Environment at runtime.
+#
+# LMDB_FORCE_SYSTEM instead builds a single engine against the system
+# liblmdb (whichever version the system ships).
+#
+
+# (name, source tree, build dir, engine -D flag).
+# Patches are applied in order; each patch's line numbers must
+# reflect the state after all preceding patches.
+ENGINES = [
+    dict(
+        name='v09',
+        tree='lib',
+        dest=os.path.join('build', 'lib09'),
+        define='LMDB_ENGINE_V09',
+        patch_names=[
+            'env-copy-txn',
+            'cursor-next-prev-uninitialized',
+            'cve-2019-16224-validate-db-flags',
+            'cve-2019-16225-reject-dirty-pages',
+            'cve-2019-16226-validate-node-del-size',
+            'cve-2019-16227-guard-xcursor-null',
+            'cve-2019-16228-validate-psize',
+            'validate-page-bounds',
+            'validate-node-read-size',
+            'validate-subpage-bounds',
+            'validate-xcursor-nodedsz',
+            'validate-leaf2-keysize',
+            'guard-xcursor-null-d3d4',
+            'validate-nodedsz-page-split',
+            'validate-node-shrink-delta',
+            'validate-overflow-pages',
+            'validate-nodedsz-cursor-put',
+            'validate-md-depth',
+            'validate-md-root',
+            'win32-sparse-file',
+            'fix-large-write',
+            'fix-win-flush-large-write',
+            'fix-overflow-page-size-mul',
+        ],
+    ),
+    dict(
+        name='v10',
+        tree='lib1',
+        dest=os.path.join('build', 'lib10'),
+        define='LMDB_ENGINE_V10',
+        patch_names=[
+            'env-copy-txn',
+        ],
+    ),
+]
+
+
+def prepare_engine_tree(engine, apply_patches):
+    """Copy an LMDB source tree into its build directories and optionally
+    apply the py-lmdb patches.
+
+    Two copies are made: <dest>-plain is the (optionally patched) tree as-is,
+    used by the cffi implementation, whose per-engine verifier modules are
+    separate shared objects and therefore need no symbol renaming.  <dest> is
+    the same tree with the symbol-rename header prepended to every C
+    translation unit plus the engine.c vtable glue; the CPython extension
+    links both engines' <dest> trees into one module.
+    """
+    tree = engine['tree']
+    dest = engine['dest']
+    plain = dest + '-plain'
+
+    try:
+        os.makedirs('build')
+    except Exception:
+        pass
+    for d in (dest, plain):
+        try:
+            shutil.rmtree(d)
+        except Exception:
+            pass
+    shutil.copytree(tree, plain)
+
+    if apply_patches:
+        if sys.platform.startswith('win'):
+            for name in engine['patch_names']:
+                patchfile = tree + '\\py-lmdb\\' + name + '.patch'
+                patchset = patch.fromfile(patchfile)
+                if not patchset:
+                    raise Exception('Parsing patch failed: ' + patchfile)
+                if not patchset.apply(2, root=plain):
+                    raise Exception('Applying patch failed: ' + patchfile)
+        else:
+            for name in engine['patch_names']:
+                patchfile = tree + '/py-lmdb/' + name + '.patch'
+                rv = os.system('patch -N -p3 -d ' + plain + ' < ' + patchfile)
+                if rv:
+                    raise Exception('Applying patch failed: ' + patchfile)
+
+    shutil.copytree(plain, dest)
+    shutil.copy(os.path.join(tree, 'py-lmdb', 'rename.h'),
+                os.path.join(dest, 'lmdb_rename.h'))
+    shutil.copy(os.path.join('lmdb', 'engine.c'),
+                os.path.join(dest, 'engine.c'))
+
+    for fname in ('mdb.c', 'midl.c', 'engine.c'):
+        path = os.path.join(dest, fname)
+        with open(path, 'r') as fp:
+            source = fp.read()
+        with open(path, 'w') as fp:
+            fp.write('#include "lmdb_rename.h"\n')
+            fp.write(source)
+
+
+use_bundled_lmdb = os.getenv('LMDB_FORCE_SYSTEM') is None
+apply_patches = use_bundled_lmdb and os.getenv('LMDB_PURE') is None
+
+# Per-engine compiled sources + include dir, consumed both by the CPython
+# extension below and (via _config.py) by the cffi implementation.
+engine_specs = []
+
+if not use_bundled_lmdb:
+    print('py-lmdb: Using system version of liblmdb (single engine).')
     extra_sources = []
-    extra_include_dirs += []
     libraries = ['lmdb']
-    patch_lmdb_source = False
-elif os.getenv('LMDB_PURE') is not None:
-    print('py-lmdb: Using bundled unmodified liblmdb; override with LMDB_FORCE_SYSTEM=1.')
-    extra_sources = ['lib/mdb.c', 'lib/midl.c']
-    extra_include_dirs += ['lib']
-    libraries = []
-    patch_lmdb_source = False
+    extra_compile_args += ['-DLMDB_ENGINE_SYS=1']
+    engine_specs.append(dict(
+        name='sys',
+        sources=['lmdb/engine.c'],
+        include_dirs=[],
+        define='LMDB_ENGINE_SYS',
+    ))
 else:
-    print('py-lmdb: Using bundled liblmdb with py-lmdb patches; override with LMDB_FORCE_SYSTEM=1 or LMDB_PURE=1.')
-    extra_sources = [os.path.join(os.path.dirname(__file__), 'build/lib/mdb.c'), os.path.join(os.path.dirname(__file__), 'build/lib/midl.c')]
-    extra_include_dirs += [os.path.join(os.path.dirname(__file__), 'build/lib'), os.path.join(os.path.dirname(__file__), 'lib/py-lmdb')]
-    extra_compile_args += ['-DHAVE_PATCHED_LMDB=1']
-    libraries = []
+    if apply_patches:
+        print('py-lmdb: Using bundled liblmdb with py-lmdb patches; override with LMDB_FORCE_SYSTEM=1 or LMDB_PURE=1.')
+        extra_compile_args += ['-DHAVE_PATCHED_LMDB=1']
+    else:
+        print('py-lmdb: Using bundled unmodified liblmdb; override with LMDB_FORCE_SYSTEM=1.')
 
-
-
-if patch_lmdb_source:
     if sys.platform.startswith('win'):
         try:
             import patch_ng as patch
@@ -105,62 +223,31 @@ if patch_lmdb_source:
                 except OSError:
                     pass  # On Windows, .pyd may be locked by a running process
 
-    # Clean out any previously patched files
-    dest = 'build' + os.sep + 'lib'
-    try:
-        os.mkdir('build')
-    except Exception:
-        pass
+    extra_sources = []
+    libraries = []
+    for engine in ENGINES:
+        prepare_engine_tree(engine, apply_patches)
+        dest = engine['dest']
+        plain = dest + '-plain'
+        sources = [os.path.join(dest, 'mdb.c'),
+                   os.path.join(dest, 'midl.c'),
+                   os.path.join(dest, 'engine.c')]
+        extra_sources += sources
+        extra_compile_args += ['-D%s=1' % engine['define']]
+        engine_specs.append(dict(
+            name=engine['name'],
+            sources=[os.path.join(plain, 'mdb.c'),
+                     os.path.join(plain, 'midl.c')],
+            include_dirs=[plain],
+            define=engine['define'],
+        ))
 
-    try:
-        shutil.rmtree(dest)
-    except Exception:
-        pass
-    shutil.copytree('lib', dest)
-
-    # Copy away the lmdb source then patch it.
-    # Patches are applied in order; each patch's line numbers must
-    # reflect the state after all preceding patches.
-    patch_names = [
-        'env-copy-txn',
-        'cursor-next-prev-uninitialized',
-        'cve-2019-16224-validate-db-flags',
-        'cve-2019-16225-reject-dirty-pages',
-        'cve-2019-16226-validate-node-del-size',
-        'cve-2019-16227-guard-xcursor-null',
-        'cve-2019-16228-validate-psize',
-        'validate-page-bounds',
-        'validate-node-read-size',
-        'validate-subpage-bounds',
-        'validate-xcursor-nodedsz',
-        'validate-leaf2-keysize',
-        'guard-xcursor-null-d3d4',
-        'validate-nodedsz-page-split',
-        'validate-node-shrink-delta',
-        'validate-overflow-pages',
-        'validate-nodedsz-cursor-put',
-        'validate-md-depth',
-        'validate-md-root',
-        'win32-sparse-file',
-        'fix-large-write',
-        'fix-win-flush-large-write',
-        'fix-overflow-page-size-mul',
-    ]
-
-    if sys.platform.startswith('win'):
-        for name in patch_names:
-            patchfile = 'lib\\py-lmdb\\' + name + '.patch'
-            patchset = patch.fromfile(patchfile)
-            if not patchset:
-                raise Exception('Parsing patch failed: ' + patchfile)
-            if not patchset.apply(2, root=dest):
-                raise Exception('Applying patch failed: ' + patchfile)
-    else:
-        for name in patch_names:
-            patchfile = 'lib/py-lmdb/' + name + '.patch'
-            rv = os.system('patch -N -p3 -d build/lib < ' + patchfile)
-            if rv:
-                raise Exception('Applying patch failed: ' + patchfile)
+    # cpython.c and the cffi csource include "lmdb.h" for types and
+    # constants: use the newest bundled header (a superset of 0.9's API).
+    # Each engine TU picks up its own tree's header via quoted-include
+    # resolution in its build directory, so only the v10 dir may appear on
+    # the global include path.
+    extra_include_dirs += [ENGINES[-1]['dest']]
 
 # distutils perplexingly forces NDEBUG for package code!
 extra_compile_args += ['-UNDEBUG']
@@ -200,6 +287,9 @@ with open('lmdb/_config.py', 'w') as fp:
         ('extra_library_dirs', extra_library_dirs),
         ('extra_include_dirs', extra_include_dirs),
         ('libraries', libraries),
+        # Per-engine unrenamed sources for the cffi implementation, which
+        # builds one verifier module per bundled LMDB version.
+        ('engines', engine_specs),
     ),))
 
 
