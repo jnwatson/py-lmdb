@@ -159,7 +159,10 @@ No alerts in `mdb_env_incr_dumpfd` / `mdb_env_incr_dump` (their byte counter
 is `mdb_size_t`, already 64-bit), `mdb_txn_prepare`, `mdb_env_rollback`,
 `mdb_env_set_pagesize`, or `mdb_cursor_is_db`.
 
-## Separate open question: `md_pad` from the DB record
+## Separate open question (affects BOTH engines): `md_pad` from the DB record
+
+Tracked in `lib/py-lmdb/PATCH-STATUS.md` and `lib1/py-lmdb/PATCH-STATUS.md`,
+not only here — this one is not specific to the 1.0 port.
 
 Alerts 8418, 9355, 9476, 10792 and 10798 all multiply by `ksize` /
 `md_pad`. Our `validate-leaf2-keysize` patch bounds the **page's** `mp_pad`

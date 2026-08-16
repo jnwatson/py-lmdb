@@ -72,6 +72,13 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
   backup API** and needs a patch first. The rest are deferred, not
   dismissed: they become reachable if `MDB_REMAP_CHUNKS` is ever exposed.
 
+- **`md_pad` from the DB record is unvalidated** — `validate-leaf2-keysize`
+  bounds the *page's* `mp_pad`, but nothing bounds `md_pad` as read from the
+  DB record, and `mdb_cursor_get` turns `NUMKEYS(page) * md_pad` into a
+  buffer length returned to the caller. This affects **both** engines, so
+  any fix needs a `validate-md-pad` patch in `lib/py-lmdb/` as well as here.
+  Analysis in `docs/lmdb-1.0-overflow-audit.md`.
+
 - **`cve-2019-16225`'s protection is not carried forward.** The patch rejected
   a mapped page claiming `P_DIRTY`, which would otherwise let
   `mdb_page_touch` skip copy-on-write and then write through a `PROT_READ`
