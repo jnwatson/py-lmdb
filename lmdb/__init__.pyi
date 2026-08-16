@@ -579,4 +579,10 @@ __all__ = [
     "TlsFullError",
     "TxnFullError",
     "VersionMismatchError",
+    # LMDB 1.0.x error codes; absent when built against a 0.9 system
+    # liblmdb, where these names are not exported at runtime.
+    "BadChecksumError",
+    "CryptoFailError",
+    "EnvEncryptionError",
+    "ProblemError",
 ]

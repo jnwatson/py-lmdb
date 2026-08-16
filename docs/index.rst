@@ -231,6 +231,51 @@ If you have found a bug or have a question, please report it on the
 `GitHub issue tracker <https://github.com/jnwatson/py-lmdb/issues>`_.
 
 
+LMDB versions
++++++++++++++
+
+py-lmdb bundles two binary-incompatible LMDB releases and links both into a
+single extension module:
+
+* **LMDB 0.9.x**, which reads and writes data format v1.
+* **LMDB 1.0.x**, which reads and writes data format v3.
+
+The two formats are mutually unreadable: LMDB 1.0 has no support for opening
+0.9 files and vice versa, and the two cannot share an environment even for
+reading.  Migration is via ``mdb_dump`` on the old version followed by
+``mdb_load`` on the new one.
+
+py-lmdb hides this from callers.  Each :py:class:`Environment` is bound to one
+engine when it is constructed:
+
+* Opening an **existing** environment reads the data file's format version and
+  selects the matching engine automatically.  Files written by either version
+  just work.
+* Creating a **new** environment uses LMDB 0.9 by default, so databases stay
+  readable by other tools and by older py-lmdb releases.
+
+Pass ``lib_version=`` to :py:func:`lmdb.open` to choose explicitly — ``0`` for
+0.9.x, ``1`` for 1.0.x.  It applies only when creating a new environment; for
+an existing one the file's own format wins, and forcing the wrong engine
+raises rather than converting anything::
+
+    env = lmdb.open('/tmp/db', lib_version=1)   # new database in v3 format
+
+:py:meth:`Environment.lib_version` reports the engine backing an environment,
+and :py:func:`lmdb.version` accepts ``lib_version=`` to report either bundled
+version.  Setting the ``LMDB_DEFAULT_LIB_VERSION`` environment variable
+changes the default for new environments process-wide, which is mainly useful
+for testing an application against both engines.
+
+Exception classes, buffer semantics and every other API detail are shared
+across engines, so ``except lmdb.Error`` and ``isinstance`` checks behave
+identically regardless of which engine is in use.
+
+Building with ``LMDB_FORCE_SYSTEM=1`` produces a single-engine build against
+whatever version the system ``liblmdb`` provides; ``lib_version=`` then
+accepts only that version.
+
+
 Named Databases
 +++++++++++++++
 

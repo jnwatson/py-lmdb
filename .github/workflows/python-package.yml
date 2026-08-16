@@ -72,8 +72,15 @@ jobs:
         pip install pytest cffi patch-ng setuptools
         python setup.py develop
 
-    - name: Test with pytest
+    # Both bundled LMDB engines are linked into every build, so the second
+    # engine costs an extra test run rather than an extra job.
+    - name: Test with pytest (LMDB 0.9 engine)
       run: pytest
+
+    - name: Test with pytest (LMDB 1.0 engine)
+      run: pytest
+      env:
+        LMDB_DEFAULT_LIB_VERSION: 1
 
   type-check:
     name: Type-check tests and stubs
@@ -150,8 +157,15 @@ jobs:
         pip install pytest cffi patch-ng setuptools
         python setup.py develop
 
-    - name: Test with pytest
+    # Both bundled LMDB engines are linked into every build, so the second
+    # engine costs an extra test run rather than an extra job.
+    - name: Test with pytest (LMDB 0.9 engine)
       run: pytest
+
+    - name: Test with pytest (LMDB 1.0 engine)
+      run: pytest
+      env:
+        LMDB_DEFAULT_LIB_VERSION: 1
 
   test-mdb-layout:
     name: MDB layout tests (${{ matrix.os }})

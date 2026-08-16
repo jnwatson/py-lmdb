@@ -389,7 +389,7 @@ if not lmdb._reading_docs():
 
     _engines = []
     _verifier_extensions = []
-    for _cfg in _engine_cfgs:
+    for _cfg in _engine_cfgs:  # type: ignore[attr-defined]
         _l = _ffi.verify(_CFFI_VERIFY,
                          modulename='lmdb_cffi_' + _cfg['name'],
                          ext_package='lmdb',
@@ -399,14 +399,16 @@ if not lmdb._reading_docs():
                                        _config_vars['extra_include_dirs']),
                          libraries=_config_vars['libraries'],
                          library_dirs=_config_vars['extra_library_dirs'])
-        _verifier_extensions.append(_ffi.verifier.get_extension())
+        _verifier_extensions.append(
+            _ffi.verifier.get_extension())  # type: ignore[attr-defined]
         _engines.append(dict(
             lib=_l,
-            major=_l.MDB_VERSION_MAJOR,
-            minor=_l.MDB_VERSION_MINOR,
-            patch=_l.MDB_VERSION_PATCH,
+            major=_l.MDB_VERSION_MAJOR,  # type: ignore[attr-defined]
+            minor=_l.MDB_VERSION_MINOR,  # type: ignore[attr-defined]
+            patch=_l.MDB_VERSION_PATCH,  # type: ignore[attr-defined]
             # Data format the engine reads/writes: 1 for 0.9.x, 3 for 1.0.x.
-            data_version=3 if _l.MDB_VERSION_MAJOR >= 1 else 1,
+            data_version=(
+                3 if _l.MDB_VERSION_MAJOR >= 1 else 1),  # type: ignore[attr-defined]
         ))
     del _cfg, _l
 
