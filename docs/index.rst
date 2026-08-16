@@ -267,13 +267,29 @@ version.  Setting the ``LMDB_DEFAULT_LIB_VERSION`` environment variable
 changes the default for new environments process-wide, which is mainly useful
 for testing an application against both engines.
 
-Exception classes, buffer semantics and every other API detail are shared
-across engines, so ``except lmdb.Error`` and ``isinstance`` checks behave
-identically regardless of which engine is in use.
+The exception hierarchy, buffer semantics and object types are shared across
+engines, so ``except lmdb.Error`` and ``isinstance`` checks behave identically
+whichever engine is in use.  In particular, writing in a read-only transaction
+raises :py:class:`lmdb.ReadonlyError` on both, even though the underlying
+error code differs (0.9 reports ``EACCES``, 1.0 ``MDB_IS_READONLY``).
+
+Two differences do remain visible:
+
+* LMDB 1.0 defines error codes 0.9 does not, so
+  :py:class:`lmdb.ProblemError`, :py:class:`lmdb.BadChecksumError`,
+  :py:class:`lmdb.CryptoFailError` and :py:class:`lmdb.EnvEncryptionError`
+  can only be raised by a 1.0 environment.  They are always defined on a
+  bundled build, so ``except lmdb.ProblemError`` is safe to write even in
+  code that only ever opens 0.9 databases.
+* LMDB 1.0 stores sub-database names with a trailing NUL byte where 0.9 does
+  not.  :py:meth:`Environment.dbs` strips it so it returns the same names on
+  either engine, but the raw byte is still there if you iterate the main
+  database yourself with a cursor.
 
 Building with ``LMDB_FORCE_SYSTEM=1`` produces a single-engine build against
-whatever version the system ``liblmdb`` provides; ``lib_version=`` then
-accepts only that version.
+whatever version the system ``liblmdb`` provides.  ``lib_version=`` then
+accepts only that version, and the 1.0-only exception classes above are not
+defined at all.
 
 
 Named Databases
@@ -1100,6 +1116,22 @@ Exceptions
 .. autoclass:: lmdb.LockError ()
 .. autoclass:: lmdb.MemoryError ()
 .. autoclass:: lmdb.DiskError ()
+
+The following correspond to error codes added in LMDB 1.0.  They exist only
+when the 1.0 engine is present, so they are absent from builds made with
+``LMDB_FORCE_SYSTEM=1`` against a 0.9 system ``liblmdb``.  Use
+``getattr(lmdb, 'ProblemError', ())`` in an ``except`` clause if you need to
+handle them in code that must also import against such a build.
+
+.. autoclass:: lmdb.ProblemError ()
+.. autoclass:: lmdb.BadChecksumError ()
+.. autoclass:: lmdb.CryptoFailError ()
+.. autoclass:: lmdb.EnvEncryptionError ()
+
+Note that LMDB 1.0 reports a write attempt in a read-only transaction as
+``MDB_IS_READONLY`` where 0.9 reports ``EACCES``.  Both surface as
+:py:class:`lmdb.ReadonlyError`, so no code change is needed to handle either
+engine.
 
 
 Command line tools

@@ -857,6 +857,25 @@ class Environment:
             and must ensure that no readers are using old transactions while a
             writer is active. The simplest approach is to use an exclusive lock
             so that no readers may be active at all when a writer begins.
+
+        `lib_version`:
+            Which bundled LMDB version to use for a **new** environment:
+            ``0`` for 0.9.x (data format v1) or ``1`` for 1.0.x (data format
+            v3).  Defaults to 0.9.x, so new databases stay readable by other
+            tools and by older py-lmdb releases.
+
+            This is ignored when opening an environment that already exists:
+            the file's own format decides which engine services it, so
+            databases written by either version open without the caller doing
+            anything.  Passing the version that does not match an existing
+            file raises rather than converting it.
+
+            Raises :py:class:`lmdb.Error` if this build has no such engine —
+            notably ``LMDB_FORCE_SYSTEM=1`` builds, which contain only the
+            single version the system ``liblmdb`` provides.
+
+            See :py:meth:`lib_version` to query the engine actually in use,
+            and `LMDB versions`_ for the full picture.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
                  readonly=False, metasync=True, sync=True, map_async=False,
@@ -1556,6 +1575,12 @@ class Environment:
         each key as a named database.  It only returns reliable results
         when the main database is not used to store regular key-value
         pairs.
+
+        LMDB 1.0 stores sub-database names with a trailing NUL where 0.9
+        does not.  That byte is stripped here, so this returns the same
+        names whichever engine backs the environment.  Note the difference
+        is still visible if you iterate the main database yourself with a
+        cursor rather than calling this method.
 
             `txn`:
                 Read-only or read-write :py:class:`Transaction` to use.  If
