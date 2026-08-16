@@ -104,4 +104,21 @@
 #define mdb_txn_reset                mdb09_txn_reset
 #define mdb_version                  mdb09_version
 
+/* mdb_tls_cbp -- the Win32 TLS callback pointer -- is deliberately NOT
+ * renamed here.  Under MSVC, mdb.c force-references it with
+ *
+ *     #pragma comment(linker, "/INCLUDE:mdb_tls_cbp")
+ *
+ * so the whole-program optimizer cannot drop it.  That name sits inside a
+ * string literal, where macro replacement does not apply, so renaming the
+ * definition would leave the directive pointing at a symbol that no longer
+ * exists.  This tree therefore keeps the original name and the 1.0 tree
+ * renames its own copy, which resolves the duplicate-definition error
+ * (LNK2005) while leaving both directives satisfiable.  See
+ * lib1/py-lmdb/rename.h for the other half.
+ *
+ * Bundled builds always include this engine, so the unrenamed definition is
+ * always present for both trees' directives to bind to.
+ */
+
 #endif /* LMDB_RENAME_H */

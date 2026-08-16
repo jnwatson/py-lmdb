@@ -60,8 +60,16 @@ if os.getenv('LMDB_LIBDIR'):
 else:
     extra_library_dirs = []
 
-extra_include_dirs += ['lib/py-lmdb', 'lmdb']
 extra_compile_args = []
+
+# Absolute, so the paths recorded in lmdb/_config.py stay valid regardless of
+# the working directory.  cffi's verify() builds from its own temporary
+# directory on some implementations (notably PyPy), where relative source
+# paths would not resolve.
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+extra_include_dirs += [os.path.join(HERE, 'lib', 'py-lmdb'),
+                       os.path.join(HERE, 'lmdb')]
 
 #
 # py-lmdb bundles two binary-incompatible LMDB versions (0.9.x, data format
@@ -82,7 +90,7 @@ ENGINES = [
     dict(
         name='v09',
         tree='lib',
-        dest=os.path.join('build', 'lib09'),
+        dest=os.path.join(HERE, 'build', 'lib09'),
         define='LMDB_ENGINE_V09',
         patch_names=[
             'env-copy-txn',
@@ -113,7 +121,7 @@ ENGINES = [
     dict(
         name='v10',
         tree='lib1',
-        dest=os.path.join('build', 'lib10'),
+        dest=os.path.join(HERE, 'build', 'lib10'),
         define='LMDB_ENGINE_V10',
         # The 1.0 series omits four patches carried for 0.9: the two
         # large-write fixes landed upstream (ITS#10054, ITS#10538),
@@ -156,12 +164,12 @@ def prepare_engine_tree(engine, apply_patches):
     translation unit plus the engine.c vtable glue; the CPython extension
     links both engines' <dest> trees into one module.
     """
-    tree = engine['tree']
+    tree = os.path.join(HERE, engine['tree'])
     dest = engine['dest']
     plain = dest + '-plain'
 
     try:
-        os.makedirs('build')
+        os.makedirs(os.path.join(HERE, 'build'))
     except Exception:
         pass
     for d in (dest, plain):
@@ -190,7 +198,7 @@ def prepare_engine_tree(engine, apply_patches):
     shutil.copytree(plain, dest)
     shutil.copy(os.path.join(tree, 'py-lmdb', 'rename.h'),
                 os.path.join(dest, 'lmdb_rename.h'))
-    shutil.copy(os.path.join('lmdb', 'engine.c'),
+    shutil.copy(os.path.join(HERE, 'lmdb', 'engine.c'),
                 os.path.join(dest, 'engine.c'))
 
     for fname in ('mdb.c', 'midl.c', 'engine.c'):
@@ -213,7 +221,7 @@ if not use_bundled_lmdb:
     print('py-lmdb: Using system version of liblmdb (single engine).')
     # engine.c provides the lmdb_api_sys vtable for the CPython extension;
     # the cffi implementation talks to the system library directly.
-    extra_sources = [os.path.join('lmdb', 'engine.c')]
+    extra_sources = [os.path.join(HERE, 'lmdb', 'engine.c')]
     libraries = ['lmdb']
     extra_compile_args += ['-DLMDB_ENGINE_SYS=1']
     engine_specs.append(dict(
@@ -295,8 +303,8 @@ if sys.platform.startswith('win'):
     # If running on Visual Studio<=2010 we must provide <stdint.h>. Newer
     # versions provide it out of the box.
     if msvc_ver and not msvc_ver >= 1600:
-        extra_include_dirs += ['lib\\win32-stdint']
-    extra_include_dirs += ['lib\\win32']
+        extra_include_dirs += [os.path.join(HERE, 'lib', 'win32-stdint')]
+    extra_include_dirs += [os.path.join(HERE, 'lib', 'win32')]
     extra_compile_args += [r'/FIPython.h']
     libraries += ['Advapi32']
 

@@ -104,4 +104,27 @@
 #define mdb_txn_reset                mdb10_txn_reset
 #define mdb_version                  mdb10_version
 
+/* The Win32 TLS callback pointer is a non-static global, so both trees would
+ * otherwise define it (LNK2005).  Rename this tree's copy; the 0.9 tree
+ * keeps the original name because mdb.c's
+ *
+ *     #pragma comment(linker, "/INCLUDE:mdb_tls_cbp")
+ *
+ * names it inside a string literal, which macro replacement cannot rewrite.
+ * That directive then binds to the 0.9 definition -- harmless, since it only
+ * forces a symbol to be kept -- and the directive below does the same job for
+ * the name this tree actually defines, so LTCG cannot drop this engine's TLS
+ * callback.  MSVC decorates cdecl data with a leading underscore on 32-bit
+ * only.  The __GNUC__ path in mdb.c uses __attribute__((section)) with no
+ * linker directive, so it needs nothing here.
+ */
+#define mdb_tls_cbp                  mdb10_tls_cbp
+#if defined(_WIN32) && !defined(__GNUC__)
+# ifdef _WIN64
+#  pragma comment(linker, "/INCLUDE:mdb10_tls_cbp")
+# else
+#  pragma comment(linker, "/INCLUDE:_mdb10_tls_cbp")
+# endif
+#endif
+
 #endif /* LMDB_RENAME_H */
