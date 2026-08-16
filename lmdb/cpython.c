@@ -2308,6 +2308,16 @@ env_flags(EnvObject *self, PyObject *Py_UNUSED(ignored))
 }
 
 /**
+ * Environment.lib_version() -> tuple
+ */
+static PyObject *
+env_lib_version(EnvObject *self, PyObject *Py_UNUSED(ignored))
+{
+    const MdbApi *V = self->libv;
+    return Py_BuildValue("iii", V->major, V->minor, V->patch);
+}
+
+/**
  * Environment.max_key_size() -> int
  */
 static PyObject *
@@ -2846,6 +2856,7 @@ static struct PyMethodDef env_methods[] = {
     {"copyfd", (PyCFunction)env_copyfd, METH_VARARGS|METH_KEYWORDS},
     {"info", (PyCFunction)env_info, METH_NOARGS},
     {"flags", (PyCFunction)env_flags, METH_NOARGS},
+    {"lib_version", (PyCFunction)env_lib_version, METH_NOARGS},
     {"max_key_size", (PyCFunction)env_max_key_size, METH_NOARGS},
     {"max_readers", (PyCFunction)env_max_readers, METH_NOARGS},
     {"open_db", (PyCFunction)env_open_db, METH_VARARGS|METH_KEYWORDS},

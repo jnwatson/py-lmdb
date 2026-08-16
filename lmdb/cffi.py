@@ -1345,6 +1345,13 @@ class Environment:
             'lock': not (flags & _lib.MDB_NOLOCK),
         }
 
+    def lib_version(self):
+        """Return a tuple of integers `(major, minor, patch)` describing the
+        LMDB engine servicing this environment."""
+        return (self._lib.MDB_VERSION_MAJOR,
+                self._lib.MDB_VERSION_MINOR,
+                self._lib.MDB_VERSION_PATCH)
+
     def max_key_size(self):
         """Return the maximum size in bytes of a record's key part. This
         matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
