@@ -1,3 +1,49 @@
+UNRELEASED
+##########
+
+Features
+--------
+
+- py-lmdb now bundles both LMDB release lines and links them into a single
+    extension module: LMDB 0.9.35 (data format v1) and LMDB 1.0.1 (data
+    format v3).  The two formats are mutually unreadable, so each
+    ``Environment`` is bound to one engine at construction: an existing
+    database is opened with whatever engine matches its on-disk format, and a
+    new one uses LMDB 0.9 unless told otherwise.  Databases written by either
+    version can therefore be opened without the caller doing anything.
+
+- New ``lib_version=`` argument to ``lmdb.open()``/``Environment()`` selects
+    the LMDB version for a *new* environment (``0`` for 0.9.x, ``1`` for
+    1.0.x).  For an existing environment the file's own format wins.  New
+    ``Environment.lib_version()`` reports the engine backing an environment,
+    and ``lmdb.version()`` gained a ``lib_version=`` argument to report either
+    bundled version.  Setting ``LMDB_DEFAULT_LIB_VERSION`` changes the default
+    for new environments process-wide.
+
+- New exception classes for the error codes LMDB 1.0 adds: ``ProblemError``,
+    ``BadChecksumError``, ``CryptoFailError`` and ``EnvEncryptionError``.
+    LMDB 1.0's ``MDB_IS_READONLY`` maps to the existing ``ReadonlyError``,
+    which 0.9 raises as ``EACCES``, so writing in a read-only transaction
+    raises the same class on both engines.
+
+Bug fixes
+---------
+
+- ``Environment.dbs()`` strips the trailing NUL that LMDB 1.0 stores with
+    sub-database names, so it returns the same list on either engine.
+
+Notes
+-----
+
+- ``LMDB_FORCE_SYSTEM=1`` still builds a single engine against the system
+    liblmdb; ``lib_version=`` then accepts only that version.
+
+- The py-lmdb hardening patch series has been ported to the 1.0 tree.  Four
+    patches are not carried there: two large-write fixes landed upstream
+    (ITS#10054, ITS#10538), LMDB 1.0's incremental file growth removes the
+    need for the Windows sparse-file patch, and the CVE-2019-16225 patch keys
+    on a page flag 1.0 no longer has.  See ``lib1/py-lmdb/PATCH-STATUS.md``.
+
 2026-07-12 2.3.0
 #################
 

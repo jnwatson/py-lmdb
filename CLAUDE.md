@@ -39,9 +39,14 @@ python -m pytest tests/env_test.py::EnvTest::test_open_default
 
 # Via unittest directly
 python -m unittest discover -s tests -p "*_test.py"
+
+# Against the bundled LMDB 1.0 engine instead of the 0.9 default
+LMDB_DEFAULT_LIB_VERSION=1 python -m pytest
 ```
 
-CI runs tests across a matrix: Python 3.8/3.11/3.13/3.14 + PyPy-3.10, on Linux/Windows/macOS, with both cpython and cffi implementations, and both patched and pure LMDB variants.
+CI runs tests across a matrix: Python 3.8/3.11/3.13/3.14 + PyPy-3.10, on Linux/Windows/macOS, with both cpython and cffi implementations, and both patched and pure LMDB variants. Every job runs the suite twice — once per bundled LMDB engine — since both are linked into a single build, so the engine dimension costs test time rather than extra jobs.
+
+`tests/cve_test.py` detects `PAGEHDRSZ`/`PAGEBASE` at import so its corruption recipes work on either engine; cases not yet re-derived for 1.0 are marked with its `only_v09` decorator.
 
 ### Testing on Windows
 
@@ -65,16 +70,24 @@ Note: use `powershell.exe` with `Set-Location` rather than `cmd.exe`, since `cmd
 
 Both implementations must expose an identical API. Changes to one typically require corresponding changes to the other.
 
-### Bundled LMDB Library
+### Bundled LMDB Libraries (dual-engine)
 
-The C library source lives in `lib/` (mdb.c, lmdb.h, midl.c, midl.h). Patches in `lib/py-lmdb/` are applied during build via `setup.py`:
-- `env-copy-txn.patch` — enables copy/backup under active transactions
-- `cursor-next-prev-uninitialized.patch` — fix for next/prev on uninitialized cursors after delete
-- `win32-semaphore-lock.patch` — replace recursive Windows Mutexes with non-recursive Semaphores
+py-lmdb bundles **two binary-incompatible LMDB versions** and links both into one extension module:
 
-`setup.py` handles patching, compiler flag configuration, and selecting between bundled vs system LMDB. On Windows, patches are applied via `patch_ng`; on other platforms, via the `patch` command.
+- `lib/` — LMDB 0.9.35, data format v1. Patches in `lib/py-lmdb/`.
+- `lib1/` — LMDB 1.0.1, data format v3. Patches in `lib1/py-lmdb/`.
 
-**Upstream changes**: Never modify `lib/mdb.c`, `lib/midl.c`, `lib/lmdb.h`, or `lib/midl.h` directly. Instead, create a patch file in `lib/py-lmdb/` and add it to `setup.py`'s patch list (both the Windows `patch_ng` loop and the Unix `patch` commands). Patches must use git diff format (with a `diff --git` header line) so `patch_ng` correctly strips `a/`/`b/` prefixes. The patch must apply cleanly after all preceding patches. When fixing an upstream LMDB bug, also prepare a minimal C reproducer and a bug report to file with the LMDB project. Bug reports must conform to OpenLDAP bug-writing guidelines (https://bugs.openldap.org/page.cgi?id=bug-writing.html): one issue per report, concise summary (~60 chars), steps to reproduce, actual vs expected results, and build/platform info. Distinguish facts from speculation.
+Each tree is copied to `build/lib09` / `build/lib10`, patched, and compiled with a generated symbol-rename header (`lib*/py-lmdb/rename.h`, prefixing every extern `mdb_*` with `mdb09_`/`mdb10_`) so the two trees cannot collide at link time. `lmdb/engine.c` is compiled once per tree and exports that tree's entry points as an `MdbApi` vtable (`lmdb/mdb_api.h`). `cpython.c` calls LMDB exclusively through a per-`Environment` vtable pointer; `cffi.py` builds one verifier module per engine and selects via `self._lib` (no renaming needed there — each is its own shared object).
+
+An `Environment` binds to an engine at construction: existing data files are sniffed for their meta-page format version, new ones follow `lib_version=` (default 0.9). `LMDB_DEFAULT_LIB_VERSION=N` overrides that default process-wide, which is how the test suite runs against both engines. `LMDB_FORCE_SYSTEM=1` builds a single engine against the system liblmdb.
+
+The `ENGINES` table in `setup.py` drives patching, per-engine defines, and the `engine_specs` handed to cffi via `_config.py`.
+
+**Upstream changes**: Never modify `mdb.c`, `midl.c`, `lmdb.h`, or `midl.h` in either tree directly. Create a patch file in that tree's `py-lmdb/` directory and add it to the corresponding `ENGINES` entry's `patch_names`. Patches must use git diff format (with a `diff --git` header line) so `patch_ng` correctly strips `a/`/`b/` prefixes, and must apply cleanly after all preceding patches in that engine's list.
+
+The two series are **not** identical — see `lib1/py-lmdb/PATCH-STATUS.md` for which 0.9 patches are dropped, ported mechanically, or hand-rewritten for 1.0, and note the key layout difference (1.0 sets `PAGEBASE = PAGEHDRSZ`; 0.9 uses 0). When regenerating a series after a version bump, replay it one patch at a time and diff consecutive snapshots so line numbers stay consistent.
+
+When fixing an upstream LMDB bug, also prepare a minimal C reproducer and a bug report to file with the LMDB project (see `docs/upstream-psize-sigfpe.md` for an example). Bug reports must conform to OpenLDAP bug-writing guidelines (https://bugs.openldap.org/page.cgi?id=bug-writing.html): one issue per report, concise summary (~60 chars), steps to reproduce, actual vs expected results, and build/platform info. Distinguish facts from speculation.
 
 ### Test Structure
 

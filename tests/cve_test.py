@@ -37,32 +37,109 @@ import testlib
 SKIP_PURE = (os.environ.get('LMDB_PURE') is not None or
              os.environ.get('LMDB_FORCE_SYSTEM') is not None)
 
-# Meta page layout (64-bit):
-#   [0..15]   page header
-#   [16..19]  mm_magic (0xBEEFC0DE)
-#   [20..23]  mm_version
-#   [24..31]  mm_address (void*)
-#   [32..39]  mm_mapsize (size_t)
-#   [40..43]  mm_dbs[0].md_pad = mm_psize (FREE_DBI)
-#   [44..45]  mm_dbs[0].md_flags
-# mm_dbs[1] (MAIN_DBI) starts at offset 40+48=88, md_flags at 92.
+# Page and meta layout.  The page header differs between LMDB versions:
 #
-# Page size varies by platform (4096 on x86, 16384 on Apple Silicon).
-# Read from the file rather than hardcoding.
+#   0.9 (PAGEHDRSZ 16, 64-bit):  pgno(8) pad(2) flags(2) lower(2) upper(2)
+#   1.0 (PAGEHDRSZ 24, 64-bit):  pgno(8) txnid(8) pad(2) flags(2)
+#                                lower(2) upper(2)
+#
+# Everything else is identical: MDB_meta follows the header as
+#   magic(4) version(4) address(8) mapsize(size_t) mm_dbs[2]...
+# and MDB_db is 48 bytes on 64-bit in both versions:
+#   md_pad(4) md_flags(2) md_depth(2) md_branch_pages(8) md_leaf_pages(8)
+#   md_overflow_pages(8) md_entries(8) md_root(8)
+#
+# Rather than hardcode a version, detect the header size by locating
+# MDB_MAGIC in a freshly created environment.  That also keeps the tests
+# correct on 32-bit builds, where pgno_t is narrower.
 
-PSIZE_OFFSET = 40       # uint32: mm_psize = mm_dbs[FREE_DBI].md_pad
-FLAGS_FREE_OFFSET = 44  # uint16: mm_dbs[FREE_DBI].md_flags
-FLAGS_MAIN_OFFSET = 92  # uint16: mm_dbs[MAIN_DBI].md_flags
+MDB_MAGIC = 0xBEEFC0DE
+SIZEOF_MDB_DB = 48
 
-# Offsets within each page
-MP_FLAGS_OFFSET = 10    # uint16: mp_flags (after pgno(8) + pad(2))
-MP_PTRS_OFFSET = 16     # first mp_ptrs entry (after 16-byte page header)
 
-MP_LOWER_OFFSET = 12    # uint16: mp_lower (after pgno(8) + pad(2) + flags(2))
-MP_UPPER_OFFSET = 14    # uint16: mp_upper
+def _detect_layout():
+    """Return (PAGEHDRSZ, PAGEBASE) for the LMDB engine backing new
+    environments.
+
+    PAGEHDRSZ is found by locating MDB_MAGIC, the first field of MDB_meta,
+    which directly follows the page header.
+
+    PAGEBASE (ITS#7713) is 0 on 0.9 but PAGEHDRSZ on 1.0, where it graduated
+    out of MDB_DEVEL.  It shifts the frame of reference for mp_lower,
+    mp_upper and every mp_ptrs entry, so it is detected rather than assumed:
+    write a known number of keys to a fresh leaf page, then see whether
+    mp_lower counts from the start of the page or from the end of its
+    header."""
+    path = testlib.temp_dir()
+    env = lmdb.open(path)
+    nkeys = 3
+    try:
+        with env.begin(write=True) as txn:
+            for i in range(nkeys):
+                txn.put(b'%d' % i, b'v')
+    finally:
+        env.close()
+
+    with open(os.path.join(path, 'data.mdb'), 'rb') as fp:
+        raw = fp.read()
+
+    hdrsz = None
+    for off in range(0, 64, 4):
+        if struct.unpack_from('=I', raw, off)[0] == MDB_MAGIC:
+            hdrsz = off
+            break
+    assert hdrsz is not None, 'could not locate MDB_MAGIC in meta page'
+
+    psize = struct.unpack_from('<I', raw, hdrsz + 24)[0]
+    for off in range(psize * 2, len(raw), psize):
+        flags = struct.unpack_from('<H', raw, off + hdrsz - 6)[0]
+        if not (flags & 0x02):          # P_LEAF
+            continue
+        lower = struct.unpack_from('<H', raw, off + hdrsz - 4)[0]
+        if lower == hdrsz + 2 * nkeys:
+            return hdrsz, 0
+        if lower == 2 * nkeys:
+            return hdrsz, hdrsz
+    raise AssertionError('could not determine PAGEBASE from a leaf page')
+
+
+PAGEHDRSZ, PAGEBASE = _detect_layout()
+
+# Offsets within a meta page.
+_META = PAGEHDRSZ                       # MDB_meta starts here
+_MM_DBS = _META + 24                    # magic(4) version(4) address(8)
+                                        #   mapsize(8) -> mm_dbs[0]
+PSIZE_OFFSET = _MM_DBS                  # uint32: mm_dbs[FREE_DBI].md_pad
+FLAGS_FREE_OFFSET = _MM_DBS + 4         # uint16: mm_dbs[FREE_DBI].md_flags
+FLAGS_MAIN_OFFSET = (_MM_DBS + SIZEOF_MDB_DB + 4)  # mm_dbs[MAIN_DBI].md_flags
+
+# Offsets within any page.  lower/upper/ptrs sit at the end of the header.
+MP_FLAGS_OFFSET = PAGEHDRSZ - 6         # uint16: mp_flags
+MP_LOWER_OFFSET = PAGEHDRSZ - 4         # uint16: mp_lower
+MP_UPPER_OFFSET = PAGEHDRSZ - 2         # uint16: mp_upper
+MP_PTRS_OFFSET = PAGEHDRSZ              # first mp_ptrs entry
 
 P_LEAF = 0x02
+# 0.9 only; 1.0 derives dirtiness from mp_txnid and reuses 0x10.
 P_DIRTY = 0x10
+
+# Which LMDB engine backs new environments in this run.  Set
+# LMDB_DEFAULT_LIB_VERSION=1 to exercise the tests against the 1.0 engine.
+ENGINE_MAJOR = lmdb.version()[0]
+
+
+def only_v09(reason):
+    """Mark a corruption test whose recipe has not been carried over to the
+    1.0 engine.
+
+    The layout constants above make most of these tests engine-agnostic, but
+    a few depend on structures that 1.0 changed more deeply.  None of them
+    crash on 1.0 — the corruption simply does not reach the code path it
+    reaches on 0.9 — but until each is re-derived for 1.0 the corresponding
+    hardening is verified only on the 0.9 engine.  See
+    lib1/py-lmdb/PATCH-STATUS.md.
+    """
+    return unittest.skipIf(ENGINE_MAJOR >= 1, '0.9 engine only: ' + reason)
 
 
 def _read_page_size(db_path):
@@ -147,6 +224,8 @@ class CVE_2019_16225_Test(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('1.0 removed the P_DIRTY page flag; dirtiness is derived '
+              'from mp_txnid (see PATCH-STATUS.md follow-up)')
     def test_corrupt_leaf_page_dirty_flag(self):
         """Set P_DIRTY on a leaf page on disk; write operations must
         return MDB_CORRUPTED instead of crashing."""
@@ -214,7 +293,7 @@ class CVE_2019_16226_Test(unittest.TestCase):
             ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
             if ptr0 == 0 or ptr0 >= psize:
                 continue
-            node_off = off + ptr0
+            node_off = off + ptr0 + PAGEBASE
             mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
             if mn_hi == 0:
                 struct.pack_into('<H', raw, node_off + 2, 0x0100)
@@ -266,7 +345,7 @@ class CVE_2019_16227_Test(unittest.TestCase):
             ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
             if ptr0 == 0 or ptr0 >= psize:
                 continue
-            node_off = off + ptr0
+            node_off = off + ptr0 + PAGEBASE
             mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
             if not (mn_flags & 0x04):
                 struct.pack_into('<H', raw, node_off + 4, mn_flags | 0x04)
@@ -332,6 +411,7 @@ class PageBoundsTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('corruption does not reach mdb_page_get on 1.0')
     def test_corrupt_mp_lower_underflow(self):
         """Set mp_lower to 0 on a leaf page; NUMKEYS wraps to a huge
         value.  Operations must raise CorruptedError."""
@@ -351,7 +431,7 @@ class PageBoundsTest(unittest.TestCase):
         for off in range(psize * 2, len(raw), psize):
             flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
             if flags & P_LEAF:
-                # Set mp_lower to 0, which is < PAGEHDRSZ (16)
+                # Set mp_lower to 0, which is < PAGEHDRSZ
                 struct.pack_into('<H', raw, off + MP_LOWER_OFFSET, 0)
                 patched = True
                 break
@@ -473,7 +553,7 @@ class NodeReadSizeTest(unittest.TestCase):
             ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
             if ptr0 == 0 or ptr0 >= psize:
                 continue
-            node_off = off + ptr0
+            node_off = off + ptr0 + PAGEBASE
             # mn_hi is at offset 2 within the MDB_node struct
             mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
             if mn_hi == 0:
@@ -508,6 +588,7 @@ class SubpageBoundsTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('sub-page framing differs under 1.0 PAGEBASE')
     def test_corrupt_subpage_mp_upper(self):
         """Corrupt mp_upper on a DUPSORT sub-page; put must raise
         CorruptedError instead of heap overflow."""
@@ -531,13 +612,13 @@ class SubpageBoundsTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1  # PAGEHDRSZ=16, PAGEBASE=0
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             for idx in range(nkeys):
                 ptr = struct.unpack_from('<H', raw,
                                         off + MP_PTRS_OFFSET + idx * 2)[0]
                 if ptr == 0 or ptr >= psize:
                     continue
-                node_off = off + ptr
+                node_off = off + ptr + PAGEBASE
                 mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
                 if not (mn_flags & F_DUPDATA):
                     continue
@@ -603,13 +684,13 @@ class XcursorNodeDszTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             for idx in range(nkeys):
                 ptr = struct.unpack_from('<H', raw,
                                         off + MP_PTRS_OFFSET + idx * 2)[0]
                 if ptr == 0 or ptr >= psize:
                     continue
-                node_off = off + ptr
+                node_off = off + ptr + PAGEBASE
                 mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
                 if (mn_flags & F_SUBDATA) and (mn_flags & F_DUPDATA):
                     # Set mn_lo to 1 (NODEDSZ = 1, which < sizeof(MDB_db)=48)
@@ -653,6 +734,7 @@ class Leaf2KeySizeTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('LEAF2 md_pad recipe not re-derived for 1.0')
     def test_corrupt_mp_pad_zero(self):
         """Set mp_pad to 0 on a LEAF2 page; operations must raise
         CorruptedError."""
@@ -693,6 +775,7 @@ class Leaf2KeySizeTest(unittest.TestCase):
                 cur.first()
                 list(cur.iternext_dup())
 
+    @only_v09('LEAF2 md_pad recipe not re-derived for 1.0')
     def test_corrupt_mp_pad_huge(self):
         """Set mp_pad to a huge value on a LEAF2 page; operations must
         raise CorruptedError."""
@@ -765,7 +848,7 @@ class XcursorNullD3D4Test(unittest.TestCase):
             ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
             if ptr0 == 0 or ptr0 >= psize:
                 continue
-            node_off = off + ptr0
+            node_off = off + ptr0 + PAGEBASE
             mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
             if not (mn_flags & F_DUPDATA):
                 struct.pack_into('<H', raw, node_off + 4, mn_flags | F_DUPDATA)
@@ -837,7 +920,7 @@ class PageSplitNodeDszTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             # Corrupt a middle node's mn_hi
             mid = nkeys // 2
             if mid >= nkeys:
@@ -846,7 +929,7 @@ class PageSplitNodeDszTest(unittest.TestCase):
                                     off + MP_PTRS_OFFSET + mid * 2)[0]
             if ptr == 0 or ptr >= psize:
                 continue
-            node_off = off + ptr
+            node_off = off + ptr + PAGEBASE
             struct.pack_into('<H', raw, node_off + 2, 0x0100)
             patched += 1
 
@@ -898,13 +981,13 @@ class NodeShrinkUnderflowTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             for idx in range(nkeys):
                 ptr = struct.unpack_from('<H', raw,
                                         off + MP_PTRS_OFFSET + idx * 2)[0]
                 if ptr == 0 or ptr >= psize:
                     continue
-                node_off = off + ptr
+                node_off = off + ptr + PAGEBASE
                 mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
                 if not (mn_flags & F_DUPDATA) or (mn_flags & F_SUBDATA):
                     continue
@@ -941,7 +1024,9 @@ class NodeShrinkUnderflowTest(unittest.TestCase):
 
 
 P_OVERFLOW = 0x04
-MP_PAGES_OFFSET = 12  # uint32: mp_pages (same offset as mp_lower+mp_upper union)
+# uint32: mp_pages, a union with the mp_lower/mp_upper pair at the tail of
+# the page header.
+MP_PAGES_OFFSET = MP_LOWER_OFFSET
 
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
@@ -952,6 +1037,8 @@ class OverflowPagesTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('1.0 reads the overflow page count from the node '
+              '(MDB_ovpage.op_pages), not the page header')
     def test_corrupt_overflow_mp_pages(self):
         """Set mp_pages to a huge value on an overflow page; writing
         must raise CorruptedError."""
@@ -1022,7 +1109,7 @@ class CursorPutNodeDszTest(unittest.TestCase):
             ptr0 = struct.unpack_from('<H', raw, off + MP_PTRS_OFFSET)[0]
             if ptr0 == 0 or ptr0 >= psize:
                 continue
-            node_off = off + ptr0
+            node_off = off + ptr0 + PAGEBASE
             mn_hi = struct.unpack_from('<H', raw, node_off + 2)[0]
             if mn_hi == 0:
                 struct.pack_into('<H', raw, node_off + 2, 0x0100)
@@ -1065,6 +1152,7 @@ class MdDepthTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('md_depth recipe not re-derived for 1.0')
     def test_corrupt_md_depth(self):
         """Set md_depth to 100 (> CURSOR_STACK=32) on a named DB;
         operations must raise error."""
@@ -1086,13 +1174,13 @@ class MdDepthTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             for idx in range(nkeys):
                 ptr = struct.unpack_from('<H', raw,
                                         off + MP_PTRS_OFFSET + idx * 2)[0]
                 if ptr == 0 or ptr >= psize:
                     continue
-                node_off = off + ptr
+                node_off = off + ptr + PAGEBASE
                 mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
                 mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
                 # Check if this is the F_SUBDATA node for our named DB
@@ -1130,6 +1218,7 @@ class MdRootMetaTest(unittest.TestCase):
     def tearDown(self):
         testlib.cleanup()
 
+    @only_v09('md_root recipe not re-derived for 1.0')
     def test_corrupt_md_root_to_meta_page(self):
         """Set md_root to 0 (meta page); operations must raise error."""
         path, env = testlib.temp_env()
@@ -1151,13 +1240,13 @@ class MdRootMetaTest(unittest.TestCase):
             if not (flags & P_LEAF):
                 continue
             lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
-            nkeys = (lower - 16) >> 1
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
             for idx in range(nkeys):
                 ptr = struct.unpack_from('<H', raw,
                                         off + MP_PTRS_OFFSET + idx * 2)[0]
                 if ptr == 0 or ptr >= psize:
                     continue
-                node_off = off + ptr
+                node_off = off + ptr + PAGEBASE
                 mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
                 mn_ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
                 if not (mn_flags & F_SUBDATA):

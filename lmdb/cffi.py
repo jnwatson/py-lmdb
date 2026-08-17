@@ -373,16 +373,68 @@ if not lmdb._reading_docs():
     if _have_patched_lmdb:
         _CFFI_CDEF += _CFFI_CDEF_PATCHED
 
+    # One engine per bundled LMDB version (0.9.x and 1.0.x), or a single
+    # engine for LMDB_FORCE_SYSTEM / legacy configurations.  A single FFI
+    # serves every engine — the declared types and struct layouts are
+    # identical across versions on non-VL32 builds — with one compiled
+    # verifier module per engine supplying that engine's entry points.
+    _engine_cfgs = _config_vars.get('engines') or [dict(
+        name='default',
+        sources=_config_vars['extra_sources'],
+        include_dirs=[],
+    )]
+
     _ffi = cffi.FFI()
     _ffi.cdef(_CFFI_CDEF)
-    _lib = _ffi.verify(_CFFI_VERIFY,
-                       modulename='lmdb_cffi',
-                       ext_package='lmdb',
-                       sources=_config_vars['extra_sources'],
-                       extra_compile_args=_config_vars['extra_compile_args'],
-                       include_dirs=_config_vars['extra_include_dirs'],
-                       libraries=_config_vars['libraries'],
-                       library_dirs=_config_vars['extra_library_dirs'])
+
+    _engines = []
+    _verifier_extensions = []
+    for _cfg in _engine_cfgs:  # type: ignore[attr-defined]
+        _l = _ffi.verify(_CFFI_VERIFY,
+                         modulename='lmdb_cffi_' + _cfg['name'],
+                         ext_package='lmdb',
+                         sources=_cfg['sources'],
+                         extra_compile_args=_config_vars['extra_compile_args'],
+                         include_dirs=(_cfg['include_dirs'] +
+                                       _config_vars['extra_include_dirs']),
+                         libraries=_config_vars['libraries'],
+                         library_dirs=_config_vars['extra_library_dirs'])
+        _verifier_extensions.append(
+            _ffi.verifier.get_extension())  # type: ignore[attr-defined]
+        _engines.append(dict(
+            lib=_l,
+            major=_l.MDB_VERSION_MAJOR,  # type: ignore[attr-defined]
+            minor=_l.MDB_VERSION_MINOR,  # type: ignore[attr-defined]
+            patch=_l.MDB_VERSION_PATCH,  # type: ignore[attr-defined]
+            # Data format the engine reads/writes: 1 for 0.9.x, 3 for 1.0.x.
+            data_version=(
+                3 if _l.MDB_VERSION_MAJOR >= 1 else 1),  # type: ignore[attr-defined]
+        ))
+    del _cfg, _l
+
+    # Engine used for new environments when lib_version= is unspecified:
+    # normally the first (oldest) engine, or the engine named by
+    # $LMDB_DEFAULT_LIB_VERSION if that is set to an available LMDB major
+    # version.  The environment variable lets an entire program — notably
+    # the test suite — exercise the newer engine without passing
+    # lib_version= at every call site.
+    _default_engine = _engines[0]
+    _want = os.environ.get('LMDB_DEFAULT_LIB_VERSION')
+    if _want:
+        for _e in _engines:
+            if str(_e['major']) == _want:
+                _default_engine = _e
+                break
+        else:
+            sys.stderr.write(
+                'lmdb: ignoring LMDB_DEFAULT_LIB_VERSION=%s: no such engine '
+                'in this build\n' % (_want,))
+        del _e
+    del _want
+    # The newest engine's error table is a superset of the others', with
+    # identical messages for the shared codes; use it for strerror and
+    # engine-independent constants.
+    _lib = _engines[-1]['lib']
 
     @_ffi.callback("int(char *, void *)")
     def _msg_func(s, _):
@@ -515,13 +567,44 @@ class DiskError(Error):
     """No more disk space."""
     MDB_NAME = 'ENOSPC'
 
+# LMDB 1.0.x error codes.  Numeric because they are absent from 0.9 headers
+# (and from the shared cdef); the values are ABI constants.
+class ProblemError(Error):
+    """Unexpected problem - transaction should abort."""
+    MDB_CODE = -30779   # MDB_PROBLEM
+
+class BadChecksumError(Error):
+    """Page checksum incorrect."""
+    MDB_CODE = -30778   # MDB_BAD_CHECKSUM
+
+class CryptoFailError(Error):
+    """Encryption/decryption failed."""
+    MDB_CODE = -30777   # MDB_CRYPTO_FAIL
+
+class EnvEncryptionError(Error):
+    """Environment encryption mismatch."""
+    MDB_CODE = -30776   # MDB_ENV_ENCRYPTION
+
+__all__ += [
+    'BadChecksumError',
+    'CryptoFailError',
+    'EnvEncryptionError',
+    'ProblemError',
+]
+
 # Prepare _error_map, a mapping of integer MDB_ERROR_CODE to exception class.
 if not lmdb._reading_docs():
     _error_map = {}
     for obj in list(globals().values()):
         if inspect.isclass(obj) and issubclass(obj, Error) and obj is not Error:
-            _error_map[getattr(_lib, getattr(obj, 'MDB_NAME'))] = obj
+            if hasattr(obj, 'MDB_CODE'):
+                _error_map[obj.MDB_CODE] = obj
+            else:
+                _error_map[getattr(_lib, getattr(obj, 'MDB_NAME'))] = obj
     del obj
+    # LMDB 1.0 returns MDB_IS_READONLY where 0.9 returned EACCES: same
+    # exception class for both.
+    _error_map[-30770] = ReadonlyError
 
 def _error(what, rc):
     """Lookup and instantiate the correct exception class for the error code
@@ -560,7 +643,64 @@ def preload(mv):
 def enable_drop_gil():
     """Deprecated."""
 
-def version(subpatch=False):
+def _engine_for_major(lib_version):
+    """Return the engine dict for LMDB major version `lib_version`, raising
+    Error if this build has no such engine."""
+    for engine in _engines:
+        if engine['major'] == lib_version:
+            return engine
+    raise Error("lib_version=%d: this build has no LMDB %d.x engine."
+                % (lib_version, lib_version))
+
+_MDB_MAGIC = 0xBEEFC0DE
+
+def _sniff_data_version(path, subdir):
+    """Best-effort detection of the LMDB data-format version of an existing
+    environment: scan the leading bytes of the data file for the meta-page
+    magic and return the adjacent 32-bit MDB_DATA_VERSION (1 for 0.9.x, 3
+    for 1.0.x), or 0 if the file is missing, empty, or unrecognized.
+    Scanning keeps the check independent of the page-header layout, which
+    differs between versions and word sizes."""
+    import io
+    import struct
+    if subdir:
+        # `path` may be str or bytes; os.path.join refuses to mix them.
+        data_path = os.path.join(
+            path, b'data.mdb' if isinstance(path, bytes) else 'data.mdb')
+    else:
+        data_path = path
+    try:
+        # io.open: this module aliases `open` to Environment.
+        with io.open(data_path, 'rb') as fp:
+            head = fp.read(64)
+    except IOError:
+        return 0
+    for off in range(0, len(head) - 7, 4):
+        if struct.unpack('=I', head[off:off + 4])[0] == _MDB_MAGIC:
+            return struct.unpack('=I', head[off + 4:off + 8])[0]
+    return 0
+
+def _select_engine(lib_version, data_version, path):
+    """Select the engine for an environment.  `lib_version` is None for
+    automatic selection, otherwise an LMDB major version (0 for 0.9.x, 1
+    for 1.0.x).  `data_version` is the sniffed on-disk format (0 if
+    unknown)."""
+    if lib_version is not None and lib_version >= 0:
+        return _engine_for_major(lib_version)
+    if data_version:
+        for engine in _engines:
+            if engine['data_version'] == data_version:
+                return engine
+        if data_version == 2:
+            raise Error(
+                "%s: written with LMDB data format v2 (a pre-1.0 development "
+                "version, e.g. lmdb-js); no released LMDB reads this format."
+                % (path,))
+        raise Error("%s: LMDB data format v%d is not supported by this build."
+                    % (path, data_version))
+    return _default_engine
+
+def version(subpatch=False, lib_version=None):
     """
     Return a tuple of integers `(major, minor, patch)` describing the LMDB
     library version that the binding is linked against. The version of the
@@ -571,16 +711,18 @@ def version(subpatch=False):
             an extra integer that represents any patches applied by py-lmdb
             itself (0 representing no patches).
 
+        `lib_version`:
+            LMDB major version to report on (0 for the 0.9.x engine, 1 for
+            the 1.0.x engine).  Defaults to the engine used for new
+            environments.
     """
+    engine = (_default_engine if lib_version is None or lib_version < 0
+              else _engine_for_major(lib_version))
     if subpatch:
-        return (_lib.MDB_VERSION_MAJOR,
-                _lib.MDB_VERSION_MINOR,
-                _lib.MDB_VERSION_PATCH,
+        return (engine['major'], engine['minor'], engine['patch'],
                 1 if _have_patched_lmdb else 0)
 
-    return (_lib.MDB_VERSION_MAJOR,
-            _lib.MDB_VERSION_MINOR,
-            _lib.MDB_VERSION_PATCH)
+    return (engine['major'], engine['minor'], engine['patch'])
 
 
 class Environment:
@@ -715,18 +857,55 @@ class Environment:
             and must ensure that no readers are using old transactions while a
             writer is active. The simplest approach is to use an exclusive lock
             so that no readers may be active at all when a writer begins.
+
+        `lib_version`:
+            Which bundled LMDB version to use for a **new** environment:
+            ``0`` for 0.9.x (data format v1) or ``1`` for 1.0.x (data format
+            v3).  Defaults to 0.9.x, so new databases stay readable by other
+            tools and by older py-lmdb releases.
+
+            This is ignored when opening an environment that already exists:
+            the file's own format decides which engine services it, so
+            databases written by either version open without the caller doing
+            anything.  Passing the version that does not match an existing
+            file raises rather than converting it.
+
+            Raises :py:class:`lmdb.Error` if this build has no such engine —
+            notably ``LMDB_FORCE_SYSTEM=1`` builds, which contain only the
+            single version the system ``liblmdb`` provides.
+
+            See :py:meth:`lib_version` to query the engine actually in use,
+            and `LMDB versions`_ for the full picture.
     """
     def __init__(self, path, map_size=10485760, subdir=True,
                  readonly=False, metasync=True, sync=True, map_async=False,
                  mode=O_0755, create=True, readahead=True, writemap=False,
                  meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
-                 lock=True):
+                 lock=True, lib_version=None):
         self._max_spare_txns = max_spare_txns
         self._spare_txns = []
 
+        if create and subdir and not readonly:
+            try:
+                os.mkdir(path, mode)
+            except EnvironmentError as e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+        self._open_path = os.path.realpath(path)
+        if self._open_path in _open_env_paths:
+            raise Error("The environment %r is already open in this process."
+                        % (path,))
+
+        # Bind this environment to an engine before touching LMDB: existing
+        # data files dictate their format; new ones follow lib_version.
+        self._lib = _select_engine(lib_version,
+                                   _sniff_data_version(path, subdir),
+                                   path)['lib']
+
         envpp = _ffi.new('MDB_env **')
 
-        rc = _lib.mdb_env_create(envpp)
+        rc = self._lib.mdb_env_create(envpp)
         if rc:
             raise _error("mdb_env_create", rc)
         self._env = envpp[0]
@@ -741,25 +920,13 @@ class Environment:
 
         self.set_mapsize(map_size)
 
-        rc = _lib.mdb_env_set_maxreaders(self._env, max_readers)
+        rc = self._lib.mdb_env_set_maxreaders(self._env, max_readers)
         if rc:
             raise _error("mdb_env_set_maxreaders", rc)
 
-        rc = _lib.mdb_env_set_maxdbs(self._env, max_dbs)
+        rc = self._lib.mdb_env_set_maxdbs(self._env, max_dbs)
         if rc:
             raise _error("mdb_env_set_maxdbs", rc)
-
-        if create and subdir and not readonly:
-            try:
-                os.mkdir(path, mode)
-            except EnvironmentError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-
-        self._open_path = os.path.realpath(path)
-        if self._open_path in _open_env_paths:
-            raise Error("The environment %r is already open in this process."
-                        % (path,))
 
         flags = _lib.MDB_NOTLS
         if not subdir:
@@ -785,7 +952,7 @@ class Environment:
         if isinstance(path, str):
             path = path.encode(sys.getfilesystemencoding())
 
-        rc = _lib.mdb_env_open(self._env, path, flags, mode & ~O_0111)
+        rc = self._lib.mdb_env_open(self._env, path, flags, mode & ~O_0111)
         if rc:
             raise _error(path, rc)
 
@@ -818,6 +985,7 @@ class Environment:
         self.close()
 
     _env = None
+    _lib = None
     _deps = None
     _spare_txns = None
     _dbs = None
@@ -838,7 +1006,7 @@ class Environment:
         # Pre-open path: env created but not yet opened (called from __init__
         # before mdb_env_open).  No mmap exists yet, just set the size.
         if self._dbs is None:
-            rc = _lib.mdb_env_set_mapsize(self._env, map_size)
+            rc = self._lib.mdb_env_set_mapsize(self._env, map_size)
             if rc:
                 raise _error("mdb_env_set_mapsize", rc)
             return
@@ -892,16 +1060,16 @@ class Environment:
 
             # Phase 2: abort collected txns.
             for txn in txn_handles:
-                _lib.mdb_txn_abort(txn)
+                self._lib.mdb_txn_abort(txn)
 
             # Abort spare transactions.
             if self._spare_txns:
                 while self._spare_txns:
-                    _lib.mdb_txn_abort(self._spare_txns.pop())
+                    self._lib.mdb_txn_abort(self._spare_txns.pop())
 
             # Now safe to remap.  Cached DB handles (_dbs/_db) are preserved:
             # mdb_env_set_mapsize does not touch the dbi table.
-            rc = _lib.mdb_env_set_mapsize(self._env, map_size)
+            rc = self._lib.mdb_env_set_mapsize(self._env, map_size)
             if rc:
                 # Remap failed — env is unusable.
                 self._env = _invalid
@@ -980,11 +1148,11 @@ class Environment:
                 # All Python-level handles are _invalid, so any
                 # concurrent __del__ → abort() is a no-op.
                 for txn in txn_handles:
-                    _lib.mdb_txn_abort(txn)
+                    self._lib.mdb_txn_abort(txn)
 
                 if self._spare_txns:
                     while self._spare_txns:
-                        _lib.mdb_txn_abort(self._spare_txns.pop())
+                        self._lib.mdb_txn_abort(self._spare_txns.pop())
                 self._spare_txns = None
 
                 if self._dbs:
@@ -994,7 +1162,7 @@ class Environment:
 
                 env = self._env
                 self._env = _invalid
-                _lib.mdb_env_close(env)
+                self._lib.mdb_env_close(env)
 
             open_path = getattr(self, '_open_path', None)
             if open_path:
@@ -1009,7 +1177,7 @@ class Environment:
         <http://lmdb.tech/doc/group__mdb.html#gac699fdd8c4f8013577cb933fb6a757fe>`_
         """
         path = _ffi.new('char **')
-        rc = _lib.mdb_env_get_path(self._env, path)
+        rc = self._lib.mdb_env_get_path(self._env, path)
         if rc:
             raise _error("mdb_env_get_path", rc)
         return _ffi.string(path[0]).decode(sys.getfilesystemencoding())
@@ -1046,11 +1214,11 @@ class Environment:
         # environment while the copy is reading it.  Issue #475.
         with self._close_lock:
             if _have_patched_lmdb:
-                rc = _lib.mdb_env_copy3(self._env, encoded, flags, txn._txn if txn else _ffi.NULL)
+                rc = self._lib.mdb_env_copy3(self._env, encoded, flags, txn._txn if txn else _ffi.NULL)
                 if rc:
                     raise _error("mdb_env_copy3", rc)
             else:
-                rc = _lib.mdb_env_copy2(self._env, encoded, flags)
+                rc = self._lib.mdb_env_copy2(self._env, encoded, flags)
                 if rc:
                     raise _error("mdb_env_copy2", rc)
 
@@ -1087,11 +1255,11 @@ class Environment:
         # environment while the copy is reading it.  Issue #475.
         with self._close_lock:
             if _have_patched_lmdb:
-                rc = _lib.mdb_env_copyfd3(self._env, fd, flags, txn._txn if txn else _ffi.NULL)
+                rc = self._lib.mdb_env_copyfd3(self._env, fd, flags, txn._txn if txn else _ffi.NULL)
                 if rc:
                     raise _error("mdb_env_copyfd3", rc)
             else:
-                rc = _lib.mdb_env_copyfd2(self._env, fd, flags)
+                rc = self._lib.mdb_env_copyfd2(self._env, fd, flags)
                 if rc:
                     raise _error("mdb_env_copyfd2", rc)
 
@@ -1114,7 +1282,7 @@ class Environment:
         # Hold _close_lock so close()/set_mapsize() cannot free or remap the
         # environment during the flush.  Issue #475.
         with self._close_lock:
-            rc = _lib.mdb_env_sync(self._env, force)
+            rc = self._lib.mdb_env_sync(self._env, force)
             if rc:
                 raise _error("mdb_env_sync", rc)
 
@@ -1155,7 +1323,7 @@ class Environment:
         st = _ffi.new('MDB_stat *')
         # Issue #475: serialize against close()/set_mapsize().
         with self._close_lock:
-            rc = _lib.mdb_env_stat(self._env, st)
+            rc = self._lib.mdb_env_stat(self._env, st)
             if rc:
                 raise _error("mdb_env_stat", rc)
         return self._convert_stat(st)
@@ -1188,11 +1356,17 @@ class Environment:
         info = _ffi.new('MDB_envinfo *')
         # Issue #475: serialize against close()/set_mapsize().
         with self._close_lock:
-            rc = _lib.mdb_env_info(self._env, info)
+            rc = self._lib.mdb_env_info(self._env, info)
             if rc:
                 raise _error("mdb_env_info", rc)
         return {
-            "map_addr": int(_ffi.cast('long', info.me_mapaddr)),
+            # uintptr_t, not long: on Windows long is 32 bits even in
+            # 64-bit builds, so casting a map address through it truncates
+            # and then reads the result as signed, yielding a negative
+            # address whenever bit 31 happens to be set.  This matches what
+            # the CPython implementation returns, which converts via
+            # intptr_t and emits an unsigned long long.
+            "map_addr": int(_ffi.cast('uintptr_t', info.me_mapaddr)),
             "map_size": info.me_mapsize,
             "last_pgno": info.me_last_pgno,
             "last_txnid": info.me_last_txnid,
@@ -1204,7 +1378,7 @@ class Environment:
         """Return a dict describing Environment constructor flags used to
         instantiate this environment."""
         flags_ = _ffi.new('unsigned int[]', 1)
-        rc = _lib.mdb_env_get_flags(self._env, flags_)
+        rc = self._lib.mdb_env_get_flags(self._env, flags_)
         if rc:
             raise _error("mdb_env_get_flags", rc)
         flags = flags_[0]
@@ -1220,10 +1394,17 @@ class Environment:
             'lock': not (flags & _lib.MDB_NOLOCK),
         }
 
+    def lib_version(self):
+        """Return a tuple of integers `(major, minor, patch)` describing the
+        LMDB engine servicing this environment."""
+        return (self._lib.MDB_VERSION_MAJOR,
+                self._lib.MDB_VERSION_MINOR,
+                self._lib.MDB_VERSION_PATCH)
+
     def max_key_size(self):
         """Return the maximum size in bytes of a record's key part. This
         matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
-        return _lib.mdb_env_get_maxkeysize(self._env)
+        return self._lib.mdb_env_get_maxkeysize(self._env)
 
     def max_readers(self):
         """Return the maximum number of readers specified during open of the
@@ -1231,7 +1412,7 @@ class Environment:
         specified to the constructor if this process was the first to open the
         environment."""
         readers_ = _ffi.new('unsigned int[]', 1)
-        rc = _lib.mdb_env_get_maxreaders(self._env, readers_)
+        rc = self._lib.mdb_env_get_maxreaders(self._env, readers_)
         if rc:
             raise _error("mdb_env_get_maxreaders", rc)
         return readers_[0]
@@ -1243,7 +1424,7 @@ class Environment:
         try:
             # Issue #475: serialize against close()/set_mapsize().
             with self._close_lock:
-                rc = _lib.mdb_reader_list(self._env, _msg_func, _ffi.NULL)
+                rc = self._lib.mdb_reader_list(self._env, _msg_func, _ffi.NULL)
                 if rc:
                     raise _error("mdb_reader_list", rc)
             return "".join(_callbacks.msg_func)
@@ -1257,7 +1438,7 @@ class Environment:
         reaped = _ffi.new('int[]', 1)
         # Issue #475: serialize against close()/set_mapsize().
         with self._close_lock:
-            rc = _lib.mdb_reader_check(self._env, reaped)
+            rc = self._lib.mdb_reader_check(self._env, reaped)
             if rc:
                 raise _error('mdb_reader_check', rc)
         return reaped[0]
@@ -1395,6 +1576,12 @@ class Environment:
         when the main database is not used to store regular key-value
         pairs.
 
+        LMDB 1.0 stores sub-database names with a trailing NUL where 0.9
+        does not.  That byte is stripped here, so this returns the same
+        names whichever engine backs the environment.  Note the difference
+        is still visible if you iterate the main database yourself with a
+        cursor rather than calling this method.
+
             `txn`:
                 Read-only or read-write :py:class:`Transaction` to use.  If
                 ``None``, a temporary read-only transaction is created and
@@ -1410,9 +1597,15 @@ class Environment:
                 for key in cursor.iternext(keys=True, values=False):
                     try:
                         self.open_db(key, txn=txn, create=False)
-                        result.append(key)
                     except Error:
-                        pass
+                        continue
+                    # LMDB 1.0 stores sub-database names with a trailing
+                    # NUL, 0.9 without.  Report the name itself, so dbs()
+                    # means the same thing whichever engine backs the
+                    # environment.
+                    if key[-1:] == b'\x00':
+                        key = key[:-1]
+                    result.append(key)
             finally:
                 cursor.close()
             return result
@@ -1437,6 +1630,7 @@ class _Database:
         env._deps.add(self)
         self._deps = set()
         self._name = name
+        self._lib = env._lib
 
         flags = 0
         if reverse_key:
@@ -1453,7 +1647,7 @@ class _Database:
             flags |= _lib.MDB_DUPFIXED
         dbipp = _ffi.new('MDB_dbi *')
         self._dbi = None
-        rc = _lib.mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
+        rc = self._lib.mdb_dbi_open(txn._txn, name or _ffi.NULL, flags, dbipp)
         if rc:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
@@ -1462,7 +1656,7 @@ class _Database:
     def _load_flags(self, txn):
         """Load MDB's notion of the database flags."""
         flags_ = _ffi.new('unsigned int[]', 1)
-        rc = _lib.mdb_dbi_flags(txn._txn, self._dbi, flags_)
+        rc = self._lib.mdb_dbi_flags(txn._txn, self._dbi, flags_)
         if rc:
             raise _error("mdb_dbi_flags", rc)
         self._flags = flags_[0]
@@ -1549,6 +1743,7 @@ class Transaction:
 
     def __init__(self, env, db=None, parent=None, write=False, buffers=False):
         self._pyenv = env  # hold ref
+        self._lib = env._lib
         self._db = db or env._db
         self._key = _ffi.new('MDB_val *')
         self._val = _ffi.new('MDB_val *')
@@ -1586,7 +1781,7 @@ class Transaction:
                 if not parent:
                     env._write_txn_tid = threading.get_ident()
                 txnpp = _ffi.new('MDB_txn **')
-                rc = _lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
+                rc = self._lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
                 if rc:
                     if not parent:
                         env._write_txn_tid = 0
@@ -1601,18 +1796,18 @@ class Transaction:
                         raise IndexError
                     self._txn = env._spare_txns.pop()
                     env._max_spare_txns += 1
-                    rc = _lib.mdb_txn_renew(self._txn)
+                    rc = self._lib.mdb_txn_renew(self._txn)
                     if rc:
                         while self._deps:
                             self._deps.pop()._invalidate()
-                        _lib.mdb_txn_abort(self._txn)
+                        self._lib.mdb_txn_abort(self._txn)
                         self._txn = _invalid
                         self._invalidate()
                         raise _error("mdb_txn_renew", rc)
                 except IndexError:
                     txnpp = _ffi.new('MDB_txn **')
                     flags = _lib.MDB_RDONLY
-                    rc = _lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                    rc = self._lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
                     if rc:
                         raise _error("mdb_txn_begin", rc)
                     self._txn = txnpp[0]
@@ -1654,7 +1849,7 @@ class Transaction:
         """
         # Issue #475: serialize against close()/set_mapsize().
         with self._pyenv._close_lock:
-            return _lib.mdb_txn_id(self._txn)
+            return self._lib.mdb_txn_id(self._txn)
 
     def stat(self, db=None):
         """stat(db=None)
@@ -1668,7 +1863,7 @@ class Transaction:
         st = _ffi.new('MDB_stat *')
         # Issue #475: serialize against close()/set_mapsize().
         with self._pyenv._close_lock:
-            rc = _lib.mdb_stat(self._txn, db._dbi, st)
+            rc = self._lib.mdb_stat(self._txn, db._dbi, st)
         if rc:
             raise _error('mdb_stat', rc)
         return self._pyenv._convert_stat(st)
@@ -1685,7 +1880,7 @@ class Transaction:
             db._deps.pop()._invalidate()
         # Issue #475: serialize against close()/set_mapsize().
         with self._pyenv._close_lock:
-            rc = _lib.mdb_drop(self._txn, db._dbi, delete)
+            rc = self._lib.mdb_drop(self._txn, db._dbi, delete)
         self._mutations += 1
         if rc:
             raise _error("mdb_drop", rc)
@@ -1708,7 +1903,7 @@ class Transaction:
                 self._txn = _invalid
                 if not self._pyenv._env:
                     return True
-                _lib.mdb_txn_reset(txn)
+                self._lib.mdb_txn_reset(txn)
                 # Append inside the lock so env.close() can't miss this
                 # handle between our unlock and the append.
                 spare_txns.append(txn)
@@ -1741,7 +1936,7 @@ class Transaction:
                         self._pyenv._write_txn_cond.notify_all()
                 if not self._pyenv._env:
                     raise _error("env has been closed", _lib.EINVAL)
-                rc = _lib.mdb_txn_commit(txn)
+                rc = self._lib.mdb_txn_commit(txn)
             if rc:
                 raise _error("mdb_txn_commit", rc)
             self._invalidate()
@@ -1769,7 +1964,7 @@ class Transaction:
                     if not self._pyenv._env:
                         self._invalidate()
                         return
-                    _lib.mdb_txn_abort(txn)
+                    self._lib.mdb_txn_abort(txn)
             self._invalidate()
 
     def get(self, key, default=None, db=None):
@@ -1783,7 +1978,7 @@ class Transaction:
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
         with self._pyenv._close_lock:
-            rc = _lib.pymdb_get(self._txn, (db or self._db)._dbi,
+            rc = self._lib.pymdb_get(self._txn, (db or self._db)._dbi,
                                 key, len(key), self._val)
             if rc:
                 if rc == _lib.MDB_NOTFOUND:
@@ -1838,7 +2033,7 @@ class Transaction:
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
         with self._pyenv._close_lock:
-            rc = _lib.pymdb_put(self._txn, (db or self._db)._dbi,
+            rc = self._lib.pymdb_put(self._txn, (db or self._db)._dbi,
                                 key, len(key), value, len(value), flags)
         self._mutations += 1
         if rc:
@@ -1889,7 +2084,7 @@ class Transaction:
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
         with self._pyenv._close_lock:
-            rc = _lib.pymdb_del(self._txn, (db or self._db)._dbi,
+            rc = self._lib.pymdb_del(self._txn, (db or self._db)._dbi,
                                 key, len(key), value, len(value))
         self._mutations += 1
         if rc:
@@ -1993,6 +2188,7 @@ class Cursor:
         txn._deps.add(self)
         self._pydb = db # hold ref
         self._pytxn = txn # hold ref
+        self._lib = txn._lib
         self._dbi = db._dbi
         self._txn = txn._txn
         self._key = _ffi.new('MDB_val *')
@@ -2001,7 +2197,7 @@ class Cursor:
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
         self._cur = None
-        rc = _lib.mdb_cursor_open(self._txn, self._dbi, curpp)
+        rc = self._lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
             db._deps.discard(self)
             txn._deps.discard(self)
@@ -2025,9 +2221,9 @@ class Cursor:
             if cur:
                 if lock:
                     with lock:
-                        _lib.mdb_cursor_close(cur)
+                        self._lib.mdb_cursor_close(cur)
                 else:
-                    _lib.mdb_cursor_close(cur)
+                    self._lib.mdb_cursor_close(cur)
             self._pydb._deps.discard(self)
             self._pytxn._deps.discard(self)
             self._dbi = _invalid
@@ -2084,7 +2280,7 @@ class Cursor:
 
         while self._valid:
             yield get()
-            rc = _lib.mdb_cursor_get(cur, key, val, op)
+            rc = self._lib.mdb_cursor_get(cur, key, val, op)
             self._valid = not rc
 
         if rc:
@@ -2197,7 +2393,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.mdb_cursor_get(self._cur, self._key, self._val, op)
+            rc = self._lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         self._last_mutation = self._pytxn._mutations
         if rc:
@@ -2213,7 +2409,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
+            rc = self._lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
                                        self._key, self._val, op)
         self._valid = v = not rc
         if rc:
@@ -2544,7 +2740,7 @@ class Cursor:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
-                rc = _lib.mdb_cursor_del(self._cur, flags)
+                rc = self._lib.mdb_cursor_del(self._cur, flags)
             self._pytxn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)
@@ -2565,7 +2761,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.mdb_cursor_count(self._cur, countp)
+            rc = self._lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
@@ -2616,7 +2812,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
         self._pytxn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -2673,7 +2869,7 @@ class Cursor:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
-                rc = _lib.pymdb_cursor_put(self._cur, key, len(key),
+                rc = self._lib.pymdb_cursor_put(self._cur, key, len(key),
                                            value, len(value), flags)
             self._pytxn._mutations += 1
             added += 1
@@ -2717,7 +2913,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
         self._pytxn._mutations += 1
         if not rc:
             return
@@ -2731,7 +2927,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = _lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
         self._pytxn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
@@ -2756,7 +2952,7 @@ class Cursor:
                 if not self._cur:
                     raise _error("Attempt to operate on closed cursor",
                                   _lib.EINVAL)
-                rc = _lib.mdb_cursor_del(self._cur, 0)
+                rc = self._lib.mdb_cursor_del(self._cur, 0)
             self._pytxn._mutations += 1
             if rc:
                 raise _error("mdb_cursor_del", rc)

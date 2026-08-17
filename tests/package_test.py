@@ -32,7 +32,7 @@ class PackageExportsTest(unittest.TestCase):
     consistency of "from lmdb import *".
     """
     def test_exports(self):
-        assert sorted(lmdb.__all__) == [
+        expected = [
             'BadDbiError',
             'BadRslotError',
             'BadTxnError',
@@ -66,3 +66,12 @@ class PackageExportsTest(unittest.TestCase):
             'enable_drop_gil',
             'version',
         ]
+        # Exception classes for LMDB 1.0.x error codes; absent when built
+        # against a 0.9 system liblmdb (LMDB_FORCE_SYSTEM).
+        expected += sorted(n for n in (
+            'BadChecksumError',
+            'CryptoFailError',
+            'EnvEncryptionError',
+            'ProblemError',
+        ) if hasattr(lmdb, n))
+        assert sorted(lmdb.__all__) == sorted(expected)

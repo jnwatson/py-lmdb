@@ -205,6 +205,7 @@ class AsyncEnvironment:
     # -- proxied methods --------------------------------------------------
 
     path = _sync_method(Environment.path)
+    lib_version = _sync_method(Environment.lib_version)
     max_key_size = _sync_method(Environment.max_key_size)
     max_readers = _sync_method(Environment.max_readers)
     flags = _sync_method(Environment.flags)

@@ -21,6 +21,7 @@
 #
 
 import os
+import subprocess
 import sys
 import unittest
 import weakref
@@ -68,6 +69,42 @@ class OpenTest(unittest.TestCase):
             lambda: lmdb.open('/doesnt/exist/at/all'))
         self.assertRaises(Exception,
             lambda: lmdb.open(testlib.temp_file()))
+
+    def test_bytes_path(self):
+        """A bytes path must work, including on reopen.
+
+        Regression guard: the engine sniffer joined the incoming path with a
+        str filename, which raises "Can't mix strings and bytes in path
+        components" for bytes paths.  Reopen matters as much as create --
+        the sniffer only reads an existing data file.
+        """
+        path = testlib.temp_dir().encode()
+        env = lmdb.open(path)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(B('a'), B('b'))
+        finally:
+            env.close()
+
+        env = lmdb.open(path)
+        testlib._cleanups.append(env.close)
+        with env.begin() as txn:
+            assert txn.get(B('a')) == B('b')
+
+    def test_bytes_path_nosubdir(self):
+        """As above, for subdir=False, where the path is the data file."""
+        path = testlib.temp_file(create=False).encode()
+        env = lmdb.open(path, subdir=False)
+        try:
+            with env.begin(write=True) as txn:
+                txn.put(B('a'), B('b'))
+        finally:
+            env.close()
+
+        env = lmdb.open(path, subdir=False)
+        testlib._cleanups.append(env.close)
+        with env.begin() as txn:
+            assert txn.get(B('a')) == B('b')
 
     def test_ok_path(self):
         path, env = testlib.temp_env()
@@ -595,6 +632,28 @@ class InfoMethodsTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.info())
 
+    def test_info_map_addr_is_pointer_sized(self):
+        """info()['map_addr'] must survive a full-width pointer.
+
+        Regression guard for a Windows-only defect: the cffi implementation
+        converted me_mapaddr through C `long`, which is 32 bits on Windows
+        even in 64-bit builds (LLP64), so an address with bit 31 set came
+        back negative.  It could not fail on Linux, where `long` is 64-bit,
+        and on Windows it only failed when ASLR happened to place the
+        mapping accordingly -- so it surfaced as an intermittent CI failure.
+
+        me_mapaddr is NULL unless MDB_FIXEDMAP is used, so this exercises
+        the conversion directly rather than relying on a real mapping.
+        """
+        if lmdb.Environment.__module__ != 'lmdb.cffi':
+            self.skipTest('cffi implementation not in use')
+        from lmdb.cffi import _ffi
+
+        for addr in (0x80320000, 0x7ff680320000):
+            p = _ffi.cast('void *', addr)
+            self.assertEqual(int(_ffi.cast('uintptr_t', p)), addr)
+        self.assertEqual(_ffi.sizeof('uintptr_t'), _ffi.sizeof('void *'))
+
     def test_flags(self):
         _, env = testlib.temp_env()
         info = env.flags()
@@ -809,10 +868,30 @@ class OtherMethodsTest(unittest.TestCase):
         assert env.reader_check() == 0
 
         # Start a child, open a txn, then crash the child.
-        rc = os.spawnl(os.P_WAIT, sys.executable, sys.executable,
-                       __file__, 'test_reader_check_child', path)
+        #
+        # Run it through subprocess rather than os.spawnl so a child that
+        # dies before it ever opens a transaction can say why.  The child
+        # is launched as a script, so Python puts tests/ on its sys.path
+        # rather than the repo root: unless py-lmdb is actually installed
+        # (or the repo root is on PYTHONPATH), the child cannot import
+        # lmdb.  That is a harness problem, not a reader-check failure,
+        # and it used to surface only as a bare "assert 1 == 0".
+        proc = subprocess.run(
+            [sys.executable, __file__, 'test_reader_check_child', path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        rc = proc.returncode
+        stderr = proc.stderr.decode('utf-8', 'replace')
 
-        assert rc == 0
+        if rc != 0 and 'No module named' in stderr and 'lmdb' in stderr:
+            self.skipTest(
+                'child process cannot import lmdb, so this test cannot run. '
+                'Install the package (e.g. "pip install -e .") or put the '
+                'repo root on PYTHONPATH; a child launched as a script only '
+                'gets tests/ on sys.path.\nChild stderr:\n' + stderr)
+
+        assert rc == 0, (
+            'reader-check child exited %d\n--- child stderr ---\n%s'
+            % (rc, stderr or '(none)'))
         assert env.reader_check() == 1
         assert env.reader_check() == 0
         assert env.readers() != NO_READERS
