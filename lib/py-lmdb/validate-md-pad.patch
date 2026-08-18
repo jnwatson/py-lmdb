@@ -101,12 +101,12 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					if (mc->mc_db->md_depth > CURSOR_STACK)
  						return MDB_CORRUPTED;
  				}
-@@ -7073,7 +7136,18 @@
- 				 * memcpy size to underflow (unsigned wrap -> huge). */
- 				if (MP_LOWER(fp) < PAGEHDRSZ-PAGEBASE ||
- 					MP_UPPER(fp) + PAGEBASE > olddata.mv_size ||
--					MP_LOWER(fp) > MP_UPPER(fp)) {
-+					MP_LOWER(fp) > MP_UPPER(fp) ||
+@@ -7088,7 +7151,19 @@
+ 					MP_LOWER(fp) > MP_UPPER(fp) ||
+ 					MP_UPPER(fp) + PAGEBASE > ((fp_flags & P_LEAF2) ?
+ 						olddata.mv_size + 2 * (unsigned)NUMKEYS(fp) :
+-						olddata.mv_size)) {
++						olddata.mv_size) ||
 +					/* The LEAF2 branch below copies NUMKEYS(fp)*mp_pad
 +					 * bytes out of fp.  fp_flags comes from the on-disk
 +					 * sub-page, so P_LEAF2 can be set here even when
@@ -116,12 +116,13 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 +					 * sub-page legitimately has a key size larger than
 +					 * its current (empty) body. */
 +					((fp_flags & P_LEAF2) &&
-+					 BAD_LEAF2_KEYS(fp, MP_PAD(fp),
-+						olddata.mv_size - PAGEHDRSZ))) {
++					 (olddata.mv_size < PAGEHDRSZ ||
++					  BAD_LEAF2_KEYS(fp, MP_PAD(fp),
++						olddata.mv_size - PAGEHDRSZ)))) {
  					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
  					return MDB_CORRUPTED;
  				}
-@@ -7845,12 +7919,37 @@
+@@ -7860,12 +7935,37 @@
  			return;
  		}
  		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
@@ -159,7 +160,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  		mx->mx_db.md_pad = 0;
  		mx->mx_db.md_flags = 0;
  		mx->mx_db.md_depth = 1;
-@@ -10201,6 +10300,12 @@
+@@ -10216,6 +10316,12 @@
  		txn->mt_dbiseqs[slot] = seq;
  
  		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));

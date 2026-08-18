@@ -10,7 +10,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  						rc = mdb_cursor_get(&mc->mc_xcursor->mx_cursor, data, NULL, MDB_GET_CURRENT);
  					} else {
  						rc = mdb_node_read(mc, leaf, data);
-@@ -7301,6 +7303,8 @@
+@@ -7316,6 +7318,8 @@
  	leaf = NODEPTR(mp, mc->mc_ki[mc->mc_top]);
 
  	if (F_ISSET(leaf->mn_flags, F_DUPDATA)) {

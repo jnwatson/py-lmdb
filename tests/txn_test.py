@@ -514,6 +514,42 @@ class GetTest(unittest.TestCase):
         assert txn.put(B('a'), B('b'))
         assert txn.get(B('a')) == B('a')
 
+    def test_dupfixed_one_byte_values(self):
+        """A 1-byte DUPFIXED value is narrower than sizeof(indx_t), which
+        makes mdb_node_add() grow mp_upper past the sub-page rather than
+        shrink it.  py-lmdb's validate-subpage-bounds patch read that as
+        corruption and refused every duplicate from the fifth on (#481).
+
+        test_dupfixed above stores only two, which fit the sub-page LMDB
+        allocates up front, so it never reaches the check.
+        """
+        _, env = testlib.temp_env()
+        db1 = env.open_db(B('db1'), dupsort=True, dupfixed=True)
+        vals = [struct.pack('B', i) for i in range(256)]
+        with env.begin(write=True, db=db1) as txn:
+            for val in vals:
+                assert txn.put(B('a'), val)
+        with env.begin(db=db1) as txn:
+            cur = txn.cursor()
+            assert cur.set_key(B('a'))
+            assert list(cur.iternext_dup()) == vals
+
+    def test_dupfixed_value_sizes(self):
+        """Duplicates beyond the initially allocated sub-page, at value
+        sizes either side of sizeof(indx_t)."""
+        _, env = testlib.temp_env()
+        for size in (1, 2, 3, 4, 8):
+            db = env.open_db(B('db%d' % size), dupsort=True, dupfixed=True)
+            vals = [i.to_bytes(size, 'big')
+                    for i in range(min(200, 256 ** size))]
+            with env.begin(write=True, db=db) as txn:
+                for val in vals:
+                    assert txn.put(B('a'), val)
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                assert cur.set_key(B('a'))
+                assert list(cur.iternext_dup()) == vals, size
+
 
 class PutTest(unittest.TestCase):
     def tearDown(self):
