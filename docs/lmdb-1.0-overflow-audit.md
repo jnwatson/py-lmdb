@@ -159,23 +159,38 @@ No alerts in `mdb_env_incr_dumpfd` / `mdb_env_incr_dump` (their byte counter
 is `mdb_size_t`, already 64-bit), `mdb_txn_prepare`, `mdb_env_rollback`,
 `mdb_env_set_pagesize`, or `mdb_cursor_is_db`.
 
-## Separate open question (affects BOTH engines): `md_pad` from the DB record
+## RESOLVED (affected BOTH engines): `md_pad` from the DB record
 
-Tracked in `lib/py-lmdb/PATCH-STATUS.md` and `lib1/py-lmdb/PATCH-STATUS.md`,
-not only here — this one is not specific to the 1.0 port.
+Fixed by `validate-md-pad` in both series. Full write-up in
+`lib/py-lmdb/PATCH-STATUS.md`; reproducer in `misc/md_pad_repro.py`;
+regression tests in `tests/cve_test.py` (`MdPadTest`).
 
 Alerts 8418, 9355, 9476, 10792 and 10798 all multiply by `ksize` /
-`md_pad`. Our `validate-leaf2-keysize` patch bounds the **page's** `mp_pad`
-(`0 < mp_pad <= psize - PAGEHDRSZ`) in `mdb_page_get`, but nothing in either
-patch series bounds `md_pad` as read from the **DB record**.
+`md_pad`. `validate-leaf2-keysize` bounds the **page's** `mp_pad` in
+`mdb_page_get`, but nothing bounded `md_pad` as read from the **DB
+record**, and the two were never required to agree.
 
-At 8418 in particular, `data->mv_size = NUMKEYS(page) * mx->mc_db->md_pad`
-is handed back to the caller as a buffer length. `NUMKEYS` is bounded by the
-page-bounds patch, but if `md_pad` is not, the product can wrap.
+Investigating it changed the severity assessment in two ways worth
+recording, because both cut against how the alerts read:
 
-This is pre-existing and applies to **both** engines, so it is out of scope
-for the 1.0 port — but under py-lmdb's threat model it deserves its own
-investigation and, if confirmed, a `validate-md-pad` patch in both series.
+- **The multiplication was the least important part.** `NUMKEYS` is
+  already bounded to `psize/2` by `validate-page-bounds`, and wrapping the
+  32-bit product only makes the result *smaller*. The real defect was that
+  `md_pad` was unbounded as a length at all: a forged `0x8000` made
+  `cursor.value()` return 32768 bytes for a 7-byte record — silently, no
+  error, ~28.7 KB of adjacent mapping contents — with no multiplication
+  involved.
+- **It was also an out-of-bounds write**, which no alert flagged. The
+  LEAF2 branch of `mdb_node_add` (alert 9355) uses `md_pad` as a
+  `memmove()`/`memcpy()` length. Modest forged values write past the key
+  slot and **commit silently**, corrupting the file; larger ones fault.
+  That makes it a write primitive inside the writable mapping, not the
+  read-only disclosure the alert list suggested.
+
+This is a good illustration of the threat-model divergence described
+above: upstream does not treat a crafted `data.mdb` as an attack, so none
+of this is a bug by their standards, while under py-lmdb's model it was
+the most serious finding in this audit.
 
 ## Re-running this audit
 

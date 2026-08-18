@@ -1273,5 +1273,213 @@ class MdRootMetaTest(unittest.TestCase):
                 txn.get(b'key')
 
 
+F_DUPDATA = 0x04        # node flag: data has duplicates
+
+# mp_pad within any page: pgno(8) [txnid(8) on 1.0] pad(2).  The 0.9-only
+# MP_PAD_OFFSET above assumes the 16-byte header; this one follows the
+# detected layout.
+ANY_MP_PAD_OFFSET = PAGEHDRSZ - 8
+
+
+def _nodedata_off(node_off, ksize):
+    """Offset of a node's data.
+
+    1.0 aligns node data to an even offset (NODEDATA uses EVEN(mn_ksize));
+    0.9 uses mn_ksize as-is.  Getting this wrong shifts the read by one
+    byte for odd-length keys, which silently lands on the wrong field.
+    """
+    if ENGINE_MAJOR >= 1:
+        ksize = (ksize + 1) & ~1
+    return node_off + 8 + ksize
+
+
+def _find_dup_node(raw, psize, want_subdata):
+    """Find a leaf node holding duplicate data.
+
+    Returns (node_off, data_off) for the first F_DUPDATA node whose
+    F_SUBDATA state matches want_subdata: a real sub-DB (an MDB_db record)
+    or an embedded sub-page.  Raises if there is none, so that callers get
+    a non-optional pair.
+    """
+    for off in range(psize * 2, len(raw), psize):
+        flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+        if not (flags & P_LEAF) or (flags & P_LEAF2):
+            continue
+        lower = struct.unpack_from('<H', raw, off + MP_LOWER_OFFSET)[0]
+        nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
+        for idx in range(nkeys):
+            ptr = struct.unpack_from('<H', raw,
+                                     off + MP_PTRS_OFFSET + idx * 2)[0]
+            if ptr == 0 or ptr >= psize:
+                continue
+            node_off = off + ptr + PAGEBASE
+            mn_flags = struct.unpack_from('<H', raw, node_off + 4)[0]
+            if not (mn_flags & F_DUPDATA):
+                continue
+            if bool(mn_flags & F_SUBDATA) != want_subdata:
+                continue
+            ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
+            return node_off, _nodedata_off(node_off, ksize)
+    raise AssertionError('no %s node found'
+                         % ('sub-DB' if want_subdata else 'sub-page'))
+
+
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class MdPadTest(unittest.TestCase):
+    """The LEAF2 fixed key size must be bounded wherever it is read from
+    disk, not just on the page.
+
+    validate-leaf2-keysize bounds a *page's* mp_pad in mdb_page_get, but
+    every LEAF2 computation uses the size held in the *DB record*, and
+    nothing required the two to agree.  Forging only md_pad leaves every
+    page internally consistent, so the page-level checks still pass while
+    the key size becomes arbitrary.  See lib/py-lmdb/validate-md-pad.patch
+    and misc/md_pad_repro.py.
+    """
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def _forge(self, want_subdata, ndups, new_pad):
+        """Build a DUPFIXED database, then rewrite only its LEAF2 key
+        size.  Returns the reopened env and db handle.
+
+        new_pad may be a callable taking the file's page size.  Several of
+        these values only mean what the test intends relative to it: LMDB
+        takes its page size from the OS, and macOS on arm64 uses 16 KB
+        pages, where a hard-coded 0x1000 is a legitimate key size rather
+        than an oversized one.
+        """
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+        with env.begin(write=True, db=db) as txn:
+            for i in range(ndups):
+                txn.put(b'key0', b'v%06d' % i)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        data_off = _find_dup_node(raw, psize, want_subdata)[1]
+        if callable(new_pad):
+            new_pad = new_pad(psize)
+
+        if want_subdata:
+            # md_pad is the first field of the MDB_db record.
+            struct.pack_into('<I', raw, data_off, new_pad)
+        else:
+            struct.pack_into('<H', raw, data_off + ANY_MP_PAD_OFFSET,
+                             new_pad)
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        return env, env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+
+    def test_subdb_md_pad_disclosure(self):
+        """A md_pad larger than the page must not become the length of the
+        buffer handed back to the caller."""
+        env, db = self._forge(True, 4000, lambda psize: 8 * psize)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.value()
+
+    def test_subdb_md_pad_huge(self):
+        """md_pad = UINT32_MAX must be refused rather than faulting."""
+        env, db = self._forge(True, 4000, 0xFFFFFFFF)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.value()
+
+    def test_subdb_md_pad_getmulti(self):
+        """mv_size = NUMKEYS(page) * md_pad, in 32-bit arithmetic."""
+        env, db = self._forge(True, 4000, 0xFFFFFFFF)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.getmulti((b'key0',), dupdata=True)
+
+    def test_subdb_md_pad_write(self):
+        """The LEAF2 branch of mdb_node_add uses md_pad as a memmove()/
+        memcpy() length, making this an out-of-bounds write."""
+        env, db = self._forge(True, 4000, lambda psize: psize)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True, db=db) as txn:
+                txn.put(b'key0', b'ZZZZZZZ')
+
+    def test_subdb_md_pad_fits_page_but_not_keys(self):
+        """A key size small enough to fit the page is still corrupt if the
+        page cannot hold that many keys of that size.
+
+        Bounding md_pad on its own leaves this reachable, and it is the
+        more dangerous half: LEAF2KEY() multiplies the size by the key
+        index, so a value comfortably inside the page still addresses
+        megabytes past it by the time the search reaches the middle of a
+        full page.  Found by CI on macOS/arm64, whose 16 KB pages left the
+        4 KB key size this originally used inside the per-key bound.
+        """
+        for pad in (lambda psize: psize // 8,
+                    lambda psize: psize - PAGEHDRSZ):
+            env, db = self._forge(True, 4000, pad)
+            with self.assertRaises(lmdb.Error):
+                with env.begin(db=db) as txn:
+                    cur = txn.cursor()
+                    cur.set_key(b'key0')
+                    cur.value()
+            env, db = self._forge(True, 4000, pad)
+            with self.assertRaises(lmdb.Error):
+                with env.begin(write=True, db=db) as txn:
+                    txn.put(b'key0', b'ZZZZZZZ')
+
+    def test_subpage_mp_pad(self):
+        """For few duplicates the dups live in a sub-page embedded in the
+        node, whose mp_pad never passes through mdb_page_get."""
+        env, db = self._forge(False, 4, 0x4000)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.value()
+
+    def test_subpage_mp_pad_fits_node_but_not_keys(self):
+        """The sub-page equivalent: 14 bytes fits the node data holding
+        four 7-byte dups, but four keys of that size do not."""
+        env, db = self._forge(False, 4, 14)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.value()
+
+    def test_normal_dupfixed_still_works(self):
+        """The bound must not reject legitimate databases.  A DUPFIXED DB
+        record created by mdb_dbi_open has md_pad == 0, so zero cannot be
+        treated as corrupt at the top level."""
+        path, env = testlib.temp_env()
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+        with env.begin(write=True, db=db) as txn:
+            for i in range(4000):
+                txn.put(b'key0', b'v%06d' % i)
+        env.close()
+
+        env = lmdb.open(path, max_dbs=1)
+        testlib._cleanups.append(env.close)
+        db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
+        with env.begin(db=db) as txn:
+            cur = txn.cursor()
+            assert cur.set_key(b'key0')
+            assert cur.value() == b'v000000'
+            assert len(list(cur.iternext_dup())) == 4000
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,173 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -1354,6 +1354,58 @@
+ #define BAD_DB_FLAGS(f) \
+ 	(((f) & DUPSORT_ONLY_FLAGS) && !((f) & MDB_DUPSORT))
+ 
++	/** Bound #MDB_db.%md_pad, the LEAF2 fixed key size, as read from disk.
++	 *	Returns 0 if valid, non-zero if corrupt.
++	 *
++	 *	A LEAF2 key must fit in a page's usable space.  #LEAF2KEY() turns
++	 *	md_pad into a pointer offset and several callers hand it to the
++	 *	user as a buffer length, so an unbounded value is an out-of-bounds
++	 *	read; #mdb_node_add() uses it as a memmove()/memcpy() length, which
++	 *	makes it an out-of-bounds write.
++	 *
++	 *	Zero is deliberately accepted here: md_pad is unused unless the
++	 *	DB's own pages are LEAF2, and #mdb_dbi_open() zeroes the whole
++	 *	record when creating a DB, so a perfectly normal #MDB_DUPFIXED
++	 *	database has md_pad == 0.  Only a DUPFIXED *sub*-DB, whose pages
++	 *	are always LEAF2, additionally requires a non-zero value; see
++	 *	#mdb_xcursor_init1().
++	 *
++	 *	Must not be applied to #FREE_DBI, whose md_pad aliases #mm_psize
++	 *	and legitimately equals the full page size.  That field is checked
++	 *	separately where the meta page is read.
++	 */
++#define BAD_MD_PAD(pad, psize)	((pad) > (psize) - PAGEHDRSZ)
++
++	/** Bound the keys a LEAF2 page claims to hold.
++	 *	Returns 0 if valid, non-zero if corrupt.  `space' is the usable
++	 *	bytes after the page header.
++	 *
++	 *	#mdb_node_add() keeps mp_upper - mp_lower equal to
++	 *	space - #NUMKEYS()*ksize on a LEAF2 page, so NUMKEYS()*ksize
++	 *	never exceeds space on a page LMDB built.  Bounding the key size
++	 *	alone does not imply that, because the two halves are read from
++	 *	different places: the size from an #MDB_db record or a sub-page
++	 *	header, the count from the page.  Forging one and not the other
++	 *	leaves both individually in range while #LEAF2KEY() still
++	 *	addresses far outside the page -- on a 16KB page a key size of
++	 *	4096 is a legal value that still walks megabytes past the end.
++	 *
++	 *	ksize must already be bounded by space, or the product can
++	 *	overflow; #BAD_LEAF2_PAD() does both in the right order.
++	 */
++#define BAD_LEAF2_KEYS(p, ksize, space) \
++	((unsigned)NUMKEYS(p) * (unsigned)(ksize) > (unsigned)(space))
++
++	/** Bound a LEAF2 fixed key size and the keys it describes.
++	 *	Returns 0 if valid, non-zero if corrupt.  Zero is rejected: it
++	 *	makes #LEAF2KEY() return the same pointer for every index, and
++	 *	divisions by it appear in the split path.  Unlike #BAD_MD_PAD()
++	 *	this needs the page, so it is only usable once one is in hand.
++	 */
++#define BAD_LEAF2_PAD(p, ksize, space) \
++	((ksize) == 0 || (unsigned)(ksize) > (unsigned)(space) || \
++	 BAD_LEAF2_KEYS(p, ksize, space))
++
+ 	/** Handle for the DB used to track free pages. */
+ #define	FREE_DBI	0
+ 	/** Handle for the default DB. */
+@@ -3447,6 +3499,9 @@
+ 		 * P_LEAF2 pages that lead to use of uninitialized pointers.
+ 		 */
+ 		rc = MDB_INVALID;
++	} else if (BAD_MD_PAD(txn->mt_dbs[MAIN_DBI].md_pad, env->me_psize)) {
++		/* FREE_DBI is skipped: its md_pad aliases mm_psize. */
++		rc = MDB_INVALID;
+ 	} else {
+ 		return MDB_SUCCESS;
+ 	}
+@@ -7473,11 +7528,16 @@
+ 			txn->mt_flags |= MDB_TXN_ERROR;
+ 			return MDB_CORRUPTED;
+ 		}
+-		/* Validate mp_pad (LEAF2 key size).  Zero causes division by
+-		 * zero or infinite loops, and too-large values produce OOB
+-		 * pointers via LEAF2KEY(). */
++		/* Validate the LEAF2 key size.  Zero causes division by zero or
++		 * infinite loops, and too-large values produce OOB pointers via
++		 * LEAF2KEY().  Check the page's own mp_pad and the DB record's
++		 * md_pad separately: md_pad is the size every LEAF2 access
++		 * through this cursor actually uses, and a crafted file can
++		 * leave the two disagreeing with each other and with the key
++		 * count the page header implies. */
+ 		if (IS_LEAF2(p) &&
+-			(MP_PAD(p) == 0 || MP_PAD(p) > psize - PAGEHDRSZ)) {
++			(BAD_LEAF2_PAD(p, MP_PAD(p), psize - PAGEHDRSZ) ||
++			 BAD_LEAF2_PAD(p, mc->mc_db->md_pad, psize - PAGEHDRSZ))) {
+ 			txn->mt_flags |= MDB_TXN_ERROR;
+ 			return MDB_CORRUPTED;
+ 		}
+@@ -7648,6 +7708,9 @@
+ 					if (BAD_DB_FLAGS(flags))
+ 						return MDB_INVALID;
+ 					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
++					if (BAD_MD_PAD(mc->mc_db->md_pad,
++						mc->mc_txn->mt_env->me_psize))
++						return MDB_INVALID;
+ 					if (mc->mc_db->md_depth > CURSOR_STACK)
+ 						return MDB_CORRUPTED;
+ 				}
+@@ -8965,7 +9028,18 @@
+ 				 * memcpy size to underflow (unsigned wrap -> huge). */
+ 				if (MP_LOWER(fp) < PAGEHDRSZ-PAGEBASE ||
+ 					MP_UPPER(fp) + PAGEBASE > olddata.mv_size ||
+-					MP_LOWER(fp) > MP_UPPER(fp)) {
++					MP_LOWER(fp) > MP_UPPER(fp) ||
++					/* The LEAF2 branch below copies NUMKEYS(fp)*mp_pad
++					 * bytes out of fp.  fp_flags comes from the on-disk
++					 * sub-page, so P_LEAF2 can be set here even when
++					 * mdb_xcursor_init1() did not check mp_pad -- that
++					 * test is gated on the DB's own MDB_DUPFIXED flag.
++					 * Only the count is bounded: an about-to-be-filled
++					 * sub-page legitimately has a key size larger than
++					 * its current (empty) body. */
++					((fp_flags & P_LEAF2) &&
++					 BAD_LEAF2_KEYS(fp, MP_PAD(fp),
++						olddata.mv_size - PAGEHDRSZ))) {
+ 					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
+ 					return MDB_CORRUPTED;
+ 				}
+@@ -9736,11 +9810,36 @@
+ 			return;
+ 		}
+ 		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
++		/* Bound the sub-DB's LEAF2 key size.  Nothing else validates it:
++		 * validate-leaf2-keysize bounds a *page's* mp_pad in
++		 * mdb_page_get, but every LEAF2 computation uses this record's
++		 * md_pad, and nothing requires the two to agree.  A DUPFIXED
++		 * sub-DB's pages are always LEAF2, so zero is corrupt here even
++		 * though it is legitimate on a top-level DB record. */
++		if (BAD_MD_PAD(mx->mx_db.md_pad, mc->mc_txn->mt_env->me_psize) ||
++			((mx->mx_db.md_flags & MDB_DUPFIXED) && !mx->mx_db.md_pad)) {
++			mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++			return;
++		}
+ 		mx->mx_cursor.mc_pg[0] = 0;
+ 		mx->mx_cursor.mc_snum = 0;
+ 		mx->mx_cursor.mc_top = 0;
+ 	} else {
+ 		MDB_page *fp = NODEDATA(node);
++		/* Sub-pages live inside node data and are never fetched through
++		 * mdb_page_get, so validate-leaf2-keysize does not see them and
++		 * validate-subpage-bounds checks only their mp_lower/mp_upper.
++		 * Bound the LEAF2 key size against the node data that actually
++		 * holds the sub-page.  This runs before the sub-cursor is marked
++		 * C_INITIALIZED so that, as in the F_SUBDATA case above, the
++		 * caller's page search reports the blocked txn rather than
++		 * quietly operating on a half-built cursor. */
++		if ((mc->mc_db->md_flags & MDB_DUPFIXED) &&
++			(NODEDSZ(node) < PAGEHDRSZ ||
++			 BAD_LEAF2_PAD(fp, fp->mp_pad, NODEDSZ(node) - PAGEHDRSZ))) {
++			mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
++			return;
++		}
+ 		mx->mx_db.md_pad = 0;
+ 		mx->mx_db.md_flags = 0;
+ 		mx->mx_db.md_depth = 1;
+@@ -12542,6 +12641,12 @@
+ 		txn->mt_dbiseqs[slot] = seq;
+ 
+ 		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));
++		if (BAD_MD_PAD(txn->mt_dbs[slot].md_pad, txn->mt_env->me_psize)) {
++			free(namedup);
++			txn->mt_dbxs[slot].md_name.mv_data = NULL;
++			txn->mt_dbxs[slot].md_name.mv_size = 0;
++			return MDB_INVALID;
++		}
+ 		if (BAD_DB_FLAGS(txn->mt_dbs[slot].md_flags)) {
+ 			free(namedup);
+ 			txn->mt_dbxs[slot].md_name.mv_data = NULL;

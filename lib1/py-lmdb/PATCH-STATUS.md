@@ -36,7 +36,8 @@ described under "Maintaining this series" below.
 `validate-node-read-size`, `validate-xcursor-nodedsz`,
 `validate-leaf2-keysize`, `guard-xcursor-null-d3d4`,
 `validate-nodedsz-page-split`, `validate-node-shrink-delta`,
-`validate-nodedsz-cursor-put`, `validate-md-depth`, `validate-md-root`.
+`validate-nodedsz-cursor-put`, `validate-md-depth`, `validate-md-root`,
+`validate-md-pad`.
 
 Two notes on these:
 
@@ -63,6 +64,44 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
 1.0 tree returns `MDB_INVALID`. Worth reporting upstream — see
 `docs/upstream-psize-sigfpe.md`.
 
+### `validate-md-pad` (new; also added to the 0.9 series)
+
+The LEAF2 fixed key size was bounded only on the *page* (`mp_pad`, by
+`validate-leaf2-keysize` in `mdb_page_get`), never on the *DB record*
+(`md_pad`) that every LEAF2 computation actually uses, and nothing required
+the two to agree. `mdb_xcursor_init1`'s `memcpy` for an `F_SUBDATA` node was
+unchecked entirely, so forging that one field left every page internally
+consistent while the key size became arbitrary.
+
+The 1.0 port is mechanical — the affected functions are structurally
+identical — but the *reproducer* is not: **1.0 aligns node data to an even
+offset** (`NODEDATA` uses `EVEN(mn_ksize)`, where 0.9 uses `mn_ksize`
+directly), so a walker written for 0.9 lands one byte off for odd-length
+keys and silently reads the wrong field. `tests/cve_test.py` handles this in
+`_nodedata_off()`; `misc/md_pad_repro.py` in `Layout.nodedata()`.
+
+Confirmed on **both** engines with `misc/md_pad_repro.py`. Unpatched, all
+seven cases fail identically on 0.9.35 and 1.0.1: a forged `md_pad` of
+`8 * psize` returns 32768 bytes for a 7-byte record (~28.7 KB of adjacent
+mapping contents, no error raised), `0xFFFFFFFF` faults on both the plain
+read and `getmulti` paths, `psize` faults in the `mdb_node_add` **write**
+path, and the sub-page `mp_pad` variant faults as well. Patched, all seven
+are refused on both engines.
+
+Bounding the key size alone is not sufficient — `LEAF2KEY()` multiplies it
+by the key index, so a size that fits the page still addresses far outside
+it once a search reaches the middle of a full page. The patch also enforces
+`NUMKEYS(page) * key_size <= usable space`, the relation `mdb_node_add`
+maintains. See the 0.9 file for why that check is split in two, and for how
+CI on macOS/arm64 (16 KB pages) exposed the gap that a 4 KB-page test suite
+could not.
+
+Note the bound accepts zero on a DB record. `mdb_dbi_open` zeroes the whole
+record when creating a DB, so a perfectly normal `MDB_DUPFIXED` database has
+`md_pad == 0`; only a DUPFIXED *sub*-DB, whose pages are always LEAF2,
+additionally requires non-zero. `FREE_DBI` is excluded because its `md_pad`
+aliases `mm_psize` and legitimately equals the full page size.
+
 ## Open items
 
 - **Integer-overflow audit of new 1.0 code** — see
@@ -71,13 +110,6 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
   One of them (`mdb_env_incr_loadfd`) **blocks exporting the incremental
   backup API** and needs a patch first. The rest are deferred, not
   dismissed: they become reachable if `MDB_REMAP_CHUNKS` is ever exposed.
-
-- **`md_pad` from the DB record is unvalidated** — `validate-leaf2-keysize`
-  bounds the *page's* `mp_pad`, but nothing bounds `md_pad` as read from the
-  DB record, and `mdb_cursor_get` turns `NUMKEYS(page) * md_pad` into a
-  buffer length returned to the caller. This affects **both** engines, so
-  any fix needs a `validate-md-pad` patch in `lib/py-lmdb/` as well as here.
-  Analysis in `docs/lmdb-1.0-overflow-audit.md`.
 
 - **`cve-2019-16225`'s protection is not carried forward.** The patch rejected
   a mapped page claiming `P_DIRTY`, which would otherwise let
@@ -109,6 +141,14 @@ pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
   it was the single cause of most of the initial cross-engine failures.
 
 ## Maintaining this series
+
+`misc/run-upstream-mtests.sh` builds upstream's `mtest` programs against both
+the pristine `lib1/` tree and the patched `build/lib10-plain`, and diffs the
+output; the series should be indistinguishable from pristine LMDB on
+well-formed input. It also checks `lib1/`'s sources still match the upstream
+tag byte for byte. Currently `mtest` through `mtest5` are identical on both
+engines. See the 0.9 file for what is excluded and why (`mtest6`, and 1.0's
+`RPROGS`: `mtest_remap`, `mtest_enc`, `mtest_enc2`).
 
 When bumping the bundled 1.0 tree, regenerate rather than hand-editing: replay
 the series onto the new tree one patch at a time, snapshotting between steps
