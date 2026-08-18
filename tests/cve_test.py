@@ -279,9 +279,16 @@ class CVE_2019_16225_Test(unittest.TestCase):
 
     def _forge_txnid(self, new_txnid, writemap):
         """Rewrite mp_txnid on every mapped B-tree page.  Returns the
-        reopened env."""
+        reopened env.
+
+        sync=False is not incidental: committing a writemap transaction at
+        the default sync=True fails on Windows with "The handle is invalid"
+        on the 1.0 engine, which has nothing to do with what these tests
+        check.  See EnvTest.test_writemap_commit, which pins that down on
+        its own.
+        """
         path, env = testlib.temp_env(map_size=10*1024*1024,
-                                     writemap=writemap)
+                                     writemap=writemap, sync=False)
         with env.begin(write=True) as txn:
             for i in range(400):
                 txn.put(b'k%04d' % i, b'v' * 100)
@@ -303,7 +310,8 @@ class CVE_2019_16225_Test(unittest.TestCase):
         with open(db_path, 'wb') as f:
             f.write(raw)
 
-        env = lmdb.open(path, map_size=10*1024*1024, writemap=writemap)
+        env = lmdb.open(path, map_size=10*1024*1024, writemap=writemap,
+                        sync=False)
         testlib._cleanups.append(env.close)
         return env
 
