@@ -84,6 +84,24 @@ struct result {
     int rc_sync;        /* from mdb_env_sync(), case B only; -1 = n/a  */
 };
 
+/* mdb_strerror() returns FormatMessage() text on Windows, which ends in
+ * "\r\n".  Trim it so the table below stays on one line per case. */
+static const char *errstr(int rc)
+{
+    static char bufs[4][256];
+    static int turn;
+    char *b = bufs[turn++ & 3];
+    size_t len;
+
+    if (!rc)
+        return "ok";
+    snprintf(b, sizeof(bufs[0]), "%s", mdb_strerror(rc));
+    len = strlen(b);
+    while (len && (b[len-1] == '\n' || b[len-1] == '\r' || b[len-1] == ' '))
+        b[--len] = '\0';
+    return b;
+}
+
 /* Run one case.  Returns 2 on setup trouble, 0 otherwise; the return codes
  * under test are reported through *r rather than as failures here, so one
  * failing case does not stop the others from running. */
@@ -187,10 +205,8 @@ int main(int argc, char **argv)
     for (i = 0; i < 4; i++) {
         printf("%-4s %-34s %-30s %s\n",
                results[i].name, results[i].flags,
-               results[i].rc_commit ? mdb_strerror(results[i].rc_commit) : "ok",
-               results[i].rc_sync < 0 ? "-"
-                   : (results[i].rc_sync ? mdb_strerror(results[i].rc_sync)
-                                         : "ok"));
+               errstr(results[i].rc_commit),
+               results[i].rc_sync < 0 ? "-" : errstr(results[i].rc_sync));
         if (results[i].rc_commit || results[i].rc_sync > 0)
             bad = 1;
     }
@@ -212,8 +228,7 @@ int main(int argc, char **argv)
         printf("  A and C both fail, so the meta-write handle does not\n"
                "  explain it.  mdb_env_sync() in case B returned: %s\n",
                results[1].rc_sync < 0 ? "(not reached)"
-                   : (results[1].rc_sync ? mdb_strerror(results[1].rc_sync)
-                                         : "ok"));
+                                      : errstr(results[1].rc_sync));
     }
     return 1;
 }
