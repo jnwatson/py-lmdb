@@ -1079,6 +1079,78 @@ class OverflowPagesTest(unittest.TestCase):
                 # code path in mdb_cursor_put
                 txn.put(b'big', b'z' * 32000)
 
+    def _forge_ovpage(self, new_pages):
+        """Build a record on overflow pages, then rewrite only the page
+        header's mp_pages.  Returns the reopened env."""
+        path, env = testlib.temp_env(map_size=10*1024*1024)
+        with env.begin(write=True) as txn:
+            # Must exceed 16K to overflow on Apple Silicon's 16K pages.
+            txn.put(b'big', b'x' * 40000)
+            txn.put(b'small', b'y')
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & P_OVERFLOW:
+                struct.pack_into('<I', raw, off + MP_PAGES_OFFSET, new_pages)
+                break
+        else:
+            self.fail('no overflow page found to corrupt')
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, map_size=10*1024*1024)
+        testlib._cleanups.append(env.close)
+        return env
+
+    def test_ovpage_free_huge_mp_pages(self):
+        """mdb_ovpage_free takes the extent from the page header and hands
+        it to mdb_midl_append_range.  validate-overflow-pages bounds that
+        in mdb_cursor_put and mdb_drop0 but not here, so the delete path
+        reached it unchecked; 0xFFFFFFFF segfaulted on both engines."""
+        env = self._forge_ovpage(0xFFFFFFFF)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True) as txn:
+                txn.delete(b'big')
+
+    def test_ovpage_free_modest_mp_pages(self):
+        """The dangerous case is not the extreme one: a merely large count
+        committed silently, leaving the free DB holding page numbers past
+        the end of the file for a later transaction to hand out."""
+        env = self._forge_ovpage(100000)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True) as txn:
+                txn.delete(b'big')
+
+    def test_ovpage_free_zero_mp_pages(self):
+        """A real overflow page always spans at least one page, so zero is
+        corrupt; it used to free nothing and leak the extent."""
+        env = self._forge_ovpage(0)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True) as txn:
+                txn.delete(b'big')
+
+    def test_normal_overflow_delete_still_works(self):
+        """The bound must not reject legitimate overflow extents."""
+        path, env = testlib.temp_env(map_size=64*1024*1024)
+        db = env.open_db(b'ov')
+        with env.begin(write=True, db=db) as txn:
+            for i in range(40):
+                txn.put(b'k%03d' % i, b'x' * 300000)
+        with env.begin(db=db) as txn:
+            assert txn.stat(db)['overflow_pages'] > 0
+        with env.begin(write=True, db=db) as txn:
+            for i in range(0, 40, 2):
+                assert txn.delete(b'k%03d' % i)
+        with env.begin(db=db) as txn:
+            assert sum(1 for _ in txn.cursor()) == 20
+
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
 class CursorPutNodeDszTest(unittest.TestCase):

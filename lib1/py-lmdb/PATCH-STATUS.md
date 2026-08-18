@@ -119,10 +119,11 @@ aliases `mm_psize` and legitimately equals the full page size.
   `IS_WRITABLE`, which makes `mdb_page_touch` return `MDB_SUCCESS` without
   copying. Retaining this protection needs a new patch written against
   `mp_txnid`. **Unverified by reproducer** — this is code reading only.
-- **`mdb_ovpage_free` remains unchecked** on both lines: it takes `ovpages`
-  from the page header and feeds it to `mdb_midl_append_range` with no bound.
-  Out of scope for this port (the 0.9 patch never covered it), but it is the
-  natural companion to `validate-overflow-pages`.
+- ~~**`mdb_ovpage_free` remains unchecked**~~ — fixed by
+  `validate-ovpage-free`, added to both series. See the 0.9 file for the
+  analysis; the patch is identical on both trees, since both take `ovpages`
+  from the page header here even though 1.0's *put* path reads the count
+  from the node instead.
 - **`tests/cve_test.py` covers 17 of its 25 cases on the 1.0 engine.** The
   file now detects `PAGEHDRSZ` and `PAGEBASE` at import and expresses every
   offset in terms of them, so most corruption recipes work on either engine.

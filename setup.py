@@ -122,6 +122,7 @@ ENGINES = [
             # preceding ones, so inserting mid-series would make every
             # later patch apply with an offset.
             'validate-md-pad',
+            'validate-ovpage-free',
         ],
     ),
     dict(
@@ -156,6 +157,7 @@ ENGINES = [
             'fix-overflow-page-size-mul',
             # Appended for the same reason as in the v09 series above.
             'validate-md-pad',
+            'validate-ovpage-free',
         ],
     ),
 ]

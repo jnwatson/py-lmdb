@@ -50,6 +50,19 @@ Bug fixes
     data written by an unaffected build still read back correctly on an
     affected one — only the write path consulted the faulty check.
 
+- New ``validate-ovpage-free`` hardening patch for both bundled engines.
+    ``mdb_ovpage_free()`` took the overflow extent from the page header and
+    used it as an allocation size, as the number of page numbers appended to
+    the transaction's free list, and as a loop bound, without bounding it.
+    ``validate-overflow-pages`` covered the two other sites reading that
+    field but not this one, so deleting a record whose value lives on
+    overflow pages reached it unchecked.  A crafted ``data.mdb`` could
+    segfault the process outright, but the more serious case is a merely
+    large count: the delete committed silently, leaving the free database
+    holding page numbers past the end of the file for a later transaction to
+    hand out.  As with the rest of the series this matters only if you open
+    a database file you do not trust.
+
 - New ``validate-md-pad`` hardening patch for both bundled engines: the
     LEAF2 fixed key size was bounded only on the page (``mp_pad``), never on
     the database record (``md_pad``) that every LEAF2 computation actually

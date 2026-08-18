@@ -17,6 +17,48 @@ found during the 1.0 port.
 
 ## Resolved
 
+### `validate-ovpage-free` — unbounded overflow extent on the delete path
+
+`mdb_ovpage_free()` takes the extent from the page header
+(`ovpages = mp->mp_pages`) of a page named by an `F_BIGDATA` node, and uses
+it three ways: as an allocation size (`mdb_midl_need`), as the number of
+page numbers appended to `mt_free_pgs` (`mdb_midl_append_range`), and as a
+loop bound writing into `me_pghead`. Nothing bounded it.
+
+`validate-overflow-pages` covers the two sites that read the same field
+elsewhere — `mdb_cursor_put` and `mdb_drop0` — but not this one, so the
+**delete** path (`mdb_cursor_del` → `mdb_page_get` → `mdb_ovpage_free`)
+reached it unchecked on both engines. 1.0 is affected equally: its *put*
+path reads the count from the node (`MDB_ovpage.op_pages`), but
+`mdb_ovpage_free` still reads the page header.
+
+Reproduced on 0.9.35 and 1.0.1 alike by forging only that one `uint32`,
+then deleting the record:
+
+| Forged `mp_pages` | Unpatched behaviour |
+| --- | --- |
+| `0xFFFFFFFF` | SIGSEGV |
+| `100000` | **delete commits silently**; `md_overflow_pages` underflows to ~2^64, and the free DB is left holding 100000 page numbers past the end of a 13-page file for a later txn to hand out — on 1.0 the database will not reopen |
+| `0x7FFFFFFF` | `ENOMEM` |
+| `0x40000000` | `MDB_BAD_VALSIZE` at commit |
+| `0` | commits, frees nothing, leaks the extent |
+
+The middle row is the one that matters. The extreme values fail loudly, but
+a merely large count is accepted, committed, and *persists* — the damage
+outlives the transaction that caused it, which none of the other cases in
+this series do.
+
+The check goes inside `mdb_ovpage_free` rather than at its two call sites,
+so it covers both and any future caller. It also rejects `!IS_OVERFLOW(mp)`
+— `mdb_drop0` only asserted that, and an assertion is not a validation —
+and orders `pg > mt_next_pgno - ovpages` after the bound on `ovpages` so
+the subtraction cannot wrap on a 32-bit `pgno_t`.
+
+Regression tests are in `tests/cve_test.py` (`OverflowPagesTest`), including
+`test_normal_overflow_delete_still_works`, which passes with the patch
+removed — a positive test that only guards against false rejection is worth
+having precisely because it does not fail for the wrong reason.
+
 ### `validate-subpage-bounds` — rejected 1-byte `MDB_DUPFIXED` values
 
 Reported as issue #481: an `MDB_DUPFIXED` database with **1-byte values**
