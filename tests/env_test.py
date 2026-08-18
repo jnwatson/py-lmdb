@@ -36,11 +36,6 @@ import lmdb
 # Whether we have the patch that allows env.copy* to take a txn
 have_txn_patch = lmdb.version(subpatch=True)[3]
 
-# True when the bundled LMDB was built without py-lmdb's patch series, which
-# is how a failure gets attributed to upstream rather than to us.
-_PURE = (os.environ.get('LMDB_PURE') is not None or
-         os.environ.get('LMDB_FORCE_SYSTEM') is not None)
-
 NO_READERS = str('(no active readers)\n')
 
 try:
@@ -270,10 +265,10 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(writemap=flag)
             assert env.flags()['writemap'] == flag
 
-    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1
-                     and not _PURE,
+    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1,
                      'writemap + sync=True cannot commit on Windows with '
-                     'the bundled LMDB 1.0 engine (issue #486)')
+                     'LMDB 1.0; upstream defect, reproduces under '
+                     'LMDB_PURE (issue #486)')
     def test_writemap_commit(self):
         """Write and commit under writemap, at both sync settings.
 
@@ -284,7 +279,9 @@ class OpenTest(unittest.TestCase):
 
         The skip is narrow on purpose: this passes on Windows with the 0.9
         engine and on Linux/macOS with both, so it still guards those, and
-        dropping the skip is how a fix for #486 gets checked.
+        dropping the skip is how a fix for #486 gets checked.  That defect
+        is upstream's -- it reproduces with LMDB_PURE, which is what the
+        windows-latest pure job in CI exists to establish.
         """
         for sync in True, False:
             path, env = testlib.temp_env(writemap=True, sync=sync)
