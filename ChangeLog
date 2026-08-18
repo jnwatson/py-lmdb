@@ -61,6 +61,13 @@ Bug fixes
     place.  The 0.9 engine was never affected.  As with the rest of the
     series this matters only if you open a database file you do not trust.
 
+    Note one case this does **not** cover, shared with 0.9: under
+    ``MDB_WRITEMAP`` a page forged to exactly the next transaction's id is
+    indistinguishable from one this transaction dirtied in place, so it still
+    bypasses copy-on-write, and ``abort()`` then does not roll back.  0.9's
+    equivalent check excludes ``MDB_WRITEMAP`` altogether.  See
+    ``lib1/py-lmdb/PATCH-STATUS.md``.
+
 - New ``validate-ovpage-free`` hardening patch for both bundled engines.
     ``mdb_ovpage_free()`` took the overflow extent from the page header and
     used it as an allocation size, as the number of page numbers appended to

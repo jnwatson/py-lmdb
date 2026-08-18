@@ -89,7 +89,7 @@ Forging that one `uint64` on every B-tree page, then rewriting the records:
 | `0xFFFFFFFFFFFFFFFF` | **SIGSEGV** — write through the `PROT_READ` map |
 | `1000000` | **SIGSEGV** |
 | `5` (> `mt_txnid`, small) | `MDB_PROBLEM` — reaches `mdb_page_unspill` on a page that was never spilled |
-| `0xFFFFFFFFFFFFFFFF`, `MDB_WRITEMAP` | **writes commit silently** — the map is writable, so instead of faulting the page is modified in place, skipping the free-list bookkeeping readers of the old snapshot depend on |
+| `0xFFFFFFFFFFFFFFFF`, `MDB_WRITEMAP` | **writes land in place, silently** — the map is writable, so rather than faulting, pages of the previous snapshot are overwritten directly |
 
 The fix bounds the field where the 0.9 patch bounds `P_DIRTY` — in
 `mdb_page_get`, on the mapped-page path only. Placement matters twice over:
@@ -103,12 +103,53 @@ The fix bounds the field where the 0.9 patch bounds `P_DIRTY` — in
 
 Meta pages are unaffected — they leave `mp_txnid` at zero, so they pass.
 
-One residual, and it is the same one 0.9 has: under `MDB_WRITEMAP` a page
-claiming exactly `mt_txnid` is indistinguishable from a genuinely dirty one,
-since `mt_workid == mt_txnid` there and `mdb_page_get` skips the dirty-list
-search entirely. 0.9's patch sidesteps this by excluding `MDB_WRITEMAP`
-outright; this one at least rejects everything above `mt_txnid`, so it covers
-strictly more than 0.9 does.
+#### Known residual: `mp_txnid == mt_txnid` under `MDB_WRITEMAP`
+
+One value still gets through, and it is worth stating plainly rather than
+leaving as a footnote. A write txn's id is `last_committed + 1`, which an
+attacker crafting the file knows, since the meta page carries the committed
+id. Forging every B-tree page to exactly that value passes the bound above,
+and under `MDB_WRITEMAP` `mt_workid == mt_txnid`, so `IS_WRITABLE()` is true
+and `mdb_page_touch()` still skips the copy-on-write.
+
+Demonstrated, patch applied, forging pages to `last_txnid + 1` and then
+writing 200 records and calling **abort**:
+
+| | write | on disk after abort |
+| --- | --- | --- |
+| no `MDB_WRITEMAP` | refused (`MDB_PROBLEM`) | 201 `ORIGINAL`, 0 `MODIFIED` |
+| `MDB_WRITEMAP` | allowed | 1 `ORIGINAL`, **200 `MODIFIED`** |
+
+So this is not only an MVCC problem for concurrent readers: because the
+pages were never copied, **`abort()` does not roll back**. The writes are
+already in the previous snapshot's pages.
+
+The bound cannot simply be tightened to `>=`. Under `MDB_WRITEMAP` a page
+this txn dirtied in place carries exactly `mt_txnid` (`SET_PGTXNID` sets
+`mt_workid`), and re-reading such a page later in the same txn is completely
+routine, so `>=` would reject normal operation.
+
+Nor can it be closed by cross-checking the dirty list, which is the obvious
+alternative. `mdb_page_dirty()` under `MDB_WRITEMAP` is:
+
+```c
+if (txn->mt_flags & MDB_TXN_WRITEMAP) {
+        txn->mt_flags |= MDB_TXN_DIRTY;
+        return;
+}
+```
+
+— it sets a flag and returns without recording the page. There is no
+per-page set to test against, because avoiding exactly that bookkeeping is
+what `MDB_WRITEMAP` is for. Closing this would mean adding tracking upstream
+deliberately omits.
+
+0.9 has the same hole and a wider one: its patch excludes `MDB_WRITEMAP`
+outright, so on 0.9 *every* forged value gets through under `MDB_WRITEMAP`,
+not just this one. That is not an argument that this is fine — it is a note
+that the gap is pre-existing and shared, and that anyone opening an untrusted
+file with `writemap=True` is relying on the rest of the series, not on this
+check.
 
 ### `validate-md-pad` (new; also added to the 0.9 series)
 
