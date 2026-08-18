@@ -42,6 +42,14 @@ Bug fixes
     is below ``sizeof(indx_t)``, so it legitimately grows past the
     sub-page.  Unpatched LMDB was never affected.
 
+    **The defect did not corrupt data.**  It rejected valid writes rather
+    than mis-performing them: the check runs before the page is modified,
+    and the error marks the transaction unusable, so the affected
+    transaction aborts with nothing committed.  Databases were left byte
+    for byte as they were, remained readable, and 1-byte ``MDB_DUPFIXED``
+    data written by an unaffected build still read back correctly on an
+    affected one — only the write path consulted the faulty check.
+
 - New ``validate-md-pad`` hardening patch for both bundled engines: the
     LEAF2 fixed key size was bounded only on the page (``mp_pad``), never on
     the database record (``md_pad``) that every LEAF2 computation actually
