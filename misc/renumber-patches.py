@@ -54,7 +54,41 @@ def canon(text):
         elif line == ' ':
             line = ''
         out.append(line)
-    return '\n'.join(out)
+    # diff(1) ends its output with a newline and the hand-written patches
+    # do not always, which is not a difference in the patch either.
+    return '\n'.join(out).rstrip('\n')
+
+
+def sections(text):
+    """Split a patch into its per-file sections.
+
+    Returns [(path, body)] in file order, where `path` is the file the
+    section patches (taken from its `+++ b/...` line, basename only: the
+    series diffs against upstream's `libraries/liblmdb/` layout and is
+    applied with -p3) and `body` is that section's text from its first
+    hunk header to the start of the next section.  Only `env-copy-txn`
+    has more than one section, but renumbering from the first patch in a
+    series has to handle it.
+    """
+    out = []
+    path = body = None
+
+    def flush():
+        if path is not None:
+            out.append((path, '\n'.join(body or [])))
+
+    for line in text.split('\n'):
+        if line.startswith('diff --git '):
+            flush()
+            path = body = None
+        elif line.startswith('+++ '):
+            path = os.path.basename(line[4:].split('\t')[0])
+        elif line.startswith('@@') and body is None:
+            body = [line]
+        elif body is not None:
+            body.append(line)
+    flush()
+    return out
 
 
 def replay(tree, names, start, work):
@@ -63,13 +97,15 @@ def replay(tree, names, start, work):
     shutil.rmtree(cur, ignore_errors=True)
     shutil.copytree(os.path.join(HERE, tree), cur,
                     ignore=shutil.ignore_patterns('py-lmdb'))
-    mdb = os.path.join(cur, 'mdb.c')
     a, b = os.path.join(work, 'a.c'), os.path.join(work, 'b.c')
     touched = []
 
     for i, name in enumerate(names):
         patchfile = os.path.join(HERE, tree, 'py-lmdb', name + '.patch')
-        before = open(mdb).read()
+        old = open(patchfile).read()
+        parts = sections(old)
+        before = {path: open(os.path.join(cur, path)).read()
+                  for path, _ in parts}
         with open(patchfile, 'rb') as fp:
             r = subprocess.run(['patch', '-N', '-p3', '-d', cur],
                                stdin=fp, capture_output=True, text=True)
@@ -79,21 +115,24 @@ def replay(tree, names, start, work):
         if i < start:
             continue
 
-        open(a, 'w').write(before)
-        open(b, 'w').write(open(mdb).read())
-        diff = subprocess.run(['diff', '-u', a, b],
-                              capture_output=True, text=True).stdout
-        # Drop diff(1)'s ---/+++ lines; the patch keeps its own git header.
-        fresh = '\n'.join(diff.split('\n')[2:])
-        old = open(patchfile).read()
-        head = old[:old.index('@@')]
-        if canon(head + fresh) != canon(old):
-            sys.exit('%s/%s: body differs from the replay, not just line '
-                     'numbers.\nThe edit changed text this patch anchors '
-                     'on; fix it by hand, then re-run.' % (tree, name))
-        heads = iter(l for l in fresh.split('\n') if l.startswith('@@'))
+        heads = []
+        for path, body in parts:
+            open(a, 'w').write(before[path])
+            open(b, 'w').write(open(os.path.join(cur, path)).read())
+            diff = subprocess.run(['diff', '-u', a, b],
+                                  capture_output=True, text=True).stdout
+            # Drop diff(1)'s ---/+++ lines; the patch keeps its own header.
+            fresh = '\n'.join(diff.split('\n')[2:])
+            if canon(fresh) != canon(body):
+                sys.exit('%s/%s (%s): body differs from the replay, not '
+                         'just line numbers.\nThe edit changed text this '
+                         'patch anchors on; fix it by hand, then re-run.'
+                         % (tree, name, path))
+            heads += [l for l in fresh.split('\n') if l.startswith('@@')]
+
+        heads = iter(heads)
         new = '\n'.join(next(heads) if l.startswith('@@') else l
-                        for l in old.split('\n'))
+                         for l in old.split('\n'))
         if new != old:
             open(patchfile, 'w').write(new)
             touched.append(name)

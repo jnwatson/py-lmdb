@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -5792,6 +5792,8 @@
+@@ -5827,6 +5827,8 @@
  					if (BAD_DB_FLAGS(flags))
  						return MDB_INVALID;
  					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
@@ -10,7 +10,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  				}
  				*mc->mc_dbflag &= ~DB_STALE;
  		}
-@@ -10171,6 +10173,12 @@
+@@ -10235,6 +10237,12 @@
  			txn->mt_dbxs[slot].md_name.mv_size = 0;
  			return MDB_INVALID;
  		}

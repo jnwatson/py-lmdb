@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -5909,6 +5909,18 @@
+@@ -5944,6 +5944,18 @@
  	if (!F_ISSET(leaf->mn_flags, F_BIGDATA)) {
  		data->mv_size = NODEDSZ(leaf);
  		data->mv_data = NODEDATA(leaf);

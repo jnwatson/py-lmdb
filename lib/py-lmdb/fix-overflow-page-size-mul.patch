@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -2455,7 +2455,7 @@
+@@ -2460,7 +2460,7 @@
  				if (!np)
  					return ENOMEM;
  				if (num > 1)
@@ -10,7 +10,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  				else
  					mdb_page_copy(np, mp, env->me_psize);
  			}
-@@ -9595,7 +9595,7 @@
+@@ -9630,7 +9630,7 @@
  						my->mc_next_pgno += omp->mp_pages;
  						my->mc_wlen[toggle] += my->mc_env->me_psize;
  						if (omp->mp_pages > 1) {

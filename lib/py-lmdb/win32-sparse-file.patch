@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -4404,6 +4404,16 @@
+@@ -4439,6 +4439,16 @@
 
  	if (fd == INVALID_HANDLE_VALUE)
  		rc = ErrCode();

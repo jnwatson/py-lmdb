@@ -74,7 +74,7 @@ Both implementations must expose an identical API. Changes to one typically requ
 
 py-lmdb bundles **two binary-incompatible LMDB versions** and links both into one extension module:
 
-- `lib/` — LMDB 0.9.35, data format v1. Patches in `lib/py-lmdb/`.
+- `lib/` — LMDB 0.9.36, data format v1. Patches in `lib/py-lmdb/`.
 - `lib1/` — LMDB 1.0.1, data format v3. Patches in `lib1/py-lmdb/`.
 
 Each tree is copied to `build/lib09` / `build/lib10`, patched, and compiled with a generated symbol-rename header (`lib*/py-lmdb/rename.h`, prefixing every extern `mdb_*` with `mdb09_`/`mdb10_`) so the two trees cannot collide at link time. `lmdb/engine.c` is compiled once per tree and exports that tree's entry points as an `MdbApi` vtable (`lmdb/mdb_api.h`). `cpython.c` calls LMDB exclusively through a per-`Environment` vtable pointer; `cffi.py` builds one verifier module per engine and selects via `self._lib` (no renaming needed there — each is its own shared object).

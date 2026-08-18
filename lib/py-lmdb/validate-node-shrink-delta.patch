@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -7707,6 +7707,11 @@
+@@ -7773,6 +7773,11 @@
  	node = NODEPTR(mp, indx);
  	sp = (MDB_page *)NODEDATA(node);
  	delta = SIZELEFT(sp);

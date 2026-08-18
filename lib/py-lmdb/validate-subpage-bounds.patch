@@ -1,8 +1,8 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -6996,6 +6996,31 @@
- 					sub_root = mp;
+@@ -7060,6 +7060,31 @@
+ 					mc->mc_db->md_leaf_pages++;
  			}
  			if (mp != fp) {
 +				/* Validate sub-page bounds before copying.

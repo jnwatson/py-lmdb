@@ -2,7 +2,7 @@
 
 The 0.9 series in this directory is the long-standing baseline; its patches
 are listed in `setup.py`'s `ENGINES` table and apply cleanly to the bundled
-LMDB 0.9.35 sources. This file records **open items** against it, plus
+LMDB 0.9.36 sources. This file records **open items** against it, plus
 findings worth keeping next to the patch that resolved them.
 
 For the 1.0 tree, see `lib1/py-lmdb/PATCH-STATUS.md`, which additionally
@@ -55,6 +55,77 @@ Tracked in issue #484.
 None currently recorded against this tree beyond the `MDB_WRITEMAP` scope
 limit above. See `lib1/py-lmdb/PATCH-STATUS.md` for items that affect both
 engines but were found during the 1.0 port.
+
+## Rebasing onto 0.9.36
+
+LMDB 0.9.36 (2026-08-06) is the first upstream release since this series was
+written that lands work the series overlaps. Two patches came out of it.
+
+`fix-win-flush-large-write` is **gone**: it was py-lmdb's own fix, sent
+upstream, and 0.9.36 carries it as ITS#10538. Upstream's version advances by
+the requested chunk length rather than by the count `WriteFile` reports;
+that is the form 1.0.1 already shipped, and on a synchronous handle the two
+are equivalent, so there was no reason to keep ours on top of it.
+
+`fix-large-write` is **halved**. Its `mdb_page_flush` hunk retried a short
+write by advancing through the iovecs; ITS#10054 instead caps the single-iov
+`pwrite` at `MAX_WRITE`, which forecloses the >2 GiB short write that was the
+reported bug — Linux transfers at most `0x7ffff000` per call and `MAX_WRITE`
+is 1 GiB. A genuine short write still returns `EIO` on 0.9.36, exactly as
+upstream intends, so the retry loop was dropped rather than rebased.
+
+What remains is the `mdb_env_copythr` hunk, and it is still needed: that is
+ITS#9223, which is in 1.0.1 but **not** in 0.9.36. It is now written in
+1.0.1's own form (a `w2` declared beside `len`) so that when 0.9 does pick up
+ITS#9223 the patch drops out without a conflict.
+
+Nothing else in 0.9.36 required a change in substance, but two upstream edits
+land inside code this series anchors on:
+
+- ITS#9388 inserts `mc->mc_db->md_leaf_pages++;` immediately above the
+  `if (mp != fp)` that `validate-subpage-bounds` attaches to, so that
+  patch's leading context was refreshed.
+- ITS#7772 rewrites the sub-page growth calculation just above it, so
+  `offset` can now be 0 where it was previously always positive. The bound
+  `validate-subpage-bounds` enforces is on `MP_UPPER(fp)`, which the change
+  does not touch, and the `memcpy` length it protects is unchanged, so the
+  check still holds. Worth re-deriving rather than assuming at the next
+  bump: `SIZELEFT(fp)` is now read from a sub-page that has not been
+  validated yet, and it underflows if `mp_upper < mp_lower`. Today that only
+  steers `offset` to 0 and the corrupt page is still rejected a few lines
+  later, before anything is copied.
+
+### One upstream behaviour change reaches callers
+
+ITS#10522 makes a zero-length value in a `DUPSORT` database an
+`MDB_BAD_VALSIZE`, where 0.9.35 accepted it. The test for it is
+`data->mv_size-1 >= ENV_MAXKEY(env)`, which catches 0 by unsigned wrap. LMDB
+1.0 already behaved this way, so the effect on py-lmdb is to remove an
+engine divergence, but it does turn previously-working calls into an
+exception. It is in the ChangeLog under "Behaviour changes".
+
+### Renumbering for a version bump
+
+A bump moves every patch, not just the ones after an edit, so
+`misc/renumber-patches.py` has to run from the **first** patch in the series
+(`env-copy-txn`). It could not: `env-copy-txn` is the one patch here that
+touches two files, and the tool only ever diffed `mdb.c`. It now walks each
+`diff --git` section separately.
+
+That exposed a second thing. `env-copy-txn` had been written by hand, and
+expressed two of its hunks differently from how `diff -u` expresses the same
+edit — splitting a function's opening brace across the `-`/`+` sides where
+diff keeps it as context, and splitting one hunk where diff merges two. The
+tool's body check cannot tell that apart from a real change, and rightly
+refuses to guess. The patch was regenerated from the replay and verified to
+produce a byte-identical tree; it is now in canonical `diff -u` form, so
+future bumps renumber it mechanically.
+
+Confirming the result: both series apply with no offset and no fuzz under
+both GNU `patch` and `patch_ng`, the four build combinations
+(cpython/cffi x 0.9/1.0) pass the suite, and
+`misc/run-upstream-mtests.sh` reports the patched 0.9.36 tree
+byte-identical to pristine 0.9.36 across `mtest` through `mtest5`.
 
 ## Resolved
 
@@ -247,7 +318,9 @@ Every patch is a diff against the tree state after all preceding ones, so
 its hunk headers are relative to that state. Fixing a patch early in the
 series therefore moves every patch after it — `validate-subpage-bounds` is
 10th of 24 here and 9th of 20 in the 1.0 series, so one fix left 25 patches
-applying at an offset.
+applying at an offset. An upstream version bump moves all of them, which
+means running the tool from the first patch; see "Renumbering for a version
+bump" above for what that turned up.
 
 `misc/renumber-patches.py <patch-name>` does that bookkeeping: it replays
 each engine's series a patch at a time and rewrites the `@@` headers of
@@ -259,6 +332,12 @@ cannot fix it. Repair that patch by hand, then re-run.
 That happened once here: `validate-md-pad` adds a clause to the very
 condition `validate-subpage-bounds` creates, so it had to be rewritten
 before the rest could be renumbered.
+
+Write new hunks with **three** lines of leading context, the way `diff -u`
+emits them. GNU patch 2.7.6 records the context width from the hunk it
+parses and reports `fuzz 1` on a hunk that carries four, even when all four
+lines match the file exactly — which then hides a real fuzz elsewhere in the
+same run.
 
 Confirm the result with a build and check the log for `offset` and `fuzz`;
 that, not the tool's own output, is what proves the series is consistent.

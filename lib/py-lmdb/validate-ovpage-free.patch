@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -5949,6 +5949,27 @@
+@@ -5952,6 +5952,27 @@
  	MDB_ID pn = pg << 1;
  	int rc;
  

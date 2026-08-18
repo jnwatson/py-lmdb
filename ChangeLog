@@ -5,12 +5,24 @@ Features
 --------
 
 - py-lmdb now bundles both LMDB release lines and links them into a single
-    extension module: LMDB 0.9.35 (data format v1) and LMDB 1.0.1 (data
+    extension module: LMDB 0.9.36 (data format v1) and LMDB 1.0.1 (data
     format v3).  The two formats are mutually unreadable, so each
     ``Environment`` is bound to one engine at construction: an existing
     database is opened with whatever engine matches its on-disk format, and a
     new one uses LMDB 0.9 unless told otherwise.  Databases written by either
     version can therefore be opened without the caller doing anything.
+
+- Update the bundled LMDB 0.9 tree from 0.9.35 to 0.9.36 (2026-08-06).
+    It brings ITS#7772 (a sub-page is no longer grown when the data being
+    re-added already fits), ITS#9388 (``stat()`` reported wrong
+    ``branch_pages``/``leaf_pages`` for ``dupsort`` databases), ITS#8335
+    (input validation for ``MDB_MULTIPLE`` puts), ITS#10454 (metapage sync on
+    macOS), ITS#8590 (``SIGPIPE`` handling in the compacting copy on macOS)
+    and ITS#10522, which is a visible change of behaviour — see below.  It
+    also retires two of py-lmdb's own patches: ``fix-win-flush-large-write``
+    was contributed upstream and landed as ITS#10538, and ``fix-large-write``
+    is reduced to its compacting-copy hunk now that ITS#10054 has fixed
+    ``mdb_page_flush``.  The LMDB 1.0 tree is unchanged.
 
 - New ``lib_version=`` argument to ``lmdb.open()``/``Environment()`` selects
     the LMDB version for a *new* environment (``0`` for 0.9.x, ``1`` for
@@ -105,17 +117,27 @@ Bug fixes
     control, leave ``writemap`` at its default of ``False``.  Tracked in
     issue #484; the analysis is in ``lib1/py-lmdb/PATCH-STATUS.md``.
 
+Behaviour changes
+-----------------
+
+- Storing a **zero-length value** in a ``dupsort`` database now raises
+    ``BadValsizeError`` on the 0.9 engine, where LMDB 0.9.35 and earlier
+    accepted it.  This is upstream ITS#10522, and it removes a divergence
+    rather than creating one: LMDB 1.0 already rejected it, so both engines
+    now behave the same.  Zero-length values in non-``dupsort`` databases are
+    unaffected and remain valid.
+
 Notes
 -----
 
 - ``LMDB_FORCE_SYSTEM=1`` still builds a single engine against the system
     liblmdb; ``lib_version=`` then accepts only that version.
 
-- The py-lmdb hardening patch series has been ported to the 1.0 tree.  Four
-    patches are not carried there: two large-write fixes landed upstream
-    (ITS#10054, ITS#10538), LMDB 1.0's incremental file growth removes the
-    need for the Windows sparse-file patch, and the CVE-2019-16225 patch keys
-    on a page flag 1.0 no longer has.  See ``lib1/py-lmdb/PATCH-STATUS.md``.
+- The py-lmdb hardening patch series has been ported to the 1.0 tree.  Three
+    patches are not carried there: ``fix-large-write``'s remaining hunk landed
+    upstream as ITS#9223, LMDB 1.0's incremental file growth removes the need
+    for the Windows sparse-file patch, and the CVE-2019-16225 patch keys on a
+    page flag 1.0 no longer has.  See ``lib1/py-lmdb/PATCH-STATUS.md``.
 
 2026-07-12 2.3.0
 #################

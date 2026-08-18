@@ -2,6 +2,13 @@
 
 Fixed by `lib/py-lmdb/fix-large-write.patch`.
 
+**Status.** Both defects below are now fixed upstream, but not in the same
+release. LMDB 0.9.36 took the `mdb_page_flush` half as ITS#10054 (by capping
+each `pwrite` at `MAX_WRITE` rather than by retrying a short write), so the
+patch no longer carries it. The `mdb_env_copythr` half is ITS#9223, which is
+in LMDB 1.0.1 but not in 0.9.36, so the 0.9 series still carries it and the
+1.0 series does not.
+
 ## What
 
 A single LMDB value is stored in one contiguous overflow page spanning
@@ -24,9 +31,12 @@ per-call write limits:
 
 * `mdb_page_flush`: on a non-negative short write, advance past the bytes
   written (skip completed iovecs, adjust the first partial one) and loop via
-  `goto retry_write` until the whole page is written.
+  `goto retry_write` until the whole page is written. *Superseded by
+  ITS#10054 in 0.9.36, which caps the single-iovec `pwrite` at `MAX_WRITE`
+  instead; a short write below that cap still fails with `EIO`, as upstream
+  intends.*
 * `mdb_env_copythr`: cap each `DO_WRITE` at `MAX_WRITE` (1 GiB on 64-bit),
-  matching `mdb_env_copyfd1`.
+  matching `mdb_env_copyfd1`. *This is the only hunk the patch still carries.*
 
 ## Reproducing
 

@@ -6,9 +6,12 @@
 # call write limit (~2 GiB on Linux for one write()/pwrite(); the 32-bit DWORD
 # length of WriteFile on Windows) was written in one call.  On Linux the short
 # return count was misread as a fatal error, so mdb_txn_commit failed with
-# EIO; the compacting-copy writer had the analogous issue.  The fix loops over
-# the short count in mdb_page_flush and caps the per-call size in the
-# mdb_env_copythr writer (matching mdb_env_copyfd1).
+# EIO; the compacting-copy writer had the analogous issue.
+#
+# The mdb_page_flush half is now fixed upstream on both engines (ITS#10054),
+# which caps each pwrite at MAX_WRITE.  The mdb_env_copythr half is ITS#9223,
+# present in LMDB 1.0.1 but not 0.9.36, so on the 0.9 engine it still comes
+# from fix-large-write.patch.  Both paths are covered here either way.
 #
 # Opt-in: needs a >2 GiB value in RAM plus >2 GiB of disk for the env (and
 # again for the compacting copy), so it is skipped unless LMDB_TEST_LARGE is
