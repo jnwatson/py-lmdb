@@ -130,11 +130,14 @@ ENGINES = [
         tree='lib1',
         dest=os.path.join(HERE, 'build', 'lib10'),
         define='LMDB_ENGINE_V10',
-        # The 1.0 series omits four patches carried for 0.9: the two
-        # large-write fixes landed upstream (ITS#10054, ITS#10538),
+        # The 1.0 series omits three patches carried for 0.9: the two
+        # large-write fixes landed upstream (ITS#10054, ITS#10538), and
         # win32-sparse-file's defect was designed away by 1.0's incremental
-        # file growth, and cve-2019-16225 keys on the P_DIRTY page flag,
-        # which no longer exists.  See lib1/py-lmdb/PATCH-STATUS.md.
+        # file growth.  A fourth, cve-2019-16225, keys on the P_DIRTY page
+        # flag, which 1.0 removed; the protection is carried forward by
+        # cve-2019-16225-validate-mp-txnid below, written against the
+        # mp_txnid field that replaced it.
+        # See lib1/py-lmdb/PATCH-STATUS.md.
         patch_names=[
             'env-copy-txn',
             'cursor-next-prev-uninitialized',
@@ -158,6 +161,9 @@ ENGINES = [
             # Appended for the same reason as in the v09 series above.
             'validate-md-pad',
             'validate-ovpage-free',
+            # 1.0 only: 0.9 gets this protection from
+            # cve-2019-16225-reject-dirty-pages, which keys on P_DIRTY.
+            'cve-2019-16225-validate-mp-txnid',
         ],
     ),
 ]

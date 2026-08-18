@@ -50,6 +50,17 @@ Bug fixes
     data written by an unaffected build still read back correctly on an
     affected one — only the write path consulted the faulty check.
 
+- New ``cve-2019-16225-validate-mp-txnid`` hardening patch for the bundled
+    LMDB 1.0 engine, restoring a protection 0.9 has had since CVE-2019-16225.
+    0.9 rejects a mapped page claiming ``P_DIRTY``; 1.0 removed that flag and
+    derives dirtiness from a new ``mp_txnid`` page field, which no read path
+    validated.  ``mdb_page_touch()`` skips the copy-on-write for any page
+    whose ``mp_txnid`` is new enough, so a crafted value made it write to a
+    page it does not own: without ``MDB_WRITEMAP`` that is a write through a
+    read-only mapping (SIGSEGV), and with it the page is silently modified in
+    place.  The 0.9 engine was never affected.  As with the rest of the
+    series this matters only if you open a database file you do not trust.
+
 - New ``validate-ovpage-free`` hardening patch for both bundled engines.
     ``mdb_ovpage_free()`` took the overflow extent from the page header and
     used it as an allocation size, as the number of page numbers appended to

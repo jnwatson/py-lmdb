@@ -16,7 +16,7 @@ described under "Maintaining this series" below.
 | `fix-large-write` | Fixed upstream | ITS#10054 (`b0facd0`) caps every write at `MAX_WRITE` (1GiB) and chunks large overflow pages. The copy-path hunk landed as ITS#9223 (`e11d5a0`). |
 | `fix-win-flush-large-write` | Fixed upstream | ITS#10538 (`36e581a`) rewrote the Win32 `mdb_page_flush` to chunk writes. This was py-lmdb's fix, contributed upstream; it is also in the pending 0.9.36. |
 | `win32-sparse-file` | No longer applicable | 1.0 defaults to incremental file growth via `NtCreateSection(SEC_RESERVE)` with a NULL section size; full preallocation is now opt-in through `MDB_FIXEDSIZE`. |
-| `cve-2019-16225-reject-dirty-pages` | Not portable as written | The `P_DIRTY` page-header flag no longer exists; dirtiness is derived from `mp_txnid` (`IS_DIRTY_NW`/`IS_MUTABLE`/`IS_WRITABLE`). See "Open items" below. |
+| `cve-2019-16225-reject-dirty-pages` | Rewritten, not dropped | The `P_DIRTY` page-header flag no longer exists; dirtiness is derived from `mp_txnid` (`IS_DIRTY_NW`/`IS_MUTABLE`/`IS_WRITABLE`). Replaced by `cve-2019-16225-validate-mp-txnid`, which bounds that field instead — see "Verified" below. |
 
 ## Ported with hand-rewriting
 
@@ -63,6 +63,52 @@ release lines, at different sites:
 pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched
 1.0 tree returns `MDB_INVALID`. Worth reporting upstream — see
 `docs/upstream-psize-sigfpe.md`.
+
+### `cve-2019-16225-validate-mp-txnid` (1.0 only)
+
+The open item recorded here — that 1.0 lost CVE-2019-16225's protection when
+`P_DIRTY` was removed — was **code reading only**. It is now confirmed by
+reproducer, and the hypothesis was right.
+
+`mdb_page_touch()` opens with:
+
+```c
+if (IS_SUBP(mp) || IS_WRITABLE(txn, mp))
+        return MDB_SUCCESS;
+```
+
+`IS_WRITABLE(txn, p)` is `(p->mp_txnid >= txn->mt_workid)`, and nothing
+validated `mp_txnid` on a page read from the map. A crafted value therefore
+makes `mdb_page_touch()` report success without performing the
+copy-on-write, and the caller writes to a page it does not own.
+
+Forging that one `uint64` on every B-tree page, then rewriting the records:
+
+| Forged `mp_txnid` | Unpatched |
+| --- | --- |
+| `0xFFFFFFFFFFFFFFFF` | **SIGSEGV** — write through the `PROT_READ` map |
+| `1000000` | **SIGSEGV** |
+| `5` (> `mt_txnid`, small) | `MDB_PROBLEM` — reaches `mdb_page_unspill` on a page that was never spilled |
+| `0xFFFFFFFFFFFFFFFF`, `MDB_WRITEMAP` | **writes commit silently** — the map is writable, so instead of faulting the page is modified in place, skipping the free-list bookkeeping readers of the old snapshot depend on |
+
+The fix bounds the field where the 0.9 patch bounds `P_DIRTY` — in
+`mdb_page_get`, on the mapped-page path only. Placement matters twice over:
+
+- It must **not** go at the shared `done:` label. Dirty pages reach that
+  label too, and theirs legitimately carry `mp_txnid >= mt_workid > mt_txnid`
+  for non-`MDB_WRITEMAP`; checking there rejects every write.
+- The bound is `mp_txnid > mt_txnid`, not `>=`. Equality is legitimate: a
+  page this txn spilled was flushed with `mp_txnid = mt_txnid`, and a read
+  txn sees pages written by the txn that created its snapshot.
+
+Meta pages are unaffected — they leave `mp_txnid` at zero, so they pass.
+
+One residual, and it is the same one 0.9 has: under `MDB_WRITEMAP` a page
+claiming exactly `mt_txnid` is indistinguishable from a genuinely dirty one,
+since `mt_workid == mt_txnid` there and `mdb_page_get` skips the dirty-list
+search entirely. 0.9's patch sidesteps this by excluding `MDB_WRITEMAP`
+outright; this one at least rejects everything above `mt_txnid`, so it covers
+strictly more than 0.9 does.
 
 ### `validate-md-pad` (new; also added to the 0.9 series)
 
@@ -111,14 +157,9 @@ aliases `mm_psize` and legitimately equals the full page size.
   backup API** and needs a patch first. The rest are deferred, not
   dismissed: they become reachable if `MDB_REMAP_CHUNKS` is ever exposed.
 
-- **`cve-2019-16225`'s protection is not carried forward.** The patch rejected
-  a mapped page claiming `P_DIRTY`, which would otherwise let
-  `mdb_page_touch` skip copy-on-write and then write through a `PROT_READ`
-  mapping. That flag is gone, but the same shape appears reachable via
-  `mp_txnid`: no read path validates it, and a large value satisfies
-  `IS_WRITABLE`, which makes `mdb_page_touch` return `MDB_SUCCESS` without
-  copying. Retaining this protection needs a new patch written against
-  `mp_txnid`. **Unverified by reproducer** — this is code reading only.
+- ~~**`cve-2019-16225`'s protection is not carried forward**~~ — carried
+  forward by `cve-2019-16225-validate-mp-txnid`; see "Verified" below. The
+  code-reading hypothesis recorded here was confirmed by reproducer.
 - ~~**`mdb_ovpage_free` remains unchecked**~~ — fixed by
   `validate-ovpage-free`, added to both series. See the 0.9 file for the
   analysis; the patch is identical on both trees, since both take `ovpages`
@@ -132,9 +173,14 @@ aliases `mm_psize` and legitimately equals the full page size.
   Eight cases remain marked `only_v09` (see the decorator's docstring for
   the per-test reasons). None of them crash on 1.0 — the corruption simply
   does not reach the same code path — but the hardening they exercise is
-  verified only on 0.9 until each recipe is re-derived. The `P_DIRTY` one
-  cannot be ported at all; it is the same gap as the `cve-2019-16225` item
-  above.
+  verified only on 0.9 until each recipe is re-derived.
+
+  The `P_DIRTY` one still cannot be ported, because the flag is gone. It is
+  no longer a coverage gap, though: the protection it tests is carried by
+  `cve-2019-16225-validate-mp-txnid`, and three `only_v10` cases in the same
+  test class exercise it against `mp_txnid` instead. That pair is the model
+  for the rest — where 1.0 renamed the mechanism rather than removing it, the
+  recipe needs rewriting, not skipping.
 
   Note when re-deriving them: **1.0 sets `PAGEBASE = PAGEHDRSZ`**, where 0.9
   has `PAGEBASE = 0` (ITS#7713 graduated out of `MDB_DEVEL`). That shifts the

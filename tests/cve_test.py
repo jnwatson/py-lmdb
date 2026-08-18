@@ -119,6 +119,12 @@ MP_LOWER_OFFSET = PAGEHDRSZ - 4         # uint16: mp_lower
 MP_UPPER_OFFSET = PAGEHDRSZ - 2         # uint16: mp_upper
 MP_PTRS_OFFSET = PAGEHDRSZ              # first mp_ptrs entry
 
+# uint64: mp_txnid, the second field of the 1.0 page header (pgno, txnid).
+# 1.0 only -- 0.9's header has no such field, and its 8 bytes there are
+# mp_pad/mp_flags/mp_lower/mp_upper.  Guard uses with only_v10.
+MP_TXNID_OFFSET = 8
+
+P_BRANCH = 0x01
 P_LEAF = 0x02
 # 0.9 only; 1.0 derives dirtiness from mp_txnid and reuses 0x10.
 P_DIRTY = 0x10
@@ -140,6 +146,15 @@ def only_v09(reason):
     lib1/py-lmdb/PATCH-STATUS.md.
     """
     return unittest.skipIf(ENGINE_MAJOR >= 1, '0.9 engine only: ' + reason)
+
+
+def only_v10(reason):
+    """Mark a corruption test that applies only to the 1.0 engine.
+
+    The counterpart to only_v09: a few of the fields 1.0 introduced have no
+    0.9 equivalent, so there is nothing for the recipe to corrupt there.
+    """
+    return unittest.skipIf(ENGINE_MAJOR < 1, '1.0 engine only: ' + reason)
 
 
 def _read_page_size(db_path):
@@ -261,6 +276,80 @@ class CVE_2019_16225_Test(unittest.TestCase):
             with env.begin(write=True) as txn:
                 txn.delete(b'1')
                 txn.put(b'3', b'ddd')
+
+    def _forge_txnid(self, new_txnid, writemap):
+        """Rewrite mp_txnid on every mapped B-tree page.  Returns the
+        reopened env."""
+        path, env = testlib.temp_env(map_size=10*1024*1024,
+                                     writemap=writemap)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.put(b'k%04d' % i, b'v' * 100)
+        env.close()
+
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        patched = 0
+        for off in range(psize * 2, len(raw), psize):
+            flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
+            if flags & (P_LEAF | P_BRANCH):
+                struct.pack_into('<Q', raw, off + MP_TXNID_OFFSET, new_txnid)
+                patched += 1
+        self.assertGreater(patched, 0, 'no B-tree pages found to corrupt')
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, map_size=10*1024*1024, writemap=writemap)
+        testlib._cleanups.append(env.close)
+        return env
+
+    @only_v10('0.9 has no mp_txnid; there it is the P_DIRTY flag above '
+              'that carries this protection')
+    def test_corrupt_leaf_page_mp_txnid(self):
+        """1.0 removed P_DIRTY and derives dirtiness from mp_txnid, so a
+        mapped page claiming a txnid newer than the reader's satisfies
+        IS_WRITABLE() and makes mdb_page_touch() return success without
+        copying.  The caller then writes through the read-only map."""
+        env = self._forge_txnid(0xFFFFFFFFFFFFFFFF, writemap=False)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True) as txn:
+                for i in range(400):
+                    txn.put(b'k%04d' % i, b'W' * 100)
+
+    @only_v10('0.9 has no mp_txnid')
+    def test_corrupt_leaf_page_mp_txnid_writemap(self):
+        """Under MDB_WRITEMAP the map is writable, so the same forgery
+        does not fault -- it silently modifies the page in place, skipping
+        the bookkeeping readers on the old snapshot depend on.  0.9's
+        P_DIRTY check excludes MDB_WRITEMAP entirely; bounding mp_txnid
+        covers it."""
+        env = self._forge_txnid(0xFFFFFFFFFFFFFFFF, writemap=True)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(write=True) as txn:
+                for i in range(400):
+                    txn.put(b'k%04d' % i, b'W' * 100)
+
+    @only_v10('0.9 has no mp_txnid')
+    def test_normal_mp_txnid_still_works(self):
+        """The bound must not reject legitimate pages.  Equality is normal:
+        a page this txn spilled was flushed with mp_txnid = mt_txnid, and a
+        read txn sees pages written by the txn that created its snapshot."""
+        path, env = testlib.temp_env(map_size=64*1024*1024)
+        for round_ in range(4):
+            with env.begin(write=True) as txn:
+                for i in range(500):
+                    txn.put(b'k%04d' % i, bytes([65 + round_]) * 200)
+            with env.begin() as txn:
+                assert sum(1 for _ in txn.cursor()) == 500
+        env.close()
+        env = lmdb.open(path, map_size=64*1024*1024)
+        testlib._cleanups.append(env.close)
+        with env.begin() as txn:
+            assert sum(1 for _ in txn.cursor()) == 500
 
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
