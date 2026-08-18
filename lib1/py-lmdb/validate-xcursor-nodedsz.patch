@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9687,6 +9687,13 @@
+@@ -9702,6 +9702,13 @@
  	 * database, where mc_xcursor is NULL.  Callers must check for
  	 * mc_xcursor==NULL before calling this function.  CVE-2019-16227. */
  	if (node->mn_flags & F_SUBDATA) {

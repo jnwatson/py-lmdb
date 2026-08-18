@@ -17,6 +17,57 @@ found during the 1.0 port.
 
 ## Resolved
 
+### `validate-subpage-bounds` — rejected 1-byte `MDB_DUPFIXED` values
+
+Reported as issue #481: an `MDB_DUPFIXED` database with **1-byte values**
+failed with `MDB_CORRUPTED` from the fifth duplicate on, on a file py-lmdb
+had just created. Released in 2.3.0; both engines were affected, and
+`LMDB_PURE=1` and pristine upstream were not.
+
+The patch bounded a sub-page's `mp_upper` by the sub-page's own size:
+
+```c
+MP_UPPER(fp) + PAGEBASE > olddata.mv_size
+```
+
+That holds for a page whose nodes vary in size, but not for LEAF2.
+`mdb_node_add` adjusts `mp_upper` by `ksize - sizeof(indx_t)`, which is a
+**negative** delta once the fixed key size drops below `sizeof(indx_t)`, so
+for a 1-byte value size `mp_upper` grows by one per insert and legitimately
+overruns the sub-page. At the failing call: `numkeys=4 mp_pad=1
+lower=24 upper=24` against a 20-byte sub-page.
+
+The confusion is that `mp_upper` is only a data boundary where nodes vary in
+size — which is exactly the branch whose `memcpy` length the check was
+protecting (`olddata.mv_size - MP_UPPER(fp) - PAGEBASE`, an unsigned
+underflow if `mp_upper` is too large). LEAF2 data is addressed by
+`LEAF2KEY()` instead, and its copy length is `NUMKEYS(fp) * mp_pad`, which
+`validate-md-pad` bounds. So the fix keeps the bound for variable-size
+sub-pages and, for LEAF2, applies the bound that actually holds:
+
+```c
+MP_UPPER(fp) + PAGEBASE > olddata.mv_size + 2 * NUMKEYS(fp)
+```
+
+which follows from the same adjustment (`mp_upper` can exceed the sub-page
+by at most 2 per key). Keeping *a* bound matters: `MP_UPPER(mp) =
+MP_UPPER(fp) + offset` propagates the value into the destination page, and
+for a sub-DB root reached through `sub_root` that page is never re-fetched
+through `mdb_page_get`, so nothing downstream would re-check it.
+
+`validate-md-pad`'s clause at the same site also had to change: it took
+`olddata.mv_size >= PAGEHDRSZ` for granted, which it used to inherit from
+the old `mp_upper` bound, and now establishes itself.
+
+Two things worth remembering:
+
+- **The existing `test_dupfixed` stored only two 1-byte values**, which fit
+  the sub-page LMDB allocates up front, so it never reached the check. The
+  regression tests in `tests/txn_test.py` push past that boundary and sweep
+  the value sizes either side of `sizeof(indx_t)`.
+- Fixing a patch this early in the series moves every later patch. See
+  "Renumbering the series after an early fix" below.
+
 ### `validate-md-pad` — unvalidated LEAF2 key size
 
 `md_pad` is the fixed key size of an `MDB_DUPFIXED` (LEAF2) database.
@@ -106,6 +157,28 @@ unchanged: **1.0 aligns node data to an even offset** (`NODEDATA` uses
 `EVEN(mn_ksize)`), so walking to an `F_SUBDATA` record with 0.9's
 `mn_data + mn_ksize` lands one byte off for odd-length keys and silently
 reads the wrong field.
+
+## Renumbering the series after an early fix
+
+Every patch is a diff against the tree state after all preceding ones, so
+its hunk headers are relative to that state. Fixing a patch early in the
+series therefore moves every patch after it — `validate-subpage-bounds` is
+10th of 24 here and 9th of 20 in the 1.0 series, so one fix left 25 patches
+applying at an offset.
+
+`misc/renumber-patches.py <patch-name>` does that bookkeeping: it replays
+each engine's series a patch at a time and rewrites the `@@` headers of
+everything from `<patch-name>` onward. It changes headers only, and stops
+with an error if a patch's body no longer matches what the replay produces —
+which means the edit changed text that patch anchors on, and renumbering
+cannot fix it. Repair that patch by hand, then re-run.
+
+That happened once here: `validate-md-pad` adds a clause to the very
+condition `validate-subpage-bounds` creates, so it had to be rewritten
+before the rest could be renumbered.
+
+Confirm the result with a build and check the log for `offset` and `fuzz`;
+that, not the tool's own output, is what proves the series is consistent.
 
 ## Validating against upstream's own tests
 

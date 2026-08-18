@@ -1,17 +1,32 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -8930,6 +8930,16 @@
+@@ -8930,6 +8930,31 @@
  					mc->mc_db->md_leaf_pages++;
  			}
  			if (mp != fp) {
 +				/* Validate sub-page bounds before copying.
 +				 * fp is an on-disk sub-page whose mp_lower/mp_upper
 +				 * may be corrupt.  A bad MP_UPPER(fp) causes the
-+				 * memcpy size to underflow (unsigned wrap -> huge). */
++				 * memcpy size to underflow (unsigned wrap -> huge).
++				 *
++				 * mp_upper bounds the data only on a page whose nodes vary
++				 * in size, which is the case that memcpy() covers.  On a
++				 * LEAF2 sub-page it is free-space accounting and nothing
++				 * more: mdb_node_add() adjusts it by (ksize - sizeof(indx_t)),
++				 * a *negative* delta once the fixed key size drops below
++				 * sizeof(indx_t), so mp_upper legitimately grows past the
++				 * sub-page.  Bounding it by the sub-page there rejected every
++				 * 1-byte MDB_DUPFIXED database.  The bound that does hold
++				 * comes from the same adjustment: mp_upper can exceed the
++				 * sub-page by at most 2 per key.  What the LEAF2 copy really
++				 * needs bounded is NUMKEYS()*mp_pad, which validate-md-pad
++				 * adds here. */
 +				if (MP_LOWER(fp) < PAGEHDRSZ-PAGEBASE ||
-+					MP_UPPER(fp) + PAGEBASE > olddata.mv_size ||
-+					MP_LOWER(fp) > MP_UPPER(fp)) {
++					MP_LOWER(fp) > MP_UPPER(fp) ||
++					MP_UPPER(fp) + PAGEBASE > ((fp_flags & P_LEAF2) ?
++						olddata.mv_size + 2 * (unsigned)NUMKEYS(fp) :
++						olddata.mv_size)) {
 +					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 +					return MDB_CORRUPTED;
 +				}

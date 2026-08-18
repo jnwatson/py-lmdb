@@ -38,7 +38,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  				}
  				n = 0;
  			}
-@@ -9400,7 +9416,8 @@
+@@ -9415,7 +9431,8 @@
  again:
  		rc = MDB_SUCCESS;
  		while (wsize > 0 && !my->mc_error) {

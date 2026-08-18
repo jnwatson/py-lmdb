@@ -10,7 +10,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  				}
  				*mc->mc_dbflag &= ~DB_STALE;
  		}
-@@ -12540,6 +12542,12 @@
+@@ -12555,6 +12557,12 @@
  			txn->mt_dbxs[slot].md_name.mv_size = 0;
  			return MDB_INVALID;
  		}

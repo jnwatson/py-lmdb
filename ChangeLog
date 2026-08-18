@@ -32,6 +32,16 @@ Bug fixes
 - ``Environment.dbs()`` strips the trailing NUL that LMDB 1.0 stores with
     sub-database names, so it returns the same list on either engine.
 
+- An ``MDB_DUPFIXED`` database with 1-byte values no longer fails with
+    ``MDB_CORRUPTED`` from the fifth duplicate onwards (issue #481,
+    a regression in 2.3.0 affecting both engines).  py-lmdb's
+    ``validate-subpage-bounds`` hardening patch bounded a sub-page's
+    ``mp_upper`` by the sub-page size, which does not hold for a LEAF2
+    page: ``mdb_node_add`` adjusts ``mp_upper`` by
+    ``ksize - sizeof(indx_t)``, a negative delta once the fixed key size
+    is below ``sizeof(indx_t)``, so it legitimately grows past the
+    sub-page.  Unpatched LMDB was never affected.
+
 - New ``validate-md-pad`` hardening patch for both bundled engines: the
     LEAF2 fixed key size was bounded only on the page (``mp_pad``), never on
     the database record (``md_pad``) that every LEAF2 computation actually

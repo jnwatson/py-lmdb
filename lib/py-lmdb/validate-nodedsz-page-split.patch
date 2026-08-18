@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -9132,6 +9132,15 @@
+@@ -9147,6 +9147,15 @@
  				if (IS_LEAF(mp)) {
  					xdata.mv_data = NODEDATA(node);
  					xdata.mv_size = NODEDSZ(node);
