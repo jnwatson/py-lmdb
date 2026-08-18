@@ -9,11 +9,52 @@ For the 1.0 tree, see `lib1/py-lmdb/PATCH-STATUS.md`, which additionally
 documents which of these patches were dropped, ported mechanically, or
 hand-rewritten for 1.0.
 
+## Scope: this series does not cover `MDB_WRITEMAP`
+
+Worth stating up front, because every entry below is written as though the
+hardening applies whenever a file is untrusted, and under `MDB_WRITEMAP` it
+does not.
+
+`cve-2019-16225-reject-dirty-pages` rejects a mapped page claiming `P_DIRTY`,
+which would otherwise let `mdb_page_touch()` skip the copy-on-write. That
+check is gated on `!(env->me_flags & MDB_WRITEMAP)`, and it has to be:
+`mdb_page_get()` opens with
+
+```c
+if (! (txn->mt_flags & (MDB_TXN_RDONLY|MDB_TXN_WRITEMAP))) {
+```
+
+so under `MDB_WRITEMAP` the dirty-list search is skipped and *every* page —
+including ones this txn legitimately dirtied in place, which do carry
+`P_DIRTY` — arrives by way of the map. Nothing in the read path can tell a
+forged flag from a genuine one there.
+
+Measured, patched, `writemap=True`, forging `P_DIRTY` on every B-tree page
+and then writing 200 records and calling **abort**:
+
+| | write | on disk after abort |
+| --- | --- | --- |
+| `writemap=False` | refused (`MDB_CORRUPTED`) | 201 `ORIGINAL`, 0 `MODIFIED` |
+| `writemap=True` | allowed | 1 `ORIGINAL`, **200 `MODIFIED`** |
+
+So the copy-on-write is skipped, the previous snapshot's pages are
+overwritten in place, and `abort()` does not roll back.
+
+0.9 keeps a per-page dirty list even under `MDB_WRITEMAP` — unlike 1.0,
+whose `mdb_page_dirty()` sets a flag and returns — so the raw material for a
+fix does exist here. But it is appended unsorted under `MDB_WRITEMAP`, which
+is presumably why the search is skipped in the first place, so consulting it
+means making it searchable rather than just adding a lookup.
+
+The same gap exists on 1.0, narrowed there to a single value; see
+`cve-2019-16225-validate-mp-txnid` in `lib1/py-lmdb/PATCH-STATUS.md`.
+Tracked in issue #484.
+
 ## Open items
 
-None currently recorded against this tree. See
-`lib1/py-lmdb/PATCH-STATUS.md` for items that affect both engines but were
-found during the 1.0 port.
+None currently recorded against this tree beyond the `MDB_WRITEMAP` scope
+limit above. See `lib1/py-lmdb/PATCH-STATUS.md` for items that affect both
+engines but were found during the 1.0 port.
 
 ## Resolved
 

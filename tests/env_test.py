@@ -265,6 +265,33 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(writemap=flag)
             assert env.flags()['writemap'] == flag
 
+    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1,
+                     'writemap + sync=True cannot commit on Windows with '
+                     'LMDB 1.0; upstream defect, reproduces under '
+                     'LMDB_PURE (issue #486)')
+    def test_writemap_commit(self):
+        """Write and commit under writemap, at both sync settings.
+
+        test_writemap above only checks the flag round-trips; nothing
+        exercised a commit.  The default sync=True path in particular went
+        untested, since the writemap tests elsewhere either pass sync=False
+        (crash_test) or only write on Linux (cursor_test).
+
+        The skip is narrow on purpose: this passes on Windows with the 0.9
+        engine and on Linux/macOS with both, so it still guards those, and
+        dropping the skip is how a fix for #486 gets checked.  That defect
+        is upstream's -- it reproduces with LMDB_PURE, which is what the
+        windows-latest pure job in CI exists to establish.
+        """
+        for sync in True, False:
+            path, env = testlib.temp_env(writemap=True, sync=sync)
+            with env.begin(write=True) as txn:
+                for i in range(100):
+                    txn.put(b'k%04d' % i, b'v' * 100)
+            with env.begin() as txn:
+                assert sum(1 for _ in txn.cursor()) == 100, sync
+            env.close()
+
     def test_meminit(self):
         for flag in True, False:
             path, env = testlib.temp_env(meminit=flag)

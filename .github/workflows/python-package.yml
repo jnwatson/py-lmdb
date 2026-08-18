@@ -39,6 +39,10 @@ jobs:
           - {os: windows-latest, python-version: '3.11', impl: cpython, purity: patched}
           - {os: windows-latest, python-version: '3.14', impl: cpython, purity: patched}
           - {os: windows-latest, python-version: '3.14', impl: cffi, purity: patched}
+          # Windows - pure variant.  The pure jobs were Linux-only, so a
+          # Windows-specific failure could not be attributed to the patch
+          # series or to upstream without one; see issue #486.
+          - {os: windows-latest, python-version: '3.14', impl: cpython, purity: pure}
           # macOS - newest + one older, both impls
           - {os: macos-latest, python-version: '3.11', impl: cpython, purity: patched}
           - {os: macos-latest, python-version: '3.14', impl: cpython, purity: patched}
