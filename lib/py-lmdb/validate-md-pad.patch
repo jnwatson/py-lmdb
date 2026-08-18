@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -1076,6 +1076,28 @@
+@@ -1076,6 +1076,58 @@
  #define BAD_DB_FLAGS(f) \
  	(((f) & DUPSORT_ONLY_FLAGS) && !((f) & MDB_DUPSORT))
  
@@ -27,10 +27,40 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 +	 */
 +#define BAD_MD_PAD(pad, psize)	((pad) > (psize) - PAGEHDRSZ)
 +
++	/** Bound the keys a LEAF2 page claims to hold.
++	 *	Returns 0 if valid, non-zero if corrupt.  `space' is the usable
++	 *	bytes after the page header.
++	 *
++	 *	#mdb_node_add() keeps mp_upper - mp_lower equal to
++	 *	space - #NUMKEYS()*ksize on a LEAF2 page, so NUMKEYS()*ksize
++	 *	never exceeds space on a page LMDB built.  Bounding the key size
++	 *	alone does not imply that, because the two halves are read from
++	 *	different places: the size from an #MDB_db record or a sub-page
++	 *	header, the count from the page.  Forging one and not the other
++	 *	leaves both individually in range while #LEAF2KEY() still
++	 *	addresses far outside the page -- on a 16KB page a key size of
++	 *	4096 is a legal value that still walks megabytes past the end.
++	 *
++	 *	ksize must already be bounded by space, or the product can
++	 *	overflow; #BAD_LEAF2_PAD() does both in the right order.
++	 */
++#define BAD_LEAF2_KEYS(p, ksize, space) \
++	((unsigned)NUMKEYS(p) * (unsigned)(ksize) > (unsigned)(space))
++
++	/** Bound a LEAF2 fixed key size and the keys it describes.
++	 *	Returns 0 if valid, non-zero if corrupt.  Zero is rejected: it
++	 *	makes #LEAF2KEY() return the same pointer for every index, and
++	 *	divisions by it appear in the split path.  Unlike #BAD_MD_PAD()
++	 *	this needs the page, so it is only usable once one is in hand.
++	 */
++#define BAD_LEAF2_PAD(p, ksize, space) \
++	((ksize) == 0 || (unsigned)(ksize) > (unsigned)(space) || \
++	 BAD_LEAF2_KEYS(p, ksize, space))
++
  	/** Handle for the DB used to track free pages. */
  #define	FREE_DBI	0
  	/** Handle for the default DB. */
-@@ -2887,6 +2909,9 @@
+@@ -2887,6 +2939,9 @@
  		 * P_LEAF2 pages that lead to use of uninitialized pointers.
  		 */
  		rc = MDB_INVALID;
@@ -40,7 +70,28 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  	} else {
  		return MDB_SUCCESS;
  	}
-@@ -5834,6 +5859,9 @@
+@@ -5657,11 +5712,16 @@
+ 			txn->mt_flags |= MDB_TXN_ERROR;
+ 			return MDB_CORRUPTED;
+ 		}
+-		/* Validate mp_pad (LEAF2 key size).  Zero causes division by
+-		 * zero or infinite loops, and too-large values produce OOB
+-		 * pointers via LEAF2KEY(). */
++		/* Validate the LEAF2 key size.  Zero causes division by zero or
++		 * infinite loops, and too-large values produce OOB pointers via
++		 * LEAF2KEY().  Check the page's own mp_pad and the DB record's
++		 * md_pad separately: md_pad is the size every LEAF2 access
++		 * through this cursor actually uses, and a crafted file can
++		 * leave the two disagreeing with each other and with the key
++		 * count the page header implies. */
+ 		if (IS_LEAF2(p) &&
+-			(MP_PAD(p) == 0 || MP_PAD(p) > psize - PAGEHDRSZ)) {
++			(BAD_LEAF2_PAD(p, MP_PAD(p), psize - PAGEHDRSZ) ||
++			 BAD_LEAF2_PAD(p, mc->mc_db->md_pad, psize - PAGEHDRSZ))) {
+ 			txn->mt_flags |= MDB_TXN_ERROR;
+ 			return MDB_CORRUPTED;
+ 		}
+@@ -5834,6 +5894,9 @@
  					if (BAD_DB_FLAGS(flags))
  						return MDB_INVALID;
  					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
@@ -50,7 +101,27 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					if (mc->mc_db->md_depth > CURSOR_STACK)
  						return MDB_CORRUPTED;
  				}
-@@ -7845,12 +7873,37 @@
+@@ -7073,7 +7136,18 @@
+ 				 * memcpy size to underflow (unsigned wrap -> huge). */
+ 				if (MP_LOWER(fp) < PAGEHDRSZ-PAGEBASE ||
+ 					MP_UPPER(fp) + PAGEBASE > olddata.mv_size ||
+-					MP_LOWER(fp) > MP_UPPER(fp)) {
++					MP_LOWER(fp) > MP_UPPER(fp) ||
++					/* The LEAF2 branch below copies NUMKEYS(fp)*mp_pad
++					 * bytes out of fp.  fp_flags comes from the on-disk
++					 * sub-page, so P_LEAF2 can be set here even when
++					 * mdb_xcursor_init1() did not check mp_pad -- that
++					 * test is gated on the DB's own MDB_DUPFIXED flag.
++					 * Only the count is bounded: an about-to-be-filled
++					 * sub-page legitimately has a key size larger than
++					 * its current (empty) body. */
++					((fp_flags & P_LEAF2) &&
++					 BAD_LEAF2_KEYS(fp, MP_PAD(fp),
++						olddata.mv_size - PAGEHDRSZ))) {
+ 					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
+ 					return MDB_CORRUPTED;
+ 				}
+@@ -7845,12 +7919,37 @@
  			return;
  		}
  		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
@@ -80,15 +151,15 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 +		 * caller's page search reports the blocked txn rather than
 +		 * quietly operating on a half-built cursor. */
 +		if ((mc->mc_db->md_flags & MDB_DUPFIXED) &&
-+			(NODEDSZ(node) < PAGEHDRSZ || fp->mp_pad == 0 ||
-+			 fp->mp_pad > NODEDSZ(node) - PAGEHDRSZ)) {
++			(NODEDSZ(node) < PAGEHDRSZ ||
++			 BAD_LEAF2_PAD(fp, fp->mp_pad, NODEDSZ(node) - PAGEHDRSZ))) {
 +			mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 +			return;
 +		}
  		mx->mx_db.md_pad = 0;
  		mx->mx_db.md_flags = 0;
  		mx->mx_db.md_depth = 1;
-@@ -10201,6 +10254,12 @@
+@@ -10201,6 +10300,12 @@
  		txn->mt_dbiseqs[slot] = seq;
  
  		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));

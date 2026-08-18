@@ -38,9 +38,12 @@ Bug fixes
     uses.  A crafted ``data.mdb`` could set it arbitrarily while leaving
     every page internally consistent, turning it into an out-of-bounds read
     that silently returned adjacent mapping contents to the caller, and — via
-    ``mdb_node_add`` — an out-of-bounds write.  As with the rest of the
-    series this matters only if you open a database file you do not trust.
-    Reproducer in ``misc/md_pad_repro.py``.
+    ``mdb_node_add`` — an out-of-bounds write.  The key size is now bounded
+    both on its own and against the number of keys the page says it holds,
+    since ``LEAF2KEY()`` multiplies the two: a size that fits the page still
+    addresses far outside it partway through a full page.  As with the rest
+    of the series this matters only if you open a database file you do not
+    trust.  Reproducer in ``misc/md_pad_repro.py``.
 
 Notes
 -----

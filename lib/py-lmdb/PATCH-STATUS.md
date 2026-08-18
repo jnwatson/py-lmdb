@@ -32,23 +32,49 @@ sizeof(MDB_db))` for an `F_SUBDATA` node, was unchecked entirely. Forging
 `validate-page-bounds` and `validate-leaf2-keysize` both still pass.
 
 Reproduced on 0.9.35 and 1.0.1 alike (`misc/md_pad_repro.py`), forging only
-that one field:
+that one field, on 4 KB pages:
 
 | Case | Unpatched behaviour |
 | --- | --- |
-| `md_pad = 0x8000`, read | `cursor.value()` returns 32768 bytes for a 7-byte record, ~28.7 KB of it adjacent mapping contents — silently, no error raised |
+| `md_pad = 8 * psize`, read | `cursor.value()` returns 32768 bytes for a 7-byte record, ~28.7 KB of it adjacent mapping contents — silently, no error raised |
 | `md_pad = 0xFFFFFFFF`, read | SIGBUS |
 | `md_pad = 0xFFFFFFFF`, `getmulti` | SIGBUS (`mv_size = NUMKEYS(page) * md_pad`, in 32-bit arithmetic) |
-| `md_pad = 0x1000`, write | SIGBUS; smaller values write past the key slot and **commit silently**, corrupting the file |
+| `md_pad = psize`, write | SIGBUS; smaller values write past the key slot and **commit silently**, corrupting the file |
 | sub-page `mp_pad = 0x4000`, read | SIGBUS |
+| `md_pad = psize / 8`, read | 512 bytes returned for a 7-byte record; SIGBUS on the write path |
+| sub-page `mp_pad = 14`, read | 14 bytes returned for a 7-byte record |
 
 The write case is the most severe: the LEAF2 branch of `mdb_node_add` uses
 `md_pad` as a `memmove()`/`memcpy()` length, which is an out-of-bounds write
 inside the writable mapping. Regression tests are in `tests/cve_test.py`
-(`MdPadTest`); patched, all five cases are refused with `MDB_BAD_TXN` on
-both engines.
+(`MdPadTest`); patched, all seven cases are refused on both engines.
 
-Two details worth remembering, both of which cost a wrong first attempt:
+The last two rows are the ones a per-key bound does not stop, and they cost
+a second round after CI caught them. **Bounding the key size is not enough:
+`LEAF2KEY()` multiplies it by the key index**, so a size that comfortably
+fits the page still addresses far outside it once a search reaches the
+middle of a full page — a 512-byte key size on a 4 KB page reads 140 KB
+past the page it names. The invariant to enforce is the one `mdb_node_add`
+maintains, `NUMKEYS(page) * key_size <= usable space`, which the patch adds
+as `BAD_LEAF2_KEYS()` and applies in `mdb_page_get` (to both `mp_pad` and
+`md_pad`), in `mdb_xcursor_init1`'s sub-page branch, and at the
+`NUMKEYS(fp) * fp->mp_pad` `memcpy` in `mdb_cursor_put`.
+
+That last site needs the count check *without* the size check: on the
+`prep_subDB` path a sub-page is legitimately still empty (`olddata.mv_size
+== PAGEHDRSZ`) while already carrying the key size it is about to be filled
+with, so testing `ksize > space` there rejects ordinary DUPFIXED inserts.
+`BAD_LEAF2_KEYS()` and `BAD_LEAF2_PAD()` are split for exactly this reason.
+
+How CI found it is worth recording: **the bug was invisible on 4 KB pages
+with the values the tests used.** macOS on arm64 has 16 KB pages, which put
+the 0x1000 the write test had hard-coded inside the per-key bound, so the
+patched build accepted it and bus-errored in `mdb_node_search`. Corruption
+recipes that hard-code sizes silently test something different on a
+different page size; `MdPadTest` now derives every forged value from the
+page size in the file.
+
+Two further details, both of which cost a wrong first attempt:
 
 - **The bound must accept zero.** `mdb_dbi_open` zeroes the whole record
   when creating a DB, so a perfectly normal `MDB_DUPFIXED` database has
@@ -71,7 +97,9 @@ Note the CodeQL alert that prompted this (`NUMKEYS * md_pad` can overflow)
 described the least important part. `NUMKEYS` is already bounded to
 `psize/2` by `validate-page-bounds`, and wrapping only makes the result
 *smaller*. The defect was that `md_pad` was unbounded as a length at all —
-the silent 32 KB disclosure needs no multiplication.
+the silent 32 KB disclosure needs no multiplication. The alert did point at
+the right *expression*, though: `NUMKEYS * md_pad` is the quantity that has
+to be bounded, just for fit rather than for overflow.
 
 Also note that a reproducer written against 0.9 does not transfer to 1.0
 unchanged: **1.0 aligns node data to an even offset** (`NODEDATA` uses

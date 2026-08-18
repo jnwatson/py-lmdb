@@ -1298,7 +1298,8 @@ def _find_dup_node(raw, psize, want_subdata):
 
     Returns (node_off, data_off) for the first F_DUPDATA node whose
     F_SUBDATA state matches want_subdata: a real sub-DB (an MDB_db record)
-    or an embedded sub-page.
+    or an embedded sub-page.  Raises if there is none, so that callers get
+    a non-optional pair.
     """
     for off in range(psize * 2, len(raw), psize):
         flags = struct.unpack_from('<H', raw, off + MP_FLAGS_OFFSET)[0]
@@ -1319,7 +1320,8 @@ def _find_dup_node(raw, psize, want_subdata):
                 continue
             ksize = struct.unpack_from('<H', raw, node_off + 6)[0]
             return node_off, _nodedata_off(node_off, ksize)
-    return None, None
+    raise AssertionError('no %s node found'
+                         % ('sub-DB' if want_subdata else 'sub-page'))
 
 
 @unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
@@ -1340,7 +1342,14 @@ class MdPadTest(unittest.TestCase):
 
     def _forge(self, want_subdata, ndups, new_pad):
         """Build a DUPFIXED database, then rewrite only its LEAF2 key
-        size.  Returns the reopened env and db handle."""
+        size.  Returns the reopened env and db handle.
+
+        new_pad may be a callable taking the file's page size.  Several of
+        these values only mean what the test intends relative to it: LMDB
+        takes its page size from the OS, and macOS on arm64 uses 16 KB
+        pages, where a hard-coded 0x1000 is a legitimate key size rather
+        than an oversized one.
+        """
         path, env = testlib.temp_env()
         db = env.open_db(b'dfdb', dupsort=True, dupfixed=True)
         with env.begin(write=True, db=db) as txn:
@@ -1353,10 +1362,9 @@ class MdPadTest(unittest.TestCase):
         with open(db_path, 'rb') as f:
             raw = bytearray(f.read())
 
-        node_off, data_off = _find_dup_node(raw, psize, want_subdata)
-        self.assertIsNotNone(
-            node_off,
-            'no %s node found' % ('sub-DB' if want_subdata else 'sub-page'))
+        data_off = _find_dup_node(raw, psize, want_subdata)[1]
+        if callable(new_pad):
+            new_pad = new_pad(psize)
 
         if want_subdata:
             # md_pad is the first field of the MDB_db record.
@@ -1375,7 +1383,7 @@ class MdPadTest(unittest.TestCase):
     def test_subdb_md_pad_disclosure(self):
         """A md_pad larger than the page must not become the length of the
         buffer handed back to the caller."""
-        env, db = self._forge(True, 4000, 0x8000)
+        env, db = self._forge(True, 4000, lambda psize: 8 * psize)
         with self.assertRaises(lmdb.Error):
             with env.begin(db=db) as txn:
                 cur = txn.cursor()
@@ -1403,15 +1411,49 @@ class MdPadTest(unittest.TestCase):
     def test_subdb_md_pad_write(self):
         """The LEAF2 branch of mdb_node_add uses md_pad as a memmove()/
         memcpy() length, making this an out-of-bounds write."""
-        env, db = self._forge(True, 4000, 0x1000)
+        env, db = self._forge(True, 4000, lambda psize: psize)
         with self.assertRaises(lmdb.Error):
             with env.begin(write=True, db=db) as txn:
                 txn.put(b'key0', b'ZZZZZZZ')
+
+    def test_subdb_md_pad_fits_page_but_not_keys(self):
+        """A key size small enough to fit the page is still corrupt if the
+        page cannot hold that many keys of that size.
+
+        Bounding md_pad on its own leaves this reachable, and it is the
+        more dangerous half: LEAF2KEY() multiplies the size by the key
+        index, so a value comfortably inside the page still addresses
+        megabytes past it by the time the search reaches the middle of a
+        full page.  Found by CI on macOS/arm64, whose 16 KB pages left the
+        4 KB key size this originally used inside the per-key bound.
+        """
+        for pad in (lambda psize: psize // 8,
+                    lambda psize: psize - PAGEHDRSZ):
+            env, db = self._forge(True, 4000, pad)
+            with self.assertRaises(lmdb.Error):
+                with env.begin(db=db) as txn:
+                    cur = txn.cursor()
+                    cur.set_key(b'key0')
+                    cur.value()
+            env, db = self._forge(True, 4000, pad)
+            with self.assertRaises(lmdb.Error):
+                with env.begin(write=True, db=db) as txn:
+                    txn.put(b'key0', b'ZZZZZZZ')
 
     def test_subpage_mp_pad(self):
         """For few duplicates the dups live in a sub-page embedded in the
         node, whose mp_pad never passes through mdb_page_get."""
         env, db = self._forge(False, 4, 0x4000)
+        with self.assertRaises(lmdb.Error):
+            with env.begin(db=db) as txn:
+                cur = txn.cursor()
+                cur.set_key(b'key0')
+                cur.value()
+
+    def test_subpage_mp_pad_fits_node_but_not_keys(self):
+        """The sub-page equivalent: 14 bytes fits the node data holding
+        four 7-byte dups, but four keys of that size do not."""
+        env, db = self._forge(False, 4, 14)
         with self.assertRaises(lmdb.Error):
             with env.begin(db=db) as txn:
                 cur = txn.cursor()

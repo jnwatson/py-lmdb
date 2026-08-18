@@ -81,15 +81,23 @@ keys and silently reads the wrong field. `tests/cve_test.py` handles this in
 `_nodedata_off()`; `misc/md_pad_repro.py` in `Layout.nodedata()`.
 
 Confirmed on **both** engines with `misc/md_pad_repro.py`. Unpatched, all
-five cases fail identically on 0.9.35 and 1.0.1: a forged `md_pad` of
-`0x8000` returns 32768 bytes for a 7-byte record (~28.7 KB of adjacent
+seven cases fail identically on 0.9.35 and 1.0.1: a forged `md_pad` of
+`8 * psize` returns 32768 bytes for a 7-byte record (~28.7 KB of adjacent
 mapping contents, no error raised), `0xFFFFFFFF` faults on both the plain
-read and `getmulti` paths, `0x1000` faults in the `mdb_node_add` **write**
-path, and the sub-page `mp_pad` variant faults as well. Patched, all five
-are refused with `MDB_BAD_TXN` on both engines.
+read and `getmulti` paths, `psize` faults in the `mdb_node_add` **write**
+path, and the sub-page `mp_pad` variant faults as well. Patched, all seven
+are refused on both engines.
 
-Note the bound accepts zero. `mdb_dbi_open` zeroes the whole record when
-creating a DB, so a perfectly normal `MDB_DUPFIXED` database has
+Bounding the key size alone is not sufficient — `LEAF2KEY()` multiplies it
+by the key index, so a size that fits the page still addresses far outside
+it once a search reaches the middle of a full page. The patch also enforces
+`NUMKEYS(page) * key_size <= usable space`, the relation `mdb_node_add`
+maintains. See the 0.9 file for why that check is split in two, and for how
+CI on macOS/arm64 (16 KB pages) exposed the gap that a 4 KB-page test suite
+could not.
+
+Note the bound accepts zero on a DB record. `mdb_dbi_open` zeroes the whole
+record when creating a DB, so a perfectly normal `MDB_DUPFIXED` database has
 `md_pad == 0`; only a DUPFIXED *sub*-DB, whose pages are always LEAF2,
 additionally requires non-zero. `FREE_DBI` is excluded because its `md_pad`
 aliases `mm_psize` and legitimately equals the full page size.

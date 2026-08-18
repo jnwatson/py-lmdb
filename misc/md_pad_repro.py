@@ -38,6 +38,19 @@
 # sub-page's mp_pad.  Sub-pages never pass through mdb_page_get, so
 # validate-leaf2-keysize never saw them.
 #
+# The last two cases are the ones bounding the key size alone does not
+# stop, and they are the more dangerous half.  LEAF2KEY() multiplies the
+# size by the key index, so a value that comfortably fits the page still
+# addresses far outside it once the search reaches the middle of a full
+# page: on a 4 KB page a key size of 512 is a legal value that reads 140 KB
+# past the page it names.  The page's own header says how many keys it
+# holds, so the check has to be NUMKEYS(page) * key_size <= usable space,
+# which is exactly the relation mdb_node_add maintains.
+#
+# Note the pads below are computed from the file's page size.  LMDB takes
+# that from the OS, and macOS on arm64 uses 16 KB pages, where a literal
+# 0x1000 is a legitimate key size rather than an oversized one.
+#
 
 from __future__ import print_function
 
@@ -139,7 +152,10 @@ def build(path, engine, ndups):
 
 def forge(path, engine, ndups, want_subdata, new_pad):
     """Create a DB, then rewrite only the LEAF2 key size.  Returns the
-    genuine value so the caller can compare."""
+    genuine and forged values so the caller can compare.
+
+    new_pad may be a callable taking the file's page size.
+    """
     build(path, engine, ndups)
     db_path = os.path.join(path, 'data.mdb')
     with open(db_path, 'rb') as fp:
@@ -157,11 +173,13 @@ def forge(path, engine, ndups, want_subdata, new_pad):
         # mp_pad within the embedded sub-page.
         where, fmt = data_off + lay.mp_pad, '<H'
 
+    if callable(new_pad):
+        new_pad = new_pad(lay.psize)
     real = struct.unpack_from(fmt, raw, where)[0]
     struct.pack_into(fmt, raw, where, new_pad)
     with open(db_path, 'wb') as fp:
         fp.write(raw)
-    return lay, real
+    return lay, real, new_pad
 
 
 def main():
@@ -176,7 +194,7 @@ def main():
     def run(want_subdata, ndups, pad, action):
         path = tempfile.mkdtemp(prefix='mdpad')
         try:
-            lay, real = forge(path, eng, ndups, want_subdata, pad)
+            lay, real, pad = forge(path, eng, ndups, want_subdata, pad)
             print('    genuine key size %d, forged to %d (psize %d)'
                   % (real, pad, lay.psize))
             env = lmdb.open(path, max_dbs=4, lib_version=eng)
@@ -212,15 +230,19 @@ def main():
 
     cases = [
         ('sub-DB md_pad, read path (disclosure)',
-         lambda: run(True, 4000, 0x8000, read)),
+         lambda: run(True, 4000, lambda psize: 8 * psize, read)),
         ('sub-DB md_pad, read path (crash)',
          lambda: run(True, 4000, 0xFFFFFFFF, read)),
         ('sub-DB md_pad, getmulti path',
          lambda: run(True, 4000, 0xFFFFFFFF, getmulti)),
         ('sub-DB md_pad, write path (mdb_node_add)',
-         lambda: run(True, 4000, 0x1000, write)),
+         lambda: run(True, 4000, lambda psize: psize, write)),
         ('sub-page mp_pad, read path',
          lambda: run(False, 4, 0x4000, read)),
+        ('sub-DB md_pad within the page, too big for its key count',
+         lambda: run(True, 4000, lambda psize: psize // 8, read)),
+        ('sub-page mp_pad within the node, too big for its key count',
+         lambda: run(False, 4, 14, read)),
     ]
 
     # Child mode: run one case in this process and let it crash if it will.
