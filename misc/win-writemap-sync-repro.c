@@ -56,9 +56,10 @@
  * Run:
  *   repro [scratch-dir]
  *
- * Building against lib/ instead of lib1/ runs the same cases on 0.9.35, which
- * is the contrast: it is expected to print "all cases succeeded" on the same
- * machine.
+ * Building against lib/ instead of lib1/ runs the same cases on the bundled
+ * 0.9 tree, which is the contrast: it is expected to print "all cases
+ * succeeded" on the same machine.  (Confirmed against 0.9.35; 0.9.36 does
+ * not touch the Windows metapage path.)
  *
  * Exit status: 0 = unaffected, 1 = bug reproduced, 2 = setup error.
  */

@@ -1,7 +1,7 @@
 # py-lmdb patch status against LMDB 1.0.1
 
 Outcome of porting the `lib/py-lmdb/` patch series (written against LMDB
-0.9.35) to the bundled LMDB 1.0.1 tree (tag `LMDB_1.0.1`, released
+0.9.x, now 0.9.36) to the bundled LMDB 1.0.1 tree (tag `LMDB_1.0.1`, released
 2026-08-06). The ported series lives alongside this file and is registered in
 `setup.py`'s `ENGINES` table.
 
@@ -13,8 +13,8 @@ described under "Maintaining this series" below.
 
 | Patch | Verdict | Basis |
 | --- | --- | --- |
-| `fix-large-write` | Fixed upstream | ITS#10054 (`b0facd0`) caps every write at `MAX_WRITE` (1GiB) and chunks large overflow pages. The copy-path hunk landed as ITS#9223 (`e11d5a0`). |
-| `fix-win-flush-large-write` | Fixed upstream | ITS#10538 (`36e581a`) rewrote the Win32 `mdb_page_flush` to chunk writes. This was py-lmdb's fix, contributed upstream; it is also in the pending 0.9.36. |
+| `fix-large-write` | Fixed upstream | ITS#10054 (`b0facd0`) caps every write at `MAX_WRITE` (1GiB) and chunks large overflow pages. The copy-path hunk landed as ITS#9223 (`e11d5a0`). LMDB 0.9.36 took ITS#10054 but **not** ITS#9223, so the 0.9 series still carries the copy-path hunk alone. |
+| `fix-win-flush-large-write` | Fixed upstream | ITS#10538 (`36e581a`) rewrote the Win32 `mdb_page_flush` to chunk writes. This was py-lmdb's fix, contributed upstream; it is in 0.9.36 as well, so the 0.9 series no longer carries it either. |
 | `win32-sparse-file` | No longer applicable | 1.0 defaults to incremental file growth via `NtCreateSection(SEC_RESERVE)` with a NULL section size; full preallocation is now opt-in through `MDB_FIXEDSIZE`. |
 | `cve-2019-16225-reject-dirty-pages` | Rewritten, not dropped | The `P_DIRTY` page-header flag no longer exists; dirtiness is derived from `mp_txnid` (`IS_DIRTY_NW`/`IS_MUTABLE`/`IS_WRITABLE`). Replaced by `cve-2019-16225-validate-mp-txnid`, which bounds that field instead — see "Verified" below. |
 

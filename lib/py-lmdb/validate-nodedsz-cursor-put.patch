@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -6897,6 +6897,17 @@
+@@ -6953,6 +6953,17 @@
  		leaf = NODEPTR(mc->mc_pg[mc->mc_top], mc->mc_ki[mc->mc_top]);
  		olddata.mv_size = NODEDSZ(leaf);
  		olddata.mv_data = NODEDATA(leaf);

@@ -186,5 +186,5 @@ tree containing the 1.0.1 sources in `lib1/`:
     repro
 
 Exit status 0 = unaffected, 1 = bug reproduced, 2 = setup error. Building
-against a 0.9.35 tree instead runs the same cases on that release line,
+against a 0.9.x tree instead runs the same cases on that release line,
 which prints "all cases succeeded".

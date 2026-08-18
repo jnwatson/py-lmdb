@@ -115,7 +115,6 @@ ENGINES = [
             'validate-md-root',
             'win32-sparse-file',
             'fix-large-write',
-            'fix-win-flush-large-write',
             'fix-overflow-page-size-mul',
             # Appended, not slotted in with the other validate-* patches:
             # each patch's line numbers reflect the state after all
@@ -130,10 +129,10 @@ ENGINES = [
         tree='lib1',
         dest=os.path.join(HERE, 'build', 'lib10'),
         define='LMDB_ENGINE_V10',
-        # The 1.0 series omits three patches carried for 0.9: the two
-        # large-write fixes landed upstream (ITS#10054, ITS#10538), and
+        # The 1.0 series omits two patches carried for 0.9:
+        # fix-large-write's remaining hunk landed upstream as ITS#9223, and
         # win32-sparse-file's defect was designed away by 1.0's incremental
-        # file growth.  A fourth, cve-2019-16225, keys on the P_DIRTY page
+        # file growth.  A third, cve-2019-16225, keys on the P_DIRTY page
         # flag, which 1.0 removed; the protection is carried forward by
         # cve-2019-16225-validate-mp-txnid below, written against the
         # mp_txnid field that replaced it.

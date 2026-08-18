@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -1076,6 +1076,58 @@
+@@ -1081,6 +1081,58 @@
  #define BAD_DB_FLAGS(f) \
  	(((f) & DUPSORT_ONLY_FLAGS) && !((f) & MDB_DUPSORT))
  
@@ -60,7 +60,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  	/** Handle for the DB used to track free pages. */
  #define	FREE_DBI	0
  	/** Handle for the default DB. */
-@@ -2887,6 +2939,9 @@
+@@ -2892,6 +2944,9 @@
  		 * P_LEAF2 pages that lead to use of uninitialized pointers.
  		 */
  		rc = MDB_INVALID;
@@ -70,7 +70,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  	} else {
  		return MDB_SUCCESS;
  	}
-@@ -5657,11 +5712,16 @@
+@@ -5660,11 +5715,16 @@
  			txn->mt_flags |= MDB_TXN_ERROR;
  			return MDB_CORRUPTED;
  		}
@@ -91,7 +91,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  			txn->mt_flags |= MDB_TXN_ERROR;
  			return MDB_CORRUPTED;
  		}
-@@ -5834,6 +5894,9 @@
+@@ -5837,6 +5897,9 @@
  					if (BAD_DB_FLAGS(flags))
  						return MDB_INVALID;
  					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
@@ -101,7 +101,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					if (mc->mc_db->md_depth > CURSOR_STACK)
  						return MDB_CORRUPTED;
  				}
-@@ -7088,7 +7151,19 @@
+@@ -7120,7 +7183,19 @@
  					MP_LOWER(fp) > MP_UPPER(fp) ||
  					MP_UPPER(fp) + PAGEBASE > ((fp_flags & P_LEAF2) ?
  						olddata.mv_size + 2 * (unsigned)NUMKEYS(fp) :
@@ -122,7 +122,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
  					return MDB_CORRUPTED;
  				}
-@@ -7860,12 +7935,37 @@
+@@ -7894,12 +7969,37 @@
  			return;
  		}
  		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
@@ -160,7 +160,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  		mx->mx_db.md_pad = 0;
  		mx->mx_db.md_flags = 0;
  		mx->mx_db.md_depth = 1;
-@@ -10216,6 +10316,12 @@
+@@ -10251,6 +10351,12 @@
  		txn->mt_dbiseqs[slot] = seq;
  
  		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));

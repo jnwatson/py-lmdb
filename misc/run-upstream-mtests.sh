@@ -48,7 +48,7 @@ build_and_run() {   # <tag> <tree> <label>
     done
 }
 
-for spec in "LMDB_0.9.35 lib build/lib09-plain 0.9" \
+for spec in "LMDB_0.9.36 lib build/lib09-plain 0.9" \
             "LMDB_1.0.1  lib1 build/lib10-plain 1.0"; do
     set -- $spec
     tag="$1"; pristine="$here/$2"; patched="$here/$3"; name="$4"

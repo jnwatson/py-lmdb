@@ -9,7 +9,7 @@ bug-writing guidelines. py-lmdb carries the fix locally as
 
 **Summary:** mdb_env_open() divides by zero on crafted mm_psize
 
-**Version:** LMDB 1.0.1 and 0.9.35 (both release lines)
+**Version:** LMDB 1.0.1 and 0.9.36 (both release lines; also 0.9.35 and earlier)
 
 **OS/Platform:** Reproduced on Linux x86_64, gcc 13.3.0, glibc 2.39. Not
 platform-specific — the defect is in portable code.
@@ -26,10 +26,10 @@ earlier, in the ITS#9291 root-page sanity check:
 
     mdb.c:5570    pgno_t maxpgno = fsize / env->me_psize;
 
-LMDB 0.9.35 faults at the map-size calculation, which 1.0.1 also still has
+LMDB 0.9.36 faults at the map-size calculation, which 1.0.1 also still has
 (at mdb.c:5660):
 
-    mdb.c:4552    env->me_maxpg = env->me_mapsize / env->me_psize;
+    mdb.c:4587    env->me_maxpg = env->me_mapsize / env->me_psize;
 
 `mdb_env_read_header()` checks the page's `P_META` flag, `mm_magic` and
 `mm_version`, but never `mm_psize`; `mdb_env_open2()` then assigns
@@ -54,7 +54,7 @@ A self-contained C reproducer is attached below.
     reopening...
     Floating point exception (core dumped)
 
-Exit status 136 (SIGFPE). Identical on 0.9.35, with the magic at offset 16.
+Exit status 136 (SIGFPE). Identical on 0.9.36, with the magic at offset 16.
 
 ## Expected results
 
