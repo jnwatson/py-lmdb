@@ -36,6 +36,11 @@ import lmdb
 # Whether we have the patch that allows env.copy* to take a txn
 have_txn_patch = lmdb.version(subpatch=True)[3]
 
+# True when the bundled LMDB was built without py-lmdb's patch series, which
+# is how a failure gets attributed to upstream rather than to us.
+_PURE = (os.environ.get('LMDB_PURE') is not None or
+         os.environ.get('LMDB_FORCE_SYSTEM') is not None)
+
 NO_READERS = str('(no active readers)\n')
 
 try:
@@ -265,7 +270,8 @@ class OpenTest(unittest.TestCase):
             path, env = testlib.temp_env(writemap=flag)
             assert env.flags()['writemap'] == flag
 
-    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1,
+    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1
+                     and not _PURE,
                      'writemap + sync=True cannot commit on Windows with '
                      'the bundled LMDB 1.0 engine (issue #486)')
     def test_writemap_commit(self):
