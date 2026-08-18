@@ -1,0 +1,31 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -5949,6 +5949,27 @@
+ 	MDB_ID pn = pg << 1;
+ 	int rc;
+ 
++	/* Bound the overflow extent before it reaches the free list.
++	 * ovpages comes from the header of a page named by an F_BIGDATA node,
++	 * so a crafted data.mdb picks it freely.  It is used as an allocation
++	 * size (mdb_midl_need), as the number of page numbers appended to
++	 * mt_free_pgs (mdb_midl_append_range), and as a loop bound writing
++	 * into me_pghead.
++	 *
++	 * validate-overflow-pages bounds it in mdb_cursor_put and mdb_drop0
++	 * but not here, so the delete path reached it unchecked: a modest
++	 * forged count committed silently and left the free DB holding page
++	 * numbers past the end of the file for a later txn to hand out, and
++	 * 0xFFFFFFFF segfaulted.  Zero is corrupt as well -- a real overflow
++	 * page always spans at least one.  The subtraction is ordered after
++	 * the bound on ovpages so it cannot wrap. */
++	if (!IS_OVERFLOW(mp) || ovpages == 0 ||
++		ovpages > txn->mt_next_pgno ||
++		pg > txn->mt_next_pgno - ovpages) {
++		txn->mt_flags |= MDB_TXN_ERROR;
++		return MDB_CORRUPTED;
++	}
++
+ 	DPRINTF(("free ov page %"Z"u (%d)", pg, ovpages));
+ 	/* If the page is dirty or on the spill list we just acquired it,
+ 	 * so we should give it back to our current free list, if any.
