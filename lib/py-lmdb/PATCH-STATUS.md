@@ -2,7 +2,8 @@
 
 The 0.9 series in this directory is the long-standing baseline; its patches
 are listed in `setup.py`'s `ENGINES` table and apply cleanly to the bundled
-LMDB 0.9.35 sources. This file records only **open items** against it.
+LMDB 0.9.35 sources. This file records **open items** against it, plus
+findings worth keeping next to the patch that resolved them.
 
 For the 1.0 tree, see `lib1/py-lmdb/PATCH-STATUS.md`, which additionally
 documents which of these patches were dropped, ported mechanically, or
@@ -10,57 +11,70 @@ hand-rewritten for 1.0.
 
 ## Open items
 
-- **`md_pad` from the DB record is unvalidated.** CONFIRMED with a
-  reproducer on 0.9.35 (patched build, x86-64, 4096-byte pages). Needs a
-  `validate-md-pad` patch in **both** series, since the code is identical in
-  0.9 and 1.0. Found during the 1.0 CodeQL audit; see also
-  `docs/lmdb-1.0-overflow-audit.md`.
+None currently recorded against this tree. See
+`lib1/py-lmdb/PATCH-STATUS.md` for items that affect both engines but were
+found during the 1.0 port.
 
-  `md_pad` is the fixed key size of a `MDB_DUPFIXED` (LEAF2) database.
-  `validate-leaf2-keysize` bounds the *page's* `mp_pad`
-  (`0 < mp_pad <= psize - PAGEHDRSZ`) in `mdb_page_get`, but every
-  arithmetic site uses the **DB record's** `md_pad`, and nothing requires
-  the two to agree. Of the four places an `MDB_db` is loaded from disk,
-  three (`mdb_txn_renew0`, the `DB_STALE` reload in `mdb_page_search`,
-  `mdb_dbi_open`) run `BAD_DB_FLAGS`, which checks only `md_flags`; the
-  fourth, `mdb_xcursor_init1`'s `memcpy(&mx->mx_db, NODEDATA(node),
-  sizeof(MDB_db))` for an `F_SUBDATA` node, is unchecked entirely. Forging
-  `md_pad` there leaves every page in the file internally consistent, so
-  `validate-page-bounds` and `validate-leaf2-keysize` both still pass.
+## Resolved
 
-  Confirmed impact, forging only that one field:
-  - *Silent out-of-bounds read.* `md_pad = 0x8000` makes `cursor.value()`
-    return 32768 bytes for a 7-byte record — 28700 of the surplus bytes
-    non-zero, i.e. adjacent mapping contents — with no error raised.
-  - *Read crash.* `md_pad = 0xFFFFFFFF` gives SIGBUS in `cursor.value()`,
-    and in `getmulti()` via `mv_size = NUMKEYS(page) * md_pad`.
-  - *Out-of-bounds write.* The LEAF2 branch of `mdb_node_add` does
-    `memmove(ptr+ksize, ptr, dif*ksize)` and `memcpy(ptr, key->mv_data,
-    ksize)` with `ksize = md_pad`. `md_pad = 0x100` writes past the key
-    slot and commits silently, corrupting the file; `md_pad >= 0x1000`
-    gives SIGBUS. This is a write primitive inside the writable mapping,
-    so it is the most severe of the three.
+### `validate-md-pad` — unvalidated LEAF2 key size
 
-  Note the CodeQL alert's framing (`NUMKEYS * md_pad` can wrap) is the
-  least important part: `NUMKEYS` is already bounded by `validate-page-bounds`
-  to `psize/2`, and wrapping only makes the result *smaller*. The defect is
-  that `md_pad` is unbounded as a length at all.
+`md_pad` is the fixed key size of an `MDB_DUPFIXED` (LEAF2) database.
+`validate-leaf2-keysize` bounds the *page's* `mp_pad`
+(`0 < mp_pad <= psize - PAGEHDRSZ`) in `mdb_page_get`, but every LEAF2
+computation uses the size held in the *DB record*, and nothing required the
+two to agree. Of the four places an `MDB_db` is loaded from disk, three
+(`mdb_txn_renew0`, the `DB_STALE` reload in `mdb_page_search`,
+`mdb_dbi_open`) ran `BAD_DB_FLAGS`, which checks only `md_flags`; the
+fourth, `mdb_xcursor_init1`'s `memcpy(&mx->mx_db, NODEDATA(node),
+sizeof(MDB_db))` for an `F_SUBDATA` node, was unchecked entirely. Forging
+`md_pad` there leaves every page in the file internally consistent, so
+`validate-page-bounds` and `validate-leaf2-keysize` both still pass.
 
-  Suggested shape, mirroring `BAD_DB_FLAGS`:
+Reproduced on 0.9.35 and 1.0.1 alike (`misc/md_pad_repro.py`), forging only
+that one field:
 
-      #define BAD_MD_PAD(db, psize) \
-          (((db)->md_flags & MDB_DUPFIXED) && \
-           ((db)->md_pad == 0 || (db)->md_pad > (psize) - PAGEHDRSZ))
+| Case | Unpatched behaviour |
+| --- | --- |
+| `md_pad = 0x8000`, read | `cursor.value()` returns 32768 bytes for a 7-byte record, ~28.7 KB of it adjacent mapping contents — silently, no error raised |
+| `md_pad = 0xFFFFFFFF`, read | SIGBUS |
+| `md_pad = 0xFFFFFFFF`, `getmulti` | SIGBUS (`mv_size = NUMKEYS(page) * md_pad`, in 32-bit arithmetic) |
+| `md_pad = 0x1000`, write | SIGBUS; smaller values write past the key slot and **commit silently**, corrupting the file |
+| sub-page `mp_pad = 0x4000`, read | SIGBUS |
 
-  applied at all four load sites. Gating on `MDB_DUPFIXED` is required, not
-  cosmetic: `mm_psize` aliases `mm_dbs[FREE_DBI].md_pad`, so an ungated
-  bound would reject every database. `FREE_DBI` is never `MDB_DUPFIXED`,
-  and `mm_psize` has its own check in `cve-2019-16228-validate-psize`.
+The write case is the most severe: the LEAF2 branch of `mdb_node_add` uses
+`md_pad` as a `memmove()`/`memcpy()` length, which is an out-of-bounds write
+inside the writable mapping. Regression tests are in `tests/cve_test.py`
+(`MdPadTest`); patched, all five cases are refused with `MDB_BAD_TXN` on
+both engines.
 
-  Related, not separately reproduced: `mdb_xcursor_init1` also takes
-  `mx_db.md_pad` from an embedded sub-page's `mp_pad`. Sub-pages live inside
-  node data and are never fetched through `mdb_page_get`, so
-  `validate-leaf2-keysize` does not cover them, and `validate-subpage-bounds`
-  checks that sub-page's `mp_lower`/`mp_upper` but not its `mp_pad`. It is
-  `uint16_t`, so the exposure is bounded at 64KB rather than 4GB. Worth
-  covering in the same patch.
+Two details worth remembering, both of which cost a wrong first attempt:
+
+- **The bound must accept zero.** `mdb_dbi_open` zeroes the whole record
+  when creating a DB, so a perfectly normal `MDB_DUPFIXED` database has
+  `md_pad == 0`. Rejecting zero on a top-level DB record breaks every
+  DUPFIXED database. Only a DUPFIXED *sub*-DB, whose pages are always
+  LEAF2, additionally requires a non-zero value. `FREE_DBI` is excluded
+  entirely: its `md_pad` aliases `mm_psize` and legitimately equals the
+  full page size (`cve-2019-16228-validate-psize` checks that field).
+- **The sub-page check must run before the sub-cursor is initialized.**
+  `mdb_xcursor_init1` returns `void`, so it signals corruption by setting
+  `MDB_TXN_ERROR`; that only becomes visible when something subsequently
+  consults the txn. The `F_SUBDATA` path gets this for free, because it
+  bails out before `mc_pg[0]` is set and the caller's page search then
+  reports `MDB_BAD_TXN`. The sub-page path assigns `mc_pg[0] = fp` and
+  `C_INITIALIZED` directly, so no page search follows; validating after
+  that point leaves the caller reading a half-built cursor and quietly
+  getting a zero-length value instead of an error.
+
+Note the CodeQL alert that prompted this (`NUMKEYS * md_pad` can overflow)
+described the least important part. `NUMKEYS` is already bounded to
+`psize/2` by `validate-page-bounds`, and wrapping only makes the result
+*smaller*. The defect was that `md_pad` was unbounded as a length at all —
+the silent 32 KB disclosure needs no multiplication.
+
+Also note that a reproducer written against 0.9 does not transfer to 1.0
+unchanged: **1.0 aligns node data to an even offset** (`NODEDATA` uses
+`EVEN(mn_ksize)`), so walking to an `F_SUBDATA` record with 0.9's
+`mn_data + mn_ksize` lands one byte off for odd-length keys and silently
+reads the wrong field.

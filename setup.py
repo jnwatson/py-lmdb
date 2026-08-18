@@ -117,6 +117,11 @@ ENGINES = [
             'fix-large-write',
             'fix-win-flush-large-write',
             'fix-overflow-page-size-mul',
+            # Appended, not slotted in with the other validate-* patches:
+            # each patch's line numbers reflect the state after all
+            # preceding ones, so inserting mid-series would make every
+            # later patch apply with an offset.
+            'validate-md-pad',
         ],
     ),
     dict(
@@ -149,6 +154,8 @@ ENGINES = [
             'validate-md-depth',
             'validate-md-root',
             'fix-overflow-page-size-mul',
+            # Appended for the same reason as in the v09 series above.
+            'validate-md-pad',
         ],
     ),
 ]
