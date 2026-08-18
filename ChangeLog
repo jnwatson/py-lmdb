@@ -61,12 +61,8 @@ Bug fixes
     place.  The 0.9 engine was never affected.  As with the rest of the
     series this matters only if you open a database file you do not trust.
 
-    Note one case this does **not** cover, shared with 0.9: under
-    ``MDB_WRITEMAP`` a page forged to exactly the next transaction's id is
-    indistinguishable from one this transaction dirtied in place, so it still
-    bypasses copy-on-write, and ``abort()`` then does not roll back.  0.9's
-    equivalent check excludes ``MDB_WRITEMAP`` altogether.  See
-    ``lib1/py-lmdb/PATCH-STATUS.md``.
+    One case is not covered, under ``MDB_WRITEMAP``; see the scope note at
+    the end of this section.
 
 - New ``validate-ovpage-free`` hardening patch for both bundled engines.
     ``mdb_ovpage_free()`` took the overflow extent from the page header and
@@ -93,6 +89,21 @@ Bug fixes
     addresses far outside it partway through a full page.  As with the rest
     of the series this matters only if you open a database file you do not
     trust.  Reproducer in ``misc/md_pad_repro.py``.
+
+- **Scope of the hardening series: it does not extend to**
+    ``writemap=True``.  py-lmdb's bundled patches harden LMDB against
+    hostile or damaged database files, which upstream LMDB does not treat
+    as an attack surface.  That hardening covers the default configuration.
+    It does *not* cover ``MDB_WRITEMAP``, on either engine: under
+    ``writemap=True`` a crafted page can still be taken for one the current
+    transaction already dirtied, which bypasses copy-on-write, so writes
+    land directly on pages of the previous snapshot and ``abort()`` does not
+    roll them back.  Both engines skip the dirty-page lookup that would
+    distinguish the two, so nothing in the read path can tell them apart.
+    0.9 is affected across the board here; 1.0 only for a page forged to
+    exactly the next transaction's id.  If you open files you do not
+    control, leave ``writemap`` at its default of ``False``.  Tracked in
+    issue #484; the analysis is in ``lib1/py-lmdb/PATCH-STATUS.md``.
 
 Notes
 -----

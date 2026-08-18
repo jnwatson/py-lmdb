@@ -145,11 +145,23 @@ what `MDB_WRITEMAP` is for. Closing this would mean adding tracking upstream
 deliberately omits.
 
 0.9 has the same hole and a wider one: its patch excludes `MDB_WRITEMAP`
-outright, so on 0.9 *every* forged value gets through under `MDB_WRITEMAP`,
-not just this one. That is not an argument that this is fine — it is a note
-that the gap is pre-existing and shared, and that anyone opening an untrusted
-file with `writemap=True` is relying on the rest of the series, not on this
-check.
+outright, so on 0.9 *every* forged value gets through, not just this one.
+That is not an argument that this is fine.
+
+It is worth being clear about which side of py-lmdb's threat-model
+divergence this falls on. Upstream does not treat a hostile file as an
+attack, so there is no upstream bug here and nothing to report — the same
+conclusion `docs/lmdb-1.0-overflow-audit.md` reaches for the rest of the
+series. But py-lmdb has already adopted the stricter model and shipped the
+patches to enforce it, including the non-`MDB_WRITEMAP` half of this very
+issue. By our own standard this is in scope and uncovered, not out of scope.
+The divergence explains why the hole exists; it does not make it acceptable.
+
+What follows from that is a documented boundary rather than a costly fix:
+the series covers the default configuration, and callers opening files they
+do not control should leave `writemap` at `False`. That is now stated in the
+ChangeLog and in `lib/py-lmdb/PATCH-STATUS.md`, which carries the 0.9 side
+of the analysis. Tracked in issue #484.
 
 ### `validate-md-pad` (new; also added to the 0.9 series)
 
