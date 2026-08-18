@@ -78,3 +78,34 @@ unchanged: **1.0 aligns node data to an even offset** (`NODEDATA` uses
 `EVEN(mn_ksize)`), so walking to an `F_SUBDATA` record with 0.9's
 `mn_data + mn_ksize` lands one byte off for odd-length keys and silently
 reads the wrong field.
+
+## Validating against upstream's own tests
+
+`misc/run-upstream-mtests.sh` fetches the `mtest` programs from the upstream
+tag matching each bundled tree (they are not part of this distribution),
+builds each one twice — against the pristine tree and against the patched
+one — and diffs the output. A hardening patch that only rejects corrupt
+input should be **indistinguishable** from pristine LMDB on well-formed
+input, so a difference is the signal, not the exit status.
+
+Run it after touching either series. It pins the tests' RNG seed (they seed
+from the clock), normalises pointers and pids, and verifies the bundled
+sources still match the upstream tag before trusting the baseline.
+
+Result for `validate-md-pad`: `mtest` through `mtest5` produce byte-identical
+output on both engines, ~4,300 lines per engine. `mtest4` is the one that
+matters — it is the only upstream test using `MDB_DUPFIXED`, and it drives
+510 duplicates under a single key through `MDB_NEXT_MULTIPLE`, which is
+exactly the `F_SUBDATA` sub-DB and `fetchm` path this patch guards.
+
+Two upstream tests are excluded, both failing identically with and without
+the patch:
+
+- `mtest6` is not in upstream's `PROGS` and is not built by `make test`. It
+  needs `mdb_dkey`, which exists only under `MDB_DEBUG`; forcing
+  `-DMDB_DEBUG=1` then fails to compile on 0.9 (an unrelated `Yu` format-macro
+  bug) and segfaults on 1.0 — on the **pristine** tree as well, with identical
+  trace output up to the crash.
+- 1.0's `mtest_remap`, `mtest_enc`, `mtest_enc2` are upstream's `RPROGS`,
+  needing `MDB_REMAP_CHUNKS` and the `chacha8`/`crypto.lm` loadable module.
+  Not wired up here; they exercise features py-lmdb does not expose.

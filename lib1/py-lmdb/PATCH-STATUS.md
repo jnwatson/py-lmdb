@@ -134,6 +134,14 @@ aliases `mm_psize` and legitimately equals the full page size.
 
 ## Maintaining this series
 
+`misc/run-upstream-mtests.sh` builds upstream's `mtest` programs against both
+the pristine `lib1/` tree and the patched `build/lib10-plain`, and diffs the
+output; the series should be indistinguishable from pristine LMDB on
+well-formed input. It also checks `lib1/`'s sources still match the upstream
+tag byte for byte. Currently `mtest` through `mtest5` are identical on both
+engines. See the 0.9 file for what is excluded and why (`mtest6`, and 1.0's
+`RPROGS`: `mtest_remap`, `mtest_enc`, `mtest_enc2`).
+
 When bumping the bundled 1.0 tree, regenerate rather than hand-editing: replay
 the series onto the new tree one patch at a time, snapshotting between steps
 and diffing consecutive snapshots. That keeps every patch's line numbers
