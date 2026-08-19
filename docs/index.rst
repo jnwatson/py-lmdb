@@ -1148,8 +1148,9 @@ steer those reads out of bounds. py-lmdb's threat model is layered:
   and traversing even a malformed file fails cleanly with
   :py:class:`lmdb.CorruptedError` or :py:class:`lmdb.InvalidError` instead of
   a segfault. This is best-effort defense in depth, not a guarantee that the
-  file's *contents* mean what they claim — and builds made with
-  ``LMDB_FORCE_SYSTEM=1`` against a system ``liblmdb`` carry none of it.
+  file's *contents* mean what they claim — and builds that omit the bundled
+  patches (``LMDB_PURE=1``, or ``LMDB_FORCE_SYSTEM=1`` against a system
+  ``liblmdb``) carry none of it.
 
 - **Whether a file's contents are truthful is a matter of trust**, established
   either by provenance (you wrote it, or received it from someone you trust)
