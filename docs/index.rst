@@ -1138,31 +1138,37 @@ Trust model and offline verification
 ++++++++++++++++++++++++++++++++++++
 
 LMDB, and therefore py-lmdb, was designed for data files a process owns and
-trusts. A ``data.mdb`` is a memory-mapped on-disk structure whose page
+trusts. An LMDB data file (``data.mdb`` in a directory environment; any name
+with ``subdir=False``) is a memory-mapped on-disk structure whose page
 pointers the engine follows directly; a file crafted by a hostile party can
 steer those reads out of bounds. py-lmdb's threat model is layered:
 
-- **Reads of an arbitrary file should not crash or corrupt the process.** The
-  bundled engines carry a series of read-hardening patches that bound every
-  structure the read and write paths consume at its point of use, so opening
-  and traversing even a malformed file fails cleanly with
+- **Do not open an untrusted data file without verifying it first.** "Open"
+  here means handing the file to the engine — ``lmdb.open()`` and everything
+  after it; examining the raw bytes, which is all ``verify`` does, is always
+  safe. Opening is not a read-only inspection: the engine may write to the
+  lock file and, under some flags, to the data file, and it trusts the meta
+  page's parameters immediately.
+
+- **Opening an arbitrary file and reading through it should not crash or
+  corrupt the process.** The bundled engines carry a series of hardening
+  patches that bound every structure the read and write paths consume at its
+  point of use, so traversing even a malformed file fails cleanly with
   :py:class:`lmdb.CorruptedError` or :py:class:`lmdb.InvalidError` instead of
   a segfault. This is best-effort defense in depth, not a guarantee that the
   file's *contents* mean what they claim — and builds that omit the bundled
   patches (``LMDB_PURE=1``, or ``LMDB_FORCE_SYSTEM=1`` against a system
   ``liblmdb``) carry none of it.
 
-- **Whether a file's contents are truthful is a matter of trust**, established
-  either by provenance (you wrote it, or received it from someone you trust)
-  or by running the ``verify`` tool over it. A file can be perfectly
-  well-formed at the structural level and still lie about its global state in
-  a way no per-transaction check can catch — for example, listing a live page
-  as free.
-
-- **Do not open an untrusted ``data.mdb`` without verifying it first.**
-  Opening is not a read-only inspection: the engine may write to the lock file
-  and, under some flags, to the data file, and it trusts the meta page's
-  parameters immediately.
+- **Writing is where a dishonest file does real damage.** The same hardening
+  bounds the write paths, so writing should not crash the process either —
+  but a file can be perfectly well-formed at the structural level and still
+  lie about its global state in a way no per-transaction check can catch. A
+  free-page list that names a live page, for example, directs a later write
+  transaction to overwrite good data in place: silent corruption, no error
+  raised. Whether a file's contents are truthful is a matter of trust,
+  established either by provenance (you wrote it, or received it from someone
+  you trust) or by running ``verify`` over it.
 
 ``verify`` implements the "verify-then-trust" model (the same one behind
 SQLite's ``PRAGMA integrity_check`` and Berkeley DB's ``db_verify``). It is a
