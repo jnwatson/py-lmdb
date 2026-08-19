@@ -1135,69 +1135,73 @@ engine.
 
 
 Trust model and offline verification
-####################################
+++++++++++++++++++++++++++++++++++++
 
 LMDB, and therefore py-lmdb, was designed for data files a process owns and
-trusts. A ``data.mdb`` is a memory-mapped on-disk structure that the engine
-reads back and follows directly; a file crafted by a hostile party can steer
-those reads out of bounds. py-lmdb's threat model is layered:
+trusts. A ``data.mdb`` is a memory-mapped on-disk structure whose page
+pointers the engine follows directly; a file crafted by a hostile party can
+steer those reads out of bounds. py-lmdb's threat model is layered:
 
-- **Reads of an arbitrary file will not crash or corrupt the process.** The
+- **Reads of an arbitrary file should not crash or corrupt the process.** The
   bundled engines carry a series of read-hardening patches that bound every
   structure the read and write paths consume at its point of use, so opening
   and traversing even a malformed file fails cleanly with
   :py:class:`lmdb.CorruptedError` or :py:class:`lmdb.InvalidError` instead of
-  a segfault. This is best-effort defence in depth, not a guarantee that the
-  file's *contents* mean what they claim.
+  a segfault. This is best-effort defense in depth, not a guarantee that the
+  file's *contents* mean what they claim — and builds made with
+  ``LMDB_FORCE_SYSTEM=1`` against a system ``liblmdb`` carry none of it.
 
-- **The semantic honesty of a file is a trust property**, established either by
-  provenance (you wrote it, or received it from someone you trust) or by
-  running the ``verify`` tool over it. A file can be perfectly well-formed at
-  the structural level and still lie about its global state in a way no
-  per-transaction check can catch — for example, listing a live page as free.
+- **Whether a file's contents are truthful is a matter of trust**, established
+  either by provenance (you wrote it, or received it from someone you trust)
+  or by running the ``verify`` tool over it. A file can be perfectly
+  well-formed at the structural level and still lie about its global state in
+  a way no per-transaction check can catch — for example, listing a live page
+  as free.
 
-- **Do not open a ``data.mdb`` you do not control without verifying it first.**
+- **Do not open an untrusted ``data.mdb`` without verifying it first.**
   Opening is not a read-only inspection: the engine may write to the lock file
   and, under some flags, to the data file, and it trusts the meta page's
   parameters immediately.
 
 ``verify`` implements the "verify-then-trust" model (the same one behind
-SQLite's ``PRAGMA integrity_check`` and BerkeleyDB's ``db_verify``). It is a
+SQLite's ``PRAGMA integrity_check`` and Berkeley DB's ``db_verify``). It is a
 pure-Python byte walker that never hands the file to the C engine, so it is
 safe to point at a file you do not yet trust::
 
     $ python -mlmdb verify -e /path/to/untrusted.lmdb
     verify: OK
 
-    $ python -mlmdb verify -s single-file.mdb          # subdir=False env
+    $ python -mlmdb verify -s single-file.mdb          # single-file environment
 
-It reads the file as raw bytes and checks every invariant the write paths
-assume against a global view of the file: meta-page selection, full
-reachability of every page from the committed roots, the structural bounds the
-engine enforces, key ordering and per-database page/entry counters, the absence
-of dirty markers at rest, and — the check only an offline pass can make — that
+It reads the file as raw bytes and uses a global view of the file to check
+every invariant the write paths assume: meta-page selection, a full walk of
+every tree from the committed roots, the structural bounds the engine
+enforces, key ordering and per-database page/entry counters, the absence of
+dirty markers at rest, and — the check only an offline pass can make — that
 the set of free pages and the set of reachable pages are disjoint and together
 cover the whole file. It exits ``0`` on success and ``1`` (printing each
 problem) on failure. The check is also available in Python as
-``lmdb.verify.verify(path)``, which returns a list of problem strings.
+``from lmdb import verify; verify.verify(path)``, which returns a list of
+problem strings.
 
-Once a file passes ``verify`` you may treat it as trusted, subject to these
-operational caveats — ignore them and the guarantee is void:
+Once a file passes ``verify``, you may treat it as trusted, subject to these
+operational caveats:
 
 - **Time-of-check/time-of-use.** Verify a *private copy* that no untrusted
   writer can touch afterwards. Verifying a file and then opening the original,
   which an attacker may have replaced in between, proves nothing.
 
-- **The lock file.** Discard any ``lock.mdb`` that arrived alongside the data
-  file and let LMDB regenerate it; a supplied lock file is not covered by
-  ``verify`` and is itself an input to the engine.
+- **The lock file.** Discard any lock file that arrived alongside the data
+  file (``lock.mdb``, or ``<name>-lock`` for a single-file environment) and
+  let LMDB regenerate it; a supplied lock file is not covered by ``verify``
+  and is itself an input to the engine.
 
-- **Co-writers.** "Trusted" extends to every process that holds write access to
-  the environment from that point on. A single hostile writer afterwards
-  reintroduces the whole problem.
+- **Co-writers.** Trust extends to every process that holds write access to
+  the environment from that point on. A single hostile writer reintroduces
+  the whole problem.
 
 - **Architecture.** LMDB files are architecture-specific. ``verify`` answers
-  "is this file safe for the engine running on *this* host", assuming the
+  "is this file safe for the engine running on *this* host?", assuming the
   host's native byte order and a 64-bit build; it reports a 32-bit or
   foreign-endian file as unsupported rather than guessing.
 
@@ -1257,7 +1261,13 @@ These functions are useful for e.g. backup jobs.
         stat: Print environment statistics.
 
         verify: Offline structural audit of a data file (verify-then-trust).
-            python -mlmdb verify -e /path/to/db
+            python -mlmdb verify -e /path/to/db     # subdir environment
+            python -mlmdb verify -s single.mdb      # single-file environment
+
+            Reads the file as raw bytes without opening it through liblmdb, and
+            checks every invariant the engine's write paths assume.  Exits 0 and
+            prints "verify: OK" if the file is sound; otherwise prints each problem
+            and exits 1.  Run this on a file you do not control before trusting it.
 
         warm: Read environment into page cache sequentially.
 

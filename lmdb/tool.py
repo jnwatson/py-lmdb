@@ -608,8 +608,8 @@ def cmd_verify(opts, args):
     Usage: %prog verify [-e ENV | <path>] [-s]
 
     Reads the file as raw bytes and checks every invariant the LMDB write
-    paths assume (see lmdb/verify.py).  Prints nothing and exits 0 if the file
-    is sound; otherwise prints each problem and exits 1.  This is the offline
+    paths assume (see lmdb/verify.py).  Prints "verify: OK" and exits 0 if the
+    file is sound; otherwise prints each problem and exits 1.  This is the offline
     audit for the "verify-then-trust" model: pass a file you do not control
     through it before opening that file with the engine.
     """
