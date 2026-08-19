@@ -36,6 +36,7 @@ for the engine" claim the tool rests on.
 
 import os
 import struct
+import sys
 import unittest
 
 import lmdb
@@ -305,6 +306,9 @@ class VerifyPositiveTest(LmdbTest):
                     t.put(b'k%06d' % i, b'v', db=db)
         self._check(fn)
 
+    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1,
+                     'writemap + sync=True cannot commit on Windows with '
+                     'LMDB 1.0; upstream defect (issue #486)')
     def test_writemap_env(self):
         # writemap mode flushes pages through the map rather than write(); the
         # at-rest file must look identical to the verifier (in particular, no
@@ -395,12 +399,15 @@ class VerifyPositiveTest(LmdbTest):
         # verify clean.
         path = temp_dir()
 
+        # 40KB of duplicates per key exceeds the inline sub-page limit at any
+        # page size (up to 64KB), guaranteeing promoted dup sub-trees, while
+        # four short keys keep the DB's own tree a single leaf.
         def fn(e):
             db = e.open_db(b'df', dupsort=True, dupfixed=True)
             with e.begin(write=True) as t:
-                for i in range(20):
-                    for j in range(500):
-                        t.put(b'k%03d' % i, struct.pack('<Q', j), db=db)
+                for i in range(4):
+                    for j in range(5000):
+                        t.put(b'k%d' % i, struct.pack('<Q', j), db=db)
         _build(path, fn)
         self.assertEqual(V.verify(path), [])
         data = os.path.join(path, 'data.mdb')
@@ -410,7 +417,8 @@ class VerifyPositiveTest(LmdbTest):
         doff = lay.named_db_record()
         if doff is None:
             self.skipTest('could not locate the named-DB record')
-        # 20 short keys fit one leaf: the own tree is one leaf, no branches.
+        if lay.u64(doff + 16) <= 1:
+            self.skipTest('no promoted dup sub-trees on this page size')
         lay.set64(doff + 8, 0)                      # md_branch_pages
         lay.set64(doff + 16, 1)                     # md_leaf_pages
         with open(data, 'wb') as f:
