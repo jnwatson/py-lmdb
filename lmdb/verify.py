@@ -227,20 +227,23 @@ class _SubTree:
 class _Verifier:
     MAX_ERRORS = 200
 
-    def __init__(self, fd, filesize):
-        self.fd = fd
+    # These are filled in by detect_engine()/load_metas()/verify(), each of
+    # which runs before anything reads the attributes it sets.  Declared at
+    # class scope so the type checker knows their post-initialisation types.
+    eng: dict
+    hdrsz: int
+    pagebase: int
+    psize: int
+    meta: '_Meta'
+    next_pgno: int
+    live: bytearray         # bitmap, 1 == reachable
+    free: bytearray         # bitmap, 1 == listed in the freeDB
+
+    def __init__(self, f, filesize):
+        self.f = f                          # a binary file object (seek/read)
         self.filesize = filesize
         self.errors = []
-
-        self.eng = None
-        self.hdrsz = None
-        self.pagebase = None
-        self.psize = None
-        self.meta = None
-        self.next_pgno = None
-        self.live = None        # bytearray bitmap, 1 == reachable
-        self.free = None        # bytearray bitmap, 1 == listed in freeDB
-        self.free_records = []  # (txnid, idl_bytes) collected from the freeDB
+        self.free_records = []              # (txnid, idl_bytes) from the freeDB
 
     # -- error handling --
 
@@ -256,7 +259,12 @@ class _Verifier:
         return len(self.errors) > self.MAX_ERRORS
 
     # -- raw page access (seek/read, never mmap: a short or shrinking file must
-    #    give a clean error, not SIGBUS the verifier) --
+    #    give a clean error, not SIGBUS the verifier; and seek/read, rather than
+    #    os.pread, so this works on Windows too) --
+
+    def _read_at(self, off, n):
+        self.f.seek(off)
+        return self.f.read(n)
 
     def read_page(self, pgno):
         """Return psize bytes for page `pgno`, or None if it lies beyond EOF
@@ -264,7 +272,7 @@ class _Verifier:
         off = pgno * self.psize
         if off + self.psize > self.filesize:
             return None
-        buf = os.pread(self.fd, self.psize, off)
+        buf = self._read_at(off, self.psize)
         return buf if len(buf) == self.psize else None
 
     def read_extent(self, pgno, npages):
@@ -272,13 +280,13 @@ class _Verifier:
         length = npages * self.psize
         if off + length > self.filesize:
             return None
-        buf = os.pread(self.fd, length, off)
+        buf = self._read_at(off, length)
         return buf if len(buf) == length else None
 
     # -- engine detection & meta pages --
 
     def detect_engine(self):
-        head = os.pread(self.fd, 64, 0)
+        head = self._read_at(0, 64)
         hdrsz = None
         for off in range(0, 64, 4):
             if off + 4 <= len(head) and _U32.unpack_from(head, off)[0] == MDB_MAGIC:
@@ -304,7 +312,7 @@ class _Verifier:
         want = self.hdrsz + 160
         if off + self.hdrsz + 136 > self.filesize:
             raise VerifyError('meta page %d is beyond the end of the file' % pgno)
-        buf = os.pread(self.fd, want, off)
+        buf = self._read_at(off, want)
         if len(buf) < self.hdrsz + 136:
             raise VerifyError('meta page %d is truncated' % pgno)
         meta = _Meta(buf, 0, self.hdrsz)
@@ -968,9 +976,7 @@ def verify(path, subdir=None):
 
     Raises `VerifyError` only when verification cannot begin at all."""
     data_path = resolve_data_path(path, subdir)
-    fd = os.open(data_path, os.O_RDONLY)
-    try:
-        v = _Verifier(fd, os.fstat(fd).st_size)
-        return v.verify()
-    finally:
-        os.close(fd)
+    with open(data_path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        filesize = f.tell()
+        return _Verifier(f, filesize).verify()
