@@ -32,7 +32,10 @@ several invariants the outline stated only generically, all confirmed against
   plus every promoted dup sub-tree (`mdb_subdb_adjust`), and a promoted dup
   sub-DB record legitimately carries `MDB_DUPFIXED` **without** `MDB_DUPSORT`
   and is ordered by the *parent's* data comparator, not its own flags — both
-  were false-positive traps a naive reading would have hit.
+  were false-positive traps a naive reading would have hit.  A third: the
+  aggregation is ITS#9388, new in 0.9.36, so files from older writers hold
+  only the own-tree counts (and a file that saw both writers something in
+  between); `verify` accepts the closed `[own, aggregate]` range.
 - Overflow: `OVPAGES(NODEDSZ) == mp_pages` (and, on 1.0, the node's `op_pages`),
   extent within `next_pgno`, and `F_BIGDATA|F_DUPDATA` rejected.
 
