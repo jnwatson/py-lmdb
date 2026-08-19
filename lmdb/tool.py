@@ -64,6 +64,15 @@ Basic tools for working with LMDB.
 
     stat: Print environment statistics.
 
+    verify: Offline structural audit of a data file (verify-then-trust).
+        %prog verify -e /path/to/db     # subdir environment
+        %prog verify -s single.mdb      # single-file environment
+
+        Reads the file as raw bytes without opening it through liblmdb, and
+        checks every invariant the engine's write paths assume.  Exits 0 and
+        prints "verify: OK" if the file is sound; otherwise prints each problem
+        and exits 1.  Run this on a file you do not control before trusting it.
+
     warm: Read environment into page cache sequentially.
 
     watch: Show live environment statistics
@@ -593,6 +602,38 @@ def cmd_stat(opts, args):
     pprint.pprint(ENV.info())
 
 
+def cmd_verify(opts, args):
+    """Fully verify a data file offline, without opening it through liblmdb.
+
+    Usage: %prog verify [-e ENV | <path>] [-s]
+
+    Reads the file as raw bytes and checks every invariant the LMDB write
+    paths assume (see lmdb/verify.py).  Prints nothing and exits 0 if the file
+    is sound; otherwise prints each problem and exits 1.  This is the offline
+    audit for the "verify-then-trust" model: pass a file you do not control
+    through it before opening that file with the engine.
+    """
+    from lmdb import verify as _verify
+    path = args[0] if args else opts.env
+    if not path:
+        die('verify: specify a path (positional or with --env)')
+    subdir = None
+    if opts.use_single_file:
+        subdir = False
+    try:
+        errors = _verify.verify(path, subdir=subdir)
+    except _verify.VerifyError as e:
+        die('verify: %s', e)
+    except OSError as e:
+        die('verify: %s', e)
+    if errors:
+        for line in errors:
+            sys.stdout.write('%s\n' % (line,))
+        die('verify: FAILED (%d problem%s)',
+            len(errors), '' if len(errors) == 1 else 's')
+    sys.stdout.write('verify: OK\n')
+
+
 def _get_term_width(default=(80, 25)):
     try:
         import fcntl    # No fcntl on win32
@@ -615,6 +656,13 @@ def main(argv=None):
 
     if not args:
         die('Please specify a command (see --help)')
+
+    # verify inspects an untrusted file as raw bytes; it must NOT be opened
+    # through liblmdb, so it is dispatched before the lmdb.open() below.
+    if args[0] == 'verify':
+        cmd_verify(opts, args[1:])
+        return
+
     if not opts.env:
         die('Please specify environment (--env)')
 

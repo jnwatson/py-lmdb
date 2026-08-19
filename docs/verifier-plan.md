@@ -1,9 +1,44 @@
 # Plan: offline verifier (verify-then-trust)
 
-Status: **planned**. This records a decision already reached; it introduces no
-new analysis. It is the counterpart to the runtime-hardening work tracked
-separately — see `freedb-record-validation.md` for the Tier 0 defects that
-hardening closes.
+Status: **implemented**. Landed as `lmdb/verify.py` (a pure-Python byte
+walker), the `python -m lmdb verify` subcommand in `lmdb/tool.py`, and
+`lmdb.verify.verify(path)`. Tests in `tests/verify_test.py` cover both engines
+(positive round-trips on plain/dupsort/dupfixed/named/overflow/deletion
+databases, plus the documented forgeries including the Tier-3 live-page-in-
+freeDB signature). User-facing docs carry the threat model and operational
+caveats under "Trust model and offline verification" in `docs/index.rst`. The
+sections below are retained as the design record.
+
+It is the counterpart to the runtime-hardening work tracked separately — see
+`freedb-record-validation.md` for the Tier 0 defects that hardening closes.
+
+## What shipped vs. the plan
+
+The invariant catalog below was re-derived against the actual write paths and
+the read-hardening patch series before implementation; the shipped checker adds
+several invariants the outline stated only generically, all confirmed against
+`mdb.c`:
+
+- Both meta pages must parse (magic, version, `P_META`) before the committed
+  one is picked by `mm_txnid`; the two must agree on `mm_psize` (the staggered
+  header read anchors meta 1 at `meta0.mm_psize`); `mm_psize` must be a power of
+  two that fits a meta page; commit-parity holds (`meta[0]` even txnid,
+  `meta[1]` odd or zero, never equal-nonzero); each page stores its own
+  `mp_pgno`.
+- `BAD_DB_FLAGS` (DUPFIXED/INTEGERDUP/REVERSEDUP require DUPSORT), `md_depth <=
+  CURSOR_STACK`, `md_root` in range, and the LEAF2 relation
+  `NUMKEYS*md_pad <= usable` with the page's `mp_pad` agreeing with the record.
+- A **DUPSORT DB's `md_branch/leaf_pages` are the aggregate** of its own tree
+  plus every promoted dup sub-tree (`mdb_subdb_adjust`), and a promoted dup
+  sub-DB record legitimately carries `MDB_DUPFIXED` **without** `MDB_DUPSORT`
+  and is ordered by the *parent's* data comparator, not its own flags — both
+  were false-positive traps a naive reading would have hit.
+- Overflow: `OVPAGES(NODEDSZ) == mp_pages` (and, on 1.0, the node's `op_pages`),
+  extent within `next_pgno`, and `F_BIGDATA|F_DUPDATA` rejected.
+
+The one caveat carried forward: `verify` assumes the host's native byte order
+and a 64-bit build (8-byte `pgno`/`txnid`/size fields), and reports anything
+else as unsupported rather than mis-parsing it.
 
 ## Decision: reframe the threat model
 
