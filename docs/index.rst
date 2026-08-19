@@ -1150,15 +1150,15 @@ steer those reads out of bounds. py-lmdb's threat model is layered:
   lock file and, under some flags, to the data file, and it trusts the meta
   page's parameters immediately.
 
-- **Opening an arbitrary file and reading through it should not crash or
-  corrupt the process.** The bundled engines carry a series of hardening
-  patches that bound every structure the read and write paths consume at its
-  point of use, so traversing even a malformed file fails cleanly with
+- **If an unverified file is opened anyway, the protection is for the
+  process, not the data.** The bundled engines carry a series of hardening patches that bound
+  every structure the read and write paths consume at its point of use, so
+  traversing even a malformed file fails cleanly with
   :py:class:`lmdb.CorruptedError` or :py:class:`lmdb.InvalidError` instead of
-  a segfault. This is best-effort defense in depth, not a guarantee that the
-  file's *contents* mean what they claim — and builds that omit the bundled
-  patches (``LMDB_PURE=1``, or ``LMDB_FORCE_SYSTEM=1`` against a system
-  ``liblmdb``) carry none of it.
+  a segfault. This backstop does not weaken the rule above: it is
+  best-effort, it is absent from builds that omit the bundled patches
+  (``LMDB_PURE=1``, or ``LMDB_FORCE_SYSTEM=1`` against a system
+  ``liblmdb``), and it cannot make the file's contents true.
 
 - **Writing is where a dishonest file does real damage.** The same hardening
   bounds the write paths, so writing should not crash the process either —
