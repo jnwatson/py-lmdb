@@ -88,6 +88,14 @@ but page structure, so it defeats even a fully coherent forgery. Cost is
 O(database pages) plus a bitmap of `next_pgno` bits — 32 MB for a 1 TB database
 at 4 K pages, which is fine. It cannot be a per-transaction check.
 
+*Implemented* as the offline `verify` tool — `lmdb/verify.py`,
+`python -m lmdb verify`, `lmdb.verify.verify()` — see `docs/verifier-plan.md`.
+A freeDB record naming a genuinely live page surfaces there as a failed
+disjoint-and-cover assertion ("page N is both reachable and in the freeDB"),
+which is exactly the coherent-forgery residual left over from issue #484 that
+no per-transaction check can reach. Tier 0 shipped separately as the
+`validate-freedb-record` engine patch (both engines).
+
 ## On the "no new API" constraint
 
 Tiers 0 through 2 are unconditional validation, consistent with how the rest of

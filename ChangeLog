@@ -38,6 +38,26 @@ Features
     which 0.9 raises as ``EACCES``, so writing in a read-only transaction
     raises the same class on both engines.
 
+- New offline verifier for the "verify-then-trust" model:
+    ``python -m lmdb verify <path>``, and the underlying
+    ``lmdb.verify.verify(path)``.  It is a pure-Python byte walker that never
+    hands the file to the C engine, so it is safe to run on a data file
+    from an untrusted source before opening it.  It uses a global view of the
+    file to check every invariant the write paths assume — meta-page
+    selection, a full tree walk from the committed roots, structural bounds,
+    key ordering, per-database counters, the absence of dirty markers at
+    rest, and that the free and reachable page sets are disjoint and cover
+    the file.  The last of these catches a coherent forged free-database
+    record that names a genuinely live page, the residual left over from the
+    ``validate-freedb-record`` engine patch and issue #484 that no
+    per-transaction check can reach.  Works on every build (patched, pure,
+    system, cffi); assumes a 64-bit, native-byte-order file and reports
+    anything else as unsupported.  See "Trust model and offline verification"
+    in the documentation, which also states py-lmdb's threat model and the
+    tool's operational caveats (verify a private copy; discard a supplied
+    lock file; trust extends to every later co-writer) for the first time in
+    user-facing form.
+
 Bug fixes
 ---------
 
