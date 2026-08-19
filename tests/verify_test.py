@@ -100,6 +100,9 @@ class _Layout:
     def u16(self, off):
         return struct.unpack_from('<H', self.raw, off)[0]
 
+    def u32(self, off):
+        return struct.unpack_from('<I', self.raw, off)[0]
+
     def u64(self, off):
         return struct.unpack_from('<Q', self.raw, off)[0]
 
@@ -136,6 +139,10 @@ class _Layout:
         ptr = self.u16(pg * self.psize + self.hdrsz + 2 * i)
         return pg * self.psize + ptr + self.pagebase
 
+    def numkeys(self, pg):
+        lower = self.u16(pg * self.psize + self.hdrsz - 4)
+        return (lower - (self.hdrsz - self.pagebase)) >> 1
+
     def find_leaf(self):
         for pg in range(2, self.npages):
             fl = self.pg_flags(pg)
@@ -143,17 +150,59 @@ class _Layout:
                 return pg
         return None
 
-    def descend_free_leaf(self):
-        root = self.free_root()
-        if root == (1 << 64) - 1:
-            return None
+    def descend_leaf(self, root):
+        """Follow child 0 from `root` down to a leaf page, or None."""
         pg = root
-        while True:
+        for _ in range(64):
+            if pg >= self.npages:
+                return None
             fl = self.pg_flags(pg)
             if fl & 0x02:
                 return pg
             o = self.node_off(pg, 0)
             pg = self.u16(o) | (self.u16(o + 2) << 16) | (self.u16(o + 4) << 32)
+        return None
+
+    def descend_free_leaf(self):
+        root = self.free_root()
+        if root == (1 << 64) - 1:
+            return None
+        return self.descend_leaf(root)
+
+    def bigdata_node(self):
+        """Return (node_off, data_off, op_pgno) of the first F_BIGDATA node in
+        a live-looking leaf, or None."""
+        for pg in range(2, self.npages):
+            fl = self.pg_flags(pg)
+            if not (fl & 0x02) or (fl & 0x40):
+                continue
+            nk = self.numkeys(pg)
+            if nk < 1 or nk > self.psize // 2:
+                continue
+            for i in range(nk):
+                o = self.node_off(pg, i)
+                if o + 8 > (pg + 1) * self.psize:
+                    break
+                if self.u16(o + 4) & 0x01:          # F_BIGDATA
+                    ks = self.u16(o + 6)
+                    doff = o + 8 + (((ks + 1) & ~1) if self.hdrsz == 24 else ks)
+                    return o, doff, self.u64(doff)
+        return None
+
+    def named_db_record(self):
+        """Return the MDB_db data offset of the named sub-DB record stored as
+        node 0 of the main tree's leftmost leaf, or None."""
+        root = self.main_root()
+        if root == (1 << 64) - 1:
+            return None
+        pg = self.descend_leaf(root)
+        if pg is None or self.numkeys(pg) < 1:
+            return None
+        o = self.node_off(pg, 0)
+        if not (self.u16(o + 4) & 0x02):            # F_SUBDATA
+            return None
+        ks = self.u16(o + 6)
+        return o + 8 + (((ks + 1) & ~1) if self.hdrsz == 24 else ks)
 
     def free_value(self):
         """Return (value_offset, count) of freeDB leaf node 0, or None."""
@@ -256,14 +305,22 @@ class VerifyPositiveTest(LmdbTest):
                     t.put(b'k%06d' % i, b'v', db=db)
         self._check(fn)
 
-    def test_reversedup(self):
+    def test_writemap_env(self):
+        # writemap mode flushes pages through the map rather than write(); the
+        # at-rest file must look identical to the verifier (in particular, no
+        # in-memory page flags may leak to disk).
         def fn(e):
-            db = e.open_db(b'rd', dupsort=True, reverse_key=False)
+            db = e.open_db(b'dups', dupsort=True)
             with e.begin(write=True) as t:
-                for i in range(40):
-                    for j in range(30):
-                        t.put(b'k%03d' % i, b'd%05d' % j, db=db)
-        self._check(fn)
+                for i in range(1500):
+                    t.put(b'k%06d' % i, b'v' * 25)
+                for i in range(50):
+                    for j in range(10):
+                        t.put(b'd%03d' % i, b'x%02d' % j, db=db)
+            with e.begin(write=True) as t:
+                for i in range(0, 1500, 2):
+                    t.delete(b'k%06d' % i)
+        self._check(fn, writemap=True)
 
     def test_integerdup(self):
         def fn(e):
@@ -330,21 +387,161 @@ class VerifyPositiveTest(LmdbTest):
             env.close()
         self.assertEqual(V.verify(path, subdir=False), [])
 
+    def test_pre_9388_dupsort_counters(self):
+        # Files written by LMDB < 0.9.36 track only a DUPSORT DB's own tree in
+        # md_branch/leaf_pages (no mdb_subdb_adjust aggregation), so real
+        # legacy databases hold the own-tree counts.  Model one by rewriting a
+        # fresh file's aggregate back to the own-tree value: it must still
+        # verify clean.
+        path = temp_dir()
 
-# ============================ negative tests ================================
+        def fn(e):
+            db = e.open_db(b'df', dupsort=True, dupfixed=True)
+            with e.begin(write=True) as t:
+                for i in range(20):
+                    for j in range(500):
+                        t.put(b'k%03d' % i, struct.pack('<Q', j), db=db)
+        _build(path, fn)
+        self.assertEqual(V.verify(path), [])
+        data = os.path.join(path, 'data.mdb')
+        with open(data, 'rb') as f:
+            raw = bytearray(f.read())
+        lay = _Layout(raw)
+        doff = lay.named_db_record()
+        if doff is None:
+            self.skipTest('could not locate the named-DB record')
+        # 20 short keys fit one leaf: the own tree is one leaf, no branches.
+        lay.set64(doff + 8, 0)                      # md_branch_pages
+        lay.set64(doff + 16, 1)                     # md_leaf_pages
+        with open(data, 'wb') as f:
+            f.write(lay.raw)
+        self.assertEqual(V.verify(path), [])
 
-@unittest.skipUnless(SUPPORTED, 'verifier supports 64-bit 0.9/1.0 files only')
-class VerifyNegativeTest(LmdbTest):
-    def _forge(self, mutate, deletions=False):
-        """Build a DB (optionally with deletions to populate the freeDB),
-        confirm it passes clean, then apply `mutate` to the raw bytes and
-        return the verify() result on the forged file."""
+    # -- crash consistency: garbage outside the committed snapshot is fine --
+
+    def test_trailing_uncommitted_garbage(self):
+        # A crash can leave allocated-but-uncommitted pages past the committed
+        # frontier (mm_last_pg); they are outside the snapshot and must not
+        # fail verification.
+        path = temp_dir()
+
+        def fn(e):
+            with e.begin(write=True) as t:
+                for i in range(200):
+                    t.put(b'k%04d' % i, b'v' * 10)
+        _build(path, fn)
+        layout = _detect_layout(path)
+        self.assertIsNotNone(layout)
+        assert layout is not None
+        psize = layout[2]
+        with open(os.path.join(path, 'data.mdb'), 'ab') as f:
+            f.write(b'\xa5' * (4 * psize))
+        self.assertEqual(V.verify(path), [])
+
+    def test_garbage_in_free_pages(self):
+        # Pages the committed snapshot lists as free may hold arbitrary bytes
+        # (e.g. writes from a transaction lost in a crash).  Their contents are
+        # outside the snapshot: verify must still pass, and the engine must
+        # still read the file.
         path = temp_dir()
 
         def fn(e):
             with e.begin(write=True) as t:
                 for i in range(2000):
                     t.put(b'k%06d' % i, b'v' * 20)
+            with e.begin(write=True) as t:
+                for i in range(0, 2000, 3):
+                    t.delete(b'k%06d' % i)
+        _build(path, fn)
+        data = os.path.join(path, 'data.mdb')
+        with open(data, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            v = V._Verifier(f, f.tell())
+            self.assertEqual(v.verify(), [])
+            free_pages = [pg for pg in range(2, v.next_pgno) if v.free[pg]]
+        self.assertTrue(free_pages, 'expected a populated freeDB')
+        with open(data, 'r+b') as f:
+            for pg in free_pages[:8]:
+                f.seek(pg * v.psize)
+                f.write(b'\xff' * v.psize)
+        self.assertEqual(V.verify(path), [])
+        env = lmdb.open(path, readonly=True, lock=False)
+        try:
+            with env.begin() as t:
+                n = sum(1 for _ in t.cursor())
+        finally:
+            env.close()
+        self.assertTrue(n)
+
+    def test_crash_rollback(self):
+        # Model a mid-commit crash: later transactions' page writes are in the
+        # file but the metas still name an older committed snapshot.  Copy-on-
+        # write guarantees those writes only touched pages the old snapshot
+        # holds free (or beyond its frontier), so the rolled-back image must
+        # verify clean and the engine must read the old data from it.
+        path = temp_dir()
+        data = os.path.join(path, 'data.mdb')
+        env = lmdb.open(path, map_size=32 * 1024 * 1024)
+        try:
+            with env.begin(write=True) as t:
+                for i in range(2000):
+                    t.put(b'k%06d' % i, b'A' * 20)
+            env.sync(True)
+        finally:
+            env.close()
+        with open(data, 'rb') as f:
+            snap = f.read()
+
+        env = lmdb.open(path, map_size=32 * 1024 * 1024)
+        try:
+            with env.begin(write=True) as t:
+                for i in range(0, 2000, 2):
+                    t.delete(b'k%06d' % i)
+            with env.begin(write=True) as t:
+                for i in range(3000):
+                    t.put(b'n%06d' % i, b'B' * 30)
+            env.sync(True)
+        finally:
+            env.close()
+        with open(data, 'rb') as f:
+            later = bytearray(f.read())
+
+        psize = _Layout(bytearray(snap)).psize
+        later[:2 * psize] = snap[:2 * psize]      # metas from the old snapshot
+        crash = temp_dir()
+        with open(os.path.join(crash, 'data.mdb'), 'wb') as f:
+            f.write(later)
+
+        self.assertEqual(V.verify(crash), [])
+        env = lmdb.open(crash, readonly=True, lock=False)
+        try:
+            with env.begin() as t:
+                self.assertEqual(sum(1 for _ in t.cursor()), 2000)
+                self.assertEqual(t.get(b'k000000'), b'A' * 20)
+                self.assertIsNone(t.get(b'n000000'))
+        finally:
+            env.close()
+
+
+# ============================ negative tests ================================
+
+@unittest.skipUnless(SUPPORTED, 'verifier supports 64-bit 0.9/1.0 files only')
+class VerifyNegativeTest(LmdbTest):
+    def _forge(self, mutate, deletions=False, big=False):
+        """Build a DB (optionally with deletions to populate the freeDB, or
+        with `big` overflow values), confirm it passes clean, then apply
+        `mutate` to the raw bytes and return the verify() result on the
+        forged file."""
+        path = temp_dir()
+
+        def fn(e):
+            with e.begin(write=True) as t:
+                for i in range(2000):
+                    t.put(b'k%06d' % i, b'v' * 20)
+            if big:
+                with e.begin(write=True) as t:
+                    for i in range(30):
+                        t.put(b'big%03d' % i, b'x' * 9000)
             if deletions:
                 with e.begin(write=True) as t:
                     for i in range(0, 2000, 3):
@@ -363,8 +560,8 @@ class VerifyNegativeTest(LmdbTest):
             f.write(lay.raw)
         return path
 
-    def _assert_rejected(self, mutate, deletions=False, needle=None):
-        path = self._forge(mutate, deletions)
+    def _assert_rejected(self, mutate, deletions=False, big=False, needle=None):
+        path = self._forge(mutate, deletions, big)
         try:
             errors = V.verify(path)
         except V.VerifyError:
@@ -462,6 +659,148 @@ class VerifyNegativeTest(LmdbTest):
             l.set64(fv[0] + 8, l.main_root())       # a live page
         self._assert_rejected(mut, deletions=True,
                               needle='both reachable and in the freeDB')
+
+    def test_leaf_keys_out_of_order(self):
+        # Zero out a live leaf's second key so it sorts below its predecessor:
+        # the comparator machinery must notice.
+        def mut(l):
+            pg = l.descend_leaf(l.main_root())
+            if pg is None or l.numkeys(pg) < 2:
+                return False
+            o = l.node_off(pg, 1)
+            ks = l.u16(o + 6)
+            if not ks:
+                return False
+            l.raw[o + 8:o + 8 + ks] = b'\x00' * ks
+        self._assert_rejected(mut, needle='out of order')
+
+    def test_entries_counter_forged(self):
+        def mut(l):
+            l.set64(l.main_off() + 32, l.u64(l.main_off() + 32) + 1)
+        self._assert_rejected(mut, needle='entries, record says')
+
+    def test_leaf_pages_counter_forged(self):
+        def mut(l):
+            l.set64(l.main_off() + 16, l.u64(l.main_off() + 16) + 1)
+        self._assert_rejected(mut, needle='leaf pages, record says')
+
+    def test_leaf_with_overflow_flag(self):
+        # A reachable leaf forged as P_LEAF|P_OVERFLOW must be rejected, not
+        # treated as a leaf with a stray bit.
+        def mut(l):
+            pg = l.descend_leaf(l.main_root())
+            if pg is None:
+                return False
+            off = pg * l.psize + l.hdrsz - 6
+            l.set16(off, l.u16(off) | 0x04)
+        self._assert_rejected(mut, needle='mixed or invalid page flags')
+
+    def test_overflow_page_with_leaf_flag(self):
+        # The converse forgery: an overflow page carrying P_LEAF as well.
+        def mut(l):
+            bn = l.bigdata_node()
+            if bn is None:
+                return False
+            _, _, op = bn
+            off = op * l.psize + l.hdrsz - 6
+            l.set16(off, l.u16(off) | 0x02)
+        self._assert_rejected(mut, big=True, needle='not a pure overflow')
+
+    def test_overflow_header_pages_forged(self):
+        # The overflow page header's mp_pages must equal OVPAGES(dsize).
+        def mut(l):
+            bn = l.bigdata_node()
+            if bn is None:
+                return False
+            _, _, op = bn
+            hoff = op * l.psize + l.hdrsz - 4
+            l.set32(hoff, l.u32(hoff) + 1)
+        self._assert_rejected(mut, big=True, needle='header mp_pages')
+
+    def test_overflow_pointer_at_live_page(self):
+        # Point an F_BIGDATA node at a live tree page instead of its extent.
+        def mut(l):
+            bn = l.bigdata_node()
+            if bn is None:
+                return False
+            _, doff, _ = bn
+            l.set64(doff, l.main_root())
+        self._assert_rejected(mut, big=True, needle='not a pure overflow')
+
+    def test_overflow_extent_shifted(self):
+        # Shift the extent start into its own body: the "first" page is then
+        # raw data, not an overflow header.
+        def mut(l):
+            bn = l.bigdata_node()
+            if bn is None:
+                return False
+            _, doff, op = bn
+            l.set64(doff, op + 1)
+        self._assert_rejected(mut, big=True)
+
+    def test_overflow_node_pages_forged(self):
+        # 1.0 duplicates the extent length in the node (op_pages); it must
+        # agree with OVPAGES(dsize).  0.9 has no node-level count: skip.
+        def mut(l):
+            if l.hdrsz != 24:
+                return False
+            bn = l.bigdata_node()
+            if bn is None:
+                return False
+            _, doff, _ = bn
+            l.set64(doff + 16, l.u64(doff + 16) + 1)
+        self._assert_rejected(mut, big=True, needle='overflow op_pages')
+
+
+# ============================ MDB_REVERSEDUP ================================
+
+@unittest.skipUnless(SUPPORTED, 'verifier supports 64-bit 0.9/1.0 files only')
+class VerifyReversedupTest(LmdbTest):
+    """py-lmdb never sets MDB_REVERSEDUP itself, so files that use it (written
+    by other bindings or C code) are modelled by building a lexical dupsort DB
+    and flipping the flag into its named-DB record.  Single-byte duplicates
+    order identically under the lexical and reverse comparators, so the forged
+    file is genuinely valid (positive); multi-byte duplicates do not, so the
+    verifier must flag them (negative) -- proving the reverse-duplicate
+    comparator path actually runs."""
+
+    def _forge_reversedup(self, values):
+        path = temp_dir()
+
+        def fn(e):
+            db = e.open_db(b'rd', dupsort=True)
+            with e.begin(write=True) as t:
+                for i in range(4):
+                    for v in values:
+                        t.put(b'k%d' % i, v, db=db)
+        _build(path, fn)
+        self.assertEqual(V.verify(path), [], 'clean DB should pass first')
+
+        data = os.path.join(path, 'data.mdb')
+        with open(data, 'rb') as f:
+            raw = bytearray(f.read())
+        lay = _Layout(raw)
+        doff = lay.named_db_record()
+        if doff is None:
+            self.skipTest('could not locate the named-DB record')
+        flags = lay.u16(doff + 4)
+        self.assertTrue(flags & 0x04, 'expected MDB_DUPSORT set')
+        lay.set16(doff + 4, flags | 0x40)           # + MDB_REVERSEDUP
+        with open(data, 'wb') as f:
+            f.write(lay.raw)
+        return path
+
+    def test_reversedup_valid_order(self):
+        path = self._forge_reversedup([b'a', b'b', b'c', b'd'])
+        self.assertEqual(V.verify(path), [])
+
+    def test_reversedup_detects_disorder(self):
+        # Lexically 'ab' < 'ba', but reversed 'ba' < 'ab': the engine-built
+        # lexical order violates the REVERSEDUP comparator the flag demands.
+        path = self._forge_reversedup([b'ab', b'ba'])
+        errors = V.verify(path)
+        self.assertTrue(any('dup data out of order' in e for e in errors),
+                        'expected a dup-order error, got %r' % (errors,))
 
 
 if __name__ == '__main__':

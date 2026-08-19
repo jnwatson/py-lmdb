@@ -37,7 +37,8 @@ view of the file at rest:
     structurally sound, stores its own page number, and is reachable exactly
     once;
   * keys are ordered under the comparator each DB's flags imply, and each DB's
-    page/entry/depth counters match what the walk actually finds;
+    page/entry/depth counters match what the walk actually finds (DUPSORT page
+    counts written before ITS#9388's aggregation are also accepted);
   * no reachable page carries a dirty marker (0.9 ``P_DIRTY``; 1.0 an
     ``mp_txnid`` newer than the committed meta);
   * freeDB records are structurally valid, and -- the global check that only an
@@ -83,6 +84,14 @@ P_META = 0x08
 P_DIRTY_09 = 0x10       # 0.9 only; on 1.0 this header bit is unused
 P_LEAF2 = 0x20
 P_SUBP = 0x40
+
+# A committed full page's type bits must be exactly one of P_BRANCH, P_LEAF,
+# P_LEAF|P_LEAF2 (a DUPFIXED leaf) or P_OVERFLOW.  Neither engine writes any
+# other combination -- or any bit outside this mask -- to a full page at rest:
+# 0.9 clears P_DIRTY in mdb_page_flush, and 1.0's remaining flags (P_LOOSE,
+# P_KEEP) are memory-only.  Sub-pages are the exception: 0.9 embeds them with
+# P_DIRTY set and never clears the copy, so their flags are checked separately.
+_TYPE_MASK = P_BRANCH | P_LEAF | P_OVERFLOW | P_META | P_LEAF2 | P_SUBP
 
 # Node flags.
 F_BIGDATA = 0x01
@@ -504,23 +513,37 @@ class _Verifier:
         }
         self._walk_page(ctx, db.root, 1)
 
-        total_branch = ctx['branch'] + ctx['dup_branch']
-        total_leaf = ctx['leaf'] + ctx['dup_leaf']
-        self._check_counts(name, db, total_branch, total_leaf,
-                           ctx['overflow'], ctx['entries'], ctx['maxdepth'])
+        self._check_counts(name, db, ctx)
 
         for sub in ctx['named_subtrees']:
             self._verify_tree(sub.name, sub.db, sub.key_cmp, sub.dup_cmp,
                               is_free=False)
-        return total_branch, total_leaf
+        return ctx['branch'] + ctx['dup_branch'], ctx['leaf'] + ctx['dup_leaf']
 
-    def _check_counts(self, name, db, branch, leaf, overflow, entries, depth):
+    def _check_counts(self, name, db, ctx):
+        # md_branch/leaf_pages of a DUPSORT DB: LMDB 0.9.36 and 1.0 maintain
+        # the aggregate including promoted dup sub-trees (mdb_subdb_adjust,
+        # ITS#9388); earlier 0.9 writers tracked only the DB's own tree, and a
+        # file that has seen both writers can hold something in between.  All
+        # of those are legitimate at-rest states -- the counters are
+        # bookkeeping, not allocator inputs -- so accept the closed range.
+        for label, lo, hi, claimed in (
+                ('branch pages', ctx['branch'],
+                 ctx['branch'] + ctx['dup_branch'], db.branch_pages),
+                ('leaf pages', ctx['leaf'],
+                 ctx['leaf'] + ctx['dup_leaf'], db.leaf_pages)):
+            if lo <= claimed <= hi:
+                continue
+            if lo == hi:
+                self.err('%s DB: walked %d %s, record says %d'
+                         % (name, lo, label, claimed))
+            else:
+                self.err('%s DB: walked %d %s (%d with dup sub-trees), record '
+                         'says %d' % (name, lo, label, hi, claimed))
         for label, walked, claimed in (
-                ('branch pages', branch, db.branch_pages),
-                ('leaf pages', leaf, db.leaf_pages),
-                ('overflow pages', overflow, db.overflow_pages),
-                ('entries', entries, db.entries),
-                ('depth', depth, db.depth)):
+                ('overflow pages', ctx['overflow'], db.overflow_pages),
+                ('entries', ctx['entries'], db.entries),
+                ('depth', ctx['maxdepth'], db.depth)):
             if walked != claimed:
                 self.err('%s DB: walked %d %s, record says %d'
                          % (name, walked, label, claimed))
@@ -543,32 +566,39 @@ class _Verifier:
 
         flags = self._pg_flags(buf, 0)
         self._check_not_dirty(name, pgno, buf, flags)
+        if not self._flags_at_rest_ok(flags):
+            self.err('%s DB: page %d has unknown flag bits 0x%x' % (name, pgno, flags))
+            return
 
-        if flags & P_META:
+        ptype = flags & _TYPE_MASK
+        if ptype & P_META:
             self.err('%s DB: meta page %d reachable as a tree page' % (name, pgno))
             return
-        if flags & P_SUBP:
+        if ptype & P_SUBP:
             self.err('%s DB: standalone P_SUBP page %d' % (name, pgno))
             return
 
-        if flags & P_BRANCH:
-            if flags & (P_LEAF | P_LEAF2 | P_OVERFLOW):
-                self.err('%s DB: page %d has mixed page flags 0x%x' % (name, pgno, flags))
-                return
+        if ptype == P_BRANCH:
             ctx['maxdepth'] = max(ctx['maxdepth'], depth)
             ctx['branch'] += 1
             self._walk_branch(ctx, pgno, buf, depth)
-        elif flags & P_LEAF2:
+        elif ptype == (P_LEAF | P_LEAF2):
             ctx['maxdepth'] = max(ctx['maxdepth'], depth)
             ctx['leaf'] += 1
             self._walk_leaf2(ctx, pgno, buf)
-        elif flags & P_LEAF:
+        elif ptype == P_LEAF:
             ctx['maxdepth'] = max(ctx['maxdepth'], depth)
             ctx['leaf'] += 1
             self._walk_leaf(ctx, pgno, buf)
         else:
-            self.err('%s DB: page %d has no valid page type (flags 0x%x)'
+            self.err('%s DB: page %d has mixed or invalid page flags 0x%x'
                      % (name, pgno, flags))
+
+    def _flags_at_rest_ok(self, flags):
+        # Bits a committed full page may carry: the type bits, plus 0.9's
+        # P_DIRTY, which the dirty check reports on its own.
+        known = _TYPE_MASK | (0 if self.eng['has_txnid'] else P_DIRTY_09)
+        return not (flags & ~known)
 
     def _check_not_dirty(self, name, pgno, buf, flags):
         if self.eng['has_txnid']:
@@ -749,9 +779,10 @@ class _Verifier:
             self.err('%s DB: overflow page %d stores mp_pgno %d'
                      % (name, op_pgno, self._pg_pgno(first, 0)))
         oflags = self._pg_flags(first, 0)
-        if not (oflags & P_OVERFLOW):
-            self.err('%s DB: page %d node %d points at non-overflow page %d'
-                     % (name, pgno, i, op_pgno))
+        if (oflags & _TYPE_MASK) != P_OVERFLOW or not self._flags_at_rest_ok(oflags):
+            self.err('%s DB: page %d node %d points at page %d which is not a '
+                     'pure overflow page (flags 0x%x)'
+                     % (name, pgno, i, op_pgno, oflags))
         self._check_not_dirty(name, op_pgno, first, oflags)
         hdr_pages = self._pg_pages(first, 0)
         if hdr_pages != need:
