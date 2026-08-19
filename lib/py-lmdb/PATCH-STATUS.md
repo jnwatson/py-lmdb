@@ -129,6 +129,57 @@ byte-identical to pristine 0.9.36 across `mtest` through `mtest5`.
 
 ## Resolved
 
+### `validate-freedb-record` — unvalidated free-database record structure
+
+`mdb_page_alloc()` reads a free-DB record with `mdb_node_read` and trusts it
+whole. Two structural fields were never checked, on either engine:
+
+- **Element count.** `i = idl[0]` is taken as the number of page numbers in
+  the record without comparing it to the node size. A forged count drives
+  `mdb_midl_need()` and `mdb_midl_xmerge()` past the end of the node —
+  SIGBUS reading past the mapping, and garbage page numbers merged into
+  `me_pghead`.
+- **Page numbers.** The reuse path does `pgno = mop[i]; goto search_done;`,
+  jumping *past* the `pgno + num >= me_maxpg` bound that guards only the
+  fresh-page path. So a page number taken from a record is never
+  range-checked: under `MDB_WRITEMAP` the `me_map + psize*pgno` store lands
+  outside the map (SIGSEGV); without it, `mdb_page_flush()` pwrites at
+  `pgno*psize`, an attacker-controlled 64-bit file offset, committing
+  silently and growing the file without bound.
+
+A third, milder case: a record listing the same page twice makes
+`mdb_mid2l_insert` return a duplicate error, which `mdb_page_dirty()`
+funneled into `mdb_tassert` → `abort()` — a DoS where `MDB_CORRUPTED`
+belongs.
+
+The patch adds three constant-time checks, no new loop over file data:
+
+1. In `mdb_page_alloc`, before `idl[0]` is trusted, require
+   `data.mv_size` to be a non-zero multiple of `sizeof(MDB_ID)` equal to
+   `(idl[0]+1)*sizeof(MDB_ID)`. `mv_size` is read before `idl[0]` so the
+   count read itself cannot run off a short node.
+2. At `search_done`, for a reused page number (`i != 0`), require
+   `pgno` in `[NUM_METAS, mt_next_pgno)` with `num` pages of room; the
+   clause order keeps the subtraction from wrapping. `mt_next_pgno` is a
+   tighter and always-valid bound than `me_maxpg` — a freed page is by
+   definition already allocated.
+3. `mdb_page_dirty()` returns `MDB_CORRUPTED` instead of asserting, and its
+   two callers (`mdb_page_alloc`, `mdb_page_unspill`) propagate it.
+
+These are **structural** checks only (the "Tier 0" of the freeDB analysis).
+A coherent forgery that lists a genuinely live page *in range* still passes
+here and is left to an offline reachability verifier; that residual is what
+narrows, but does not close, issue #484's free-DB caveat. Because a freed
+page number now reaches the allocator guaranteed real and in-range, it can
+no longer be the memory-safety half of that caveat.
+
+Regression tests are in `tests/cve_test.py` (`FreeDbRecordTest`), engine
+agnostic so they run on both trees, and including
+`test_normal_freelist_reuse_still_works`, a positive test that passes with
+the patch removed — it guards against false rejection of a valid record.
+Each of the four forgery tests crashes (SIGBUS/SIGSEGV/SIGABRT) or commits
+silently with the patch removed, and returns `MDB_CORRUPTED` with it.
+
 ### `validate-ovpage-free` — unbounded overflow extent on the delete path
 
 `mdb_ovpage_free()` takes the extent from the page header

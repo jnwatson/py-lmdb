@@ -122,6 +122,7 @@ ENGINES = [
             # later patch apply with an offset.
             'validate-md-pad',
             'validate-ovpage-free',
+            'validate-freedb-record',
         ],
     ),
     dict(
@@ -163,6 +164,7 @@ ENGINES = [
             # 1.0 only: 0.9 gets this protection from
             # cve-2019-16225-reject-dirty-pages, which keys on P_DIRTY.
             'cve-2019-16225-validate-mp-txnid',
+            'validate-freedb-record',
         ],
     ),
 ]

@@ -62,6 +62,27 @@ Bug fixes
     data written by an unaffected build still read back correctly on an
     affected one — only the write path consulted the faulty check.
 
+- New ``validate-freedb-record`` hardening patch for both bundled engines:
+    ``mdb_page_alloc()`` trusted a free-database record's structure
+    completely.  Its element count was never checked against the record's
+    node size, so a forged count read past the end of the node
+    (``mdb_midl_xmerge`` SIGBUS) and merged garbage page numbers into the
+    in-memory free list.  A page number taken from a record was never
+    range-checked either — the reuse path jumps past the bound the
+    fresh-page path applies — so a crafted number could be handed out
+    directly: under ``MDB_WRITEMAP`` the store lands outside the map
+    (SIGSEGV), and without it ``mdb_page_flush()`` later pwrites at an
+    arbitrary file offset, committing silently and growing the file
+    without limit.  The record's node size must now equal
+    ``(count+1)*sizeof(pgno)``, and a reused page number must fall within
+    ``[NUM_METAS, next_pgno)`` with room for the whole run.  A forged
+    record listing the same page twice also tripped an assertion in
+    ``mdb_page_dirty()`` (``abort()``); it now returns ``MDB_CORRUPTED``.
+    As with the rest of the series this matters only if you open a database
+    file you do not trust.  These checks are structural only: a record that
+    lists a genuinely live page in range still passes, which is left to an
+    offline verifier.
+
 - New ``cve-2019-16225-validate-mp-txnid`` hardening patch for the bundled
     LMDB 1.0 engine, restoring a protection 0.9 has had since CVE-2019-16225.
     0.9 rejects a mapped page claiming ``P_DIRTY``; 1.0 removed that flag and

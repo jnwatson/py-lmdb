@@ -1,0 +1,94 @@
+diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
+--- a/libraries/liblmdb/mdb.c
++++ b/libraries/liblmdb/mdb.c
+@@ -2246,8 +2246,9 @@
+ 	return oldest;
+ }
+ 
+-/** Add a page to the txn's dirty list */
+-static void
++/** Add a page to the txn's dirty list.
++ * @return 0 on success, MDB_CORRUPTED if the page number is already listed. */
++static int
+ mdb_page_dirty(MDB_txn *txn, MDB_page *mp)
+ {
+ 	MDB_ID2 mid;
+@@ -2261,8 +2262,17 @@
+ 	mid.mid = mp->mp_pgno;
+ 	mid.mptr = mp;
+ 	rc = insert(txn->mt_u.dirty_list, &mid);
+-	mdb_tassert(txn, rc == 0);
++	if (rc) {
++		/* insert returns -1 when the page number is already present: a
++		 * forged freeDB record listed the same page twice, so the same
++		 * pgno was handed out and dirtied twice in one txn.  Upstream
++		 * asserts here (abort); return MDB_CORRUPTED for the caller to
++		 * propagate instead. */
++		txn->mt_flags |= MDB_TXN_ERROR;
++		return MDB_CORRUPTED;
++	}
+ 	txn->mt_dirty_room--;
++	return MDB_SUCCESS;
+ }
+ 
+ /** Allocate page numbers and memory for writing.  Maintain me_pglast,
+@@ -2392,6 +2402,18 @@
+ 			goto fail;
+ 
+ 		idl = (MDB_ID *) data.mv_data;
++		/* A freeDB record is an IDL: idl[0] elements follow, so its node
++		 * spans exactly (idl[0]+1)*sizeof(MDB_ID) bytes.  Nothing checked
++		 * that against the node size, so a forged count drove the
++		 * mdb_midl_need() below and mdb_midl_xmerge() past the end of the
++		 * node (SIGBUS, garbage merged into me_pghead).  Check mv_size
++		 * before reading idl[0]. */
++		if (data.mv_size < sizeof(MDB_ID) ||
++			data.mv_size % sizeof(MDB_ID) != 0 ||
++			idl[0] != data.mv_size / sizeof(MDB_ID) - 1) {
++			rc = MDB_CORRUPTED;
++			goto fail;
++		}
+ 		i = idl[0];
+ 		if (!mop) {
+ 			if (!(env->me_pghead = mop = mdb_midl_alloc(i))) {
+@@ -2425,6 +2447,20 @@
+ 	}
+ 
+ search_done:
++	/* A pgno reused from the freeDB (i != 0) reaches here having skipped
++	 * the me_maxpg bound the fresh-page path above applies to
++	 * mt_next_pgno.  A crafted record can name any 64-bit pgno; under
++	 * MDB_WRITEMAP the store through me_map just below then lands outside
++	 * the map (SIGSEGV), and without it mdb_page_flush() later pwrites at
++	 * an arbitrary file offset.  A freed page is by definition an
++	 * allocated one, so it must fall in [NUM_METAS, mt_next_pgno) with
++	 * room for num pages; the clause order keeps the subtraction from
++	 * wrapping. */
++	if (i && (pgno < NUM_METAS || pgno >= txn->mt_next_pgno ||
++		num > txn->mt_next_pgno - pgno)) {
++		rc = MDB_CORRUPTED;
++		goto fail;
++	}
+ 	if (env->me_flags & MDB_WRITEMAP) {
+ 		np = (MDB_page *)(env->me_map + env->me_psize * pgno);
+ 	} else {
+@@ -2442,7 +2478,8 @@
+ 		txn->mt_next_pgno = pgno + num;
+ 	}
+ 	np->mp_pgno = pgno;
+-	mdb_page_dirty(txn, np);
++	if ((rc = mdb_page_dirty(txn, np)) != MDB_SUCCESS)
++		goto fail;
+ 	*mp = np;
+ 
+ 	return MDB_SUCCESS;
+@@ -2529,7 +2566,8 @@
+ 				 * page remains spilled until child commits
+ 				 */
+ 
+-			mdb_page_dirty(txn, np);
++			if (mdb_page_dirty(txn, np) != MDB_SUCCESS)
++				return MDB_CORRUPTED;
+ 			np->mp_flags |= P_DIRTY;
+ 			*ret = np;
+ 			break;

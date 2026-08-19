@@ -1650,5 +1650,170 @@ class MdPadTest(unittest.TestCase):
             assert len(list(cur.iternext_dup())) == 4000
 
 
+@unittest.skipIf(SKIP_PURE, "CVE tests require patched LMDB")
+class FreeDbRecordTest(unittest.TestCase):
+    """validate-freedb-record: mdb_page_alloc trusted a free-DB record's
+    structure completely.  A forged element count read past the node
+    (SIGBUS); a forged page number skipped the me_maxpg bound the fresh-page
+    path applies, so it was handed out directly -- SIGSEGV under writemap, an
+    arbitrary-offset pwrite without it; a duplicate page number tripped an
+    assertion in mdb_page_dirty (abort).  The recipe is engine-agnostic: the
+    reuse path, the skipped bound, and the assertion are common code."""
+
+    # Offsets, relative to a meta page's start, of the fields we need.
+    _MM_DBS_IN_PAGE = PAGEHDRSZ + 24            # -> mm_dbs[0]
+    _FREE_ROOT_IN_PAGE = _MM_DBS_IN_PAGE + 40   # mm_dbs[FREE_DBI].md_root
+    _TXNID_IN_PAGE = _MM_DBS_IN_PAGE + 2 * SIZEOF_MDB_DB + 8  # mm_txnid
+
+    F_BIGDATA = 0x01
+    NODESIZE = 8                                 # mn_lo,mn_hi,mn_flags,mn_ksize
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def _build_with_freedb_record(self):
+        """Write a batch, free it in one txn (creating a free-DB record),
+        then churn so the record is settled on disk."""
+        path, env = testlib.temp_env(map_size=16 * 1024 * 1024)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.put(b'k%05d' % i, (b'V' * 200) + b'%d' % i)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.delete(b'k%05d' % i)
+        with env.begin(write=True) as txn:
+            for i in range(50):
+                txn.put(b'x%05d' % i, b'y')
+        env.close()
+        return path
+
+    def _find_freedb_idl(self, raw, psize):
+        """Locate the first inline free-DB record (an IDL) in the file.
+        Returns (data_off, count) or None."""
+        # Pick the valid meta page (higher mm_txnid).
+        best = None
+        for pg in (0, 1):
+            base = pg * psize
+            t = struct.unpack_from('<Q', raw, base + self._TXNID_IN_PAGE)[0]
+            r = struct.unpack_from('<q', raw, base + self._FREE_ROOT_IN_PAGE)[0]
+            if best is None or t >= best[0]:
+                best = (t, r)
+        assert best is not None
+        root = best[1]
+        if root < 0:
+            return None
+        # Descend to a leaf (leftmost); the tree is shallow here.
+        pg = root
+        for _ in range(8):
+            base = pg * psize
+            flags = struct.unpack_from('<H', raw, base + MP_FLAGS_OFFSET)[0]
+            lower = struct.unpack_from('<H', raw, base + MP_LOWER_OFFSET)[0]
+            nkeys = (lower - (PAGEHDRSZ - PAGEBASE)) >> 1
+            if flags & P_LEAF:
+                for i in range(nkeys):
+                    ptr = struct.unpack_from(
+                        '<H', raw, base + MP_PTRS_OFFSET + 2 * i)[0]
+                    noff = base + PAGEBASE + ptr
+                    lo, hi, nf, ks = struct.unpack_from('<HHHH', raw, noff)
+                    if nf & self.F_BIGDATA:
+                        continue            # data is on an overflow page
+                    dsize = lo | (hi << 16)
+                    doff = noff + self.NODESIZE + ks
+                    if dsize >= 16 and dsize % 8 == 0:
+                        cnt = struct.unpack_from('<Q', raw, doff)[0]
+                        if 0 < cnt <= dsize // 8 - 1 and cnt < 100000:
+                            return doff, cnt
+                return None
+            # Branch: follow the leftmost child.
+            ptr = struct.unpack_from('<H', raw, base + MP_PTRS_OFFSET)[0]
+            noff = base + PAGEBASE + ptr
+            lo, hi, nf, ks = struct.unpack_from('<HHHH', raw, noff)
+            pg = lo | (hi << 16) | (nf << 32)
+        return None
+
+    def _forge(self, kind, writemap=False):
+        """Build a db, forge its free-DB record per kind, reopen it."""
+        path = self._build_with_freedb_record()
+        db_path = _db_path(path)
+        psize = _read_page_size(db_path)
+        with open(db_path, 'rb') as f:
+            raw = bytearray(f.read())
+
+        found = self._find_freedb_idl(raw, psize)
+        self.assertIsNotNone(found, 'no inline free-DB record found to forge')
+        assert found is not None            # narrow for the type checker
+        doff, cnt = found
+
+        if kind == 'count':
+            struct.pack_into('<Q', raw, doff, 200000)          # count >> node
+        elif kind == 'pgno':
+            p1 = struct.unpack_from('<Q', raw, doff + 8)[0]
+            struct.pack_into('<Q', raw, doff + 8, p1 + 100000)  # out of range
+        elif kind == 'dup':
+            self.assertGreaterEqual(cnt, 2, 'need >=2 entries to duplicate')
+            p1 = struct.unpack_from('<Q', raw, doff + 8)[0]
+            struct.pack_into('<Q', raw, doff + 16, p1)          # duplicate pgno
+        else:
+            self.fail('unknown kind')
+
+        with open(db_path, 'wb') as f:
+            f.write(raw)
+
+        env = lmdb.open(path, map_size=16 * 1024 * 1024, writemap=writemap)
+        testlib._cleanups.append(env.close)
+        return env
+
+    def _drive_allocation(self, env):
+        """Force mdb_page_alloc to consume the free-DB record."""
+        with env.begin(write=True) as txn:
+            for i in range(300):
+                txn.put(b'z%05d' % i, b'W' * 300)
+
+    def test_forged_element_count(self):
+        """A count larger than the record read past the node (SIGBUS)."""
+        env = self._forge('count')
+        with self.assertRaises(lmdb.Error):
+            self._drive_allocation(env)
+
+    def test_forged_pgno_out_of_range(self):
+        """A page number past the high-water mark was handed out and
+        pwritten at an arbitrary file offset, committing silently."""
+        env = self._forge('pgno')
+        with self.assertRaises(lmdb.Error):
+            self._drive_allocation(env)
+
+    def test_forged_pgno_out_of_range_writemap(self):
+        """Same forged page number under writemap stored outside the map
+        (SIGSEGV); the range check refuses it first."""
+        env = self._forge('pgno', writemap=True)
+        with self.assertRaises(lmdb.Error):
+            self._drive_allocation(env)
+
+    def test_forged_duplicate_pgno(self):
+        """A page number listed twice tripped an assertion in
+        mdb_page_dirty (abort); it now returns MDB_CORRUPTED."""
+        env = self._forge('dup')
+        with self.assertRaises(lmdb.Error):
+            self._drive_allocation(env)
+
+    def test_normal_freelist_reuse_still_works(self):
+        """The checks must not reject legitimate free-DB records: a plain
+        write/delete/write cycle reuses freed pages and reads back intact."""
+        path, env = testlib.temp_env(map_size=16 * 1024 * 1024)
+        testlib._cleanups.append(env.close)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.put(b'k%05d' % i, b'V' * 200)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.delete(b'k%05d' % i)
+        with env.begin(write=True) as txn:
+            for i in range(400):
+                txn.put(b'r%05d' % i, b'W' * 200)   # reuses the freed pages
+        with env.begin() as txn:
+            assert sum(1 for _ in txn.cursor()) == 400
+            assert txn.get(b'r00042') == b'W' * 200
+
+
 if __name__ == '__main__':
     unittest.main()

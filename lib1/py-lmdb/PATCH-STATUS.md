@@ -218,6 +218,15 @@ aliases `mm_psize` and legitimately equals the full page size.
   analysis; the patch is identical on both trees, since both take `ovpages`
   from the page header here even though 1.0's *put* path reads the count
   from the node instead.
+- ~~**free-DB record structure is unvalidated in `mdb_page_alloc`**~~ —
+  fixed by `validate-freedb-record`, added to both series. See the 0.9 file
+  for the analysis; the patch is identical on both trees, since
+  `mdb_page_alloc`'s reuse path, the skipped `me_maxpg` bound, and the
+  `mdb_page_dirty` assertion are all common code. This is the structural
+  ("Tier 0") half only: it guarantees a page number reused from a record is
+  real and in range, which removes the memory-safety half of issue #484's
+  free-DB caveat but not the semantic one — a coherent forgery naming a
+  genuinely live page still needs an offline reachability verifier.
 - **`tests/cve_test.py` covers 17 of its 25 cases on the 1.0 engine.** The
   file now detects `PAGEHDRSZ` and `PAGEBASE` at import and expresses every
   offset in terms of them, so most corruption recipes work on either engine.
