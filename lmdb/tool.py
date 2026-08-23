@@ -276,8 +276,16 @@ def cmd_dump(opts, args):
 
 def restore_cursor_from_fp(txn, fp, db):
     read = fp.read
-    read1 = functools.partial(read, 1)
-    read_until = lambda sep: b''.join(iter(read1, sep))  # NOQA: E731
+
+    def read_until(sep):
+        chunks = []
+        while True:
+            ch = read(1)
+            if not ch:
+                die('unexpected EOF in length field, line/record #%d', rec_nr)
+            if ch == sep:
+                return b''.join(chunks)
+            chunks.append(ch)
 
     rec_nr = 0
 
@@ -316,11 +324,11 @@ def cmd_drop(opts, args):
     if not args:
         die('Must specify at least one sub-database (see --help)')
 
-    dbs = map(ENV.open_db, (map(_to_bytes, args)))
-    for idx, db in enumerate(dbs):
-        name = args[idx]
+    for name in args:
         if name == ':main:':
             die('Cannot drop main DB')
+    for name in args:
+        db = ENV.open_db(_to_bytes(name))
         print('Dropping DB %r...' % (name,))
         with ENV.begin(write=True) as txn:
             txn.drop(db)
@@ -504,7 +512,9 @@ def cmd_warm(opts, args):
         fp = open(opts.env + '/data.mdb', 'rb', bufsize)
     assert isinstance(fp, BufferedReader)
     while fp.tell() < last_offset:
-        fp.readinto(buf)
+        if not fp.readinto(buf):
+            die('data file is truncated (expected %d bytes, got %d)',
+                last_offset, fp.tell())
     print('Warmed %.2fmb in %dms' %
           (last_offset / 1048576., 1000 * (time.time() - t0)))
 
