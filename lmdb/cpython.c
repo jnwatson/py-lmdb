@@ -1080,7 +1080,14 @@ parse_ulong(PyObject *obj, uint64_t *l, PyObject *max)
         PyErr_Format(PyExc_OverflowError, "Integer argument exceeds limit.");
         return -1;
     }
+    /* RichCompareBool above accepts any numeric type (e.g. float), but the
+     * mask conversion only accepts integers: it sets an exception and returns
+     * (unsigned long long)-1 otherwise.  -1 is also a legitimate value, so
+     * disambiguate with PyErr_Occurred() rather than the return value. */
     *l = PyLong_AsUnsignedLongLongMask(obj);
+    if(*l == (unsigned long long)-1 && PyErr_Occurred()) {
+        return -1;
+    }
     return 0;
 }
 
@@ -1459,6 +1466,9 @@ db_from_name(EnvObject *env, MDB_txn *txn, const char *name,
     }
 
     if(! ((dbo = PyObject_New(DbObject, &PyDatabase_Type)))) {
+        /* DBIs are environment-scoped and persist until closed; leaking one
+         * on this OOM path would permanently consume a max_dbs slot. */
+        V->dbi_close(env->env, dbi);
         return NULL;
     }
 
@@ -2260,13 +2270,16 @@ env_copyfd(EnvObject *self, PyObject *args, PyObject *kwds)
 
 #ifdef HAVE_PATCHED_LMDB
     ENV_UNLOCKED(self, rc, V->env_copyfd3(self->env, HANDLE_ARG, flags, txn));
-#else
-    ENV_UNLOCKED(self, rc, V->env_copyfd2(self->env, HANDLE_ARG, flags));
-#endif
-
     if(rc) {
         return err_set("mdb_env_copyfd3", rc);
     }
+#else
+    ENV_UNLOCKED(self, rc, V->env_copyfd2(self->env, HANDLE_ARG, flags));
+    if(rc) {
+        return err_set("mdb_env_copyfd2", rc);
+    }
+#endif
+
     Py_RETURN_NONE;
 }
 
@@ -3297,6 +3310,15 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
                             }
                         }
                         first = false;
+                    } else if (arg.keyfixed &&
+                               (size_t) self->key.mv_size != key_size) {
+                        /* The keyfixed layout assumes every key is the same
+                         * width as the first; a shorter key would make the
+                         * per-item memcpy below read past its end. */
+                        PyErr_SetString(PyExc_ValueError,
+                            "keyfixed=True requires all keys to be the same "
+                            "size");
+                        goto failiter;
                     }
 
                     for(i=0; i<items; i++) {

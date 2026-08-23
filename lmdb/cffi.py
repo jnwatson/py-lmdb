@@ -909,6 +909,20 @@ class Environment:
         if rc:
             raise _error("mdb_env_create", rc)
         self._env = envpp[0]
+        try:
+            self._init_env(path, map_size, subdir, readonly, metasync, sync,
+                           map_async, mode, readahead, writemap, meminit,
+                           max_readers, max_dbs, lock)
+        except BaseException:
+            # Any failure after mdb_env_create leaves the C env allocated,
+            # but __del__ bails on the unset _pid, so free it here.
+            self._lib.mdb_env_close(self._env)
+            self._env = _invalid
+            raise
+
+    def _init_env(self, path, map_size, subdir, readonly, metasync, sync,
+                  map_async, mode, readahead, writemap, meminit,
+                  max_readers, max_dbs, lock):
         self._deps = set()
         self._creating_db_in_readonly = False
         self._write_txn_tid = 0
@@ -1003,6 +1017,12 @@ class Environment:
         Equivalent to `mdb_env_set_mapsize()
         <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
         """
+        # close() sets both _dbs to None and _env to _invalid, so the
+        # closed check must come before the pre-open fast path below --
+        # otherwise a call after close() hands the _invalid sentinel to C.
+        if self._env is _invalid:
+            raise Error("environment is closed")
+
         # Pre-open path: env created but not yet opened (called from __init__
         # before mdb_env_open).  No mmap exists yet, just set the size.
         if self._dbs is None:
@@ -1010,9 +1030,6 @@ class Environment:
             if rc:
                 raise _error("mdb_env_set_mapsize", rc)
             return
-
-        if self._env is _invalid:
-            raise Error("environment is closed")
 
         if self._write_txn_tid:
             raise Error("Cannot set_mapsize while a write transaction is active")
@@ -1209,7 +1226,10 @@ class Environment:
         if txn and not flags:
             raise TypeError("txn argument only compatible with compact=True")
 
-        encoded = path.encode(sys.getfilesystemencoding())
+        # Accept str or bytes, mirroring Environment.__init__.
+        if isinstance(path, str):
+            path = path.encode(sys.getfilesystemencoding())
+        encoded = path
         # Hold _close_lock so close() or set_mapsize() cannot free/remap the
         # environment while the copy is reading it.  Issue #475.
         with self._close_lock:
@@ -1378,9 +1398,11 @@ class Environment:
         """Return a dict describing Environment constructor flags used to
         instantiate this environment."""
         flags_ = _ffi.new('unsigned int[]', 1)
-        rc = self._lib.mdb_env_get_flags(self._env, flags_)
-        if rc:
-            raise _error("mdb_env_get_flags", rc)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            rc = self._lib.mdb_env_get_flags(self._env, flags_)
+            if rc:
+                raise _error("mdb_env_get_flags", rc)
         flags = flags_[0]
         return {
             'subdir': not (flags & _lib.MDB_NOSUBDIR),
@@ -1404,7 +1426,9 @@ class Environment:
     def max_key_size(self):
         """Return the maximum size in bytes of a record's key part. This
         matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
-        return self._lib.mdb_env_get_maxkeysize(self._env)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            return self._lib.mdb_env_get_maxkeysize(self._env)
 
     def max_readers(self):
         """Return the maximum number of readers specified during open of the
@@ -1412,9 +1436,11 @@ class Environment:
         specified to the constructor if this process was the first to open the
         environment."""
         readers_ = _ffi.new('unsigned int[]', 1)
-        rc = self._lib.mdb_env_get_maxreaders(self._env, readers_)
-        if rc:
-            raise _error("mdb_env_get_maxreaders", rc)
+        # Issue #475: serialize against close()/set_mapsize().
+        with self._close_lock:
+            rc = self._lib.mdb_env_get_maxreaders(self._env, readers_)
+            if rc:
+                raise _error("mdb_env_get_maxreaders", rc)
         return readers_[0]
 
     def readers(self):
@@ -1595,6 +1621,11 @@ class Environment:
             cursor = txn.cursor()
             try:
                 for key in cursor.iternext(keys=True, values=False):
+                    # An empty key would become _ffi.NULL in open_db and
+                    # spuriously open the main DB, listing b'' as a sub-DB;
+                    # the C extension avoids this (empty name != NULL there).
+                    if not key:
+                        continue
                     try:
                         self.open_db(key, txn=txn, create=False)
                     except Error:
@@ -2651,11 +2682,22 @@ class Cursor:
 
         a = bytearray()
         lst = list()
+        keyfixed_size = None
         for key in keys:
             if self.set_key(key):
                 if not values:
                     lst.append(self._to_py(self._key))
                     continue
+                if keyfixed:
+                    # The structured array assumes every key is the width of
+                    # the first; a differing key would make the flat buffer
+                    # jagged.  Match the C extension and reject it.
+                    if keyfixed_size is None:
+                        keyfixed_size = len(self._to_py(self._key))
+                    elif len(self._to_py(self._key)) != keyfixed_size:
+                        raise ValueError(
+                            "keyfixed=True requires all keys to be the same "
+                            "size")
                 while self._valid:
                     self._cursor_get(get_op)
                     preload(self._val)

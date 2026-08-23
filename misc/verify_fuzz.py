@@ -38,6 +38,7 @@ import argparse
 import os
 import random
 import shutil
+import signal
 import struct
 import sys
 import tempfile
@@ -75,9 +76,13 @@ def engine_walk(data_path):
     Python exception we did not expect.  A hard crash shows up as a negative
     exit / signal to the parent."""
     import lmdb
-    env = lmdb.open(os.path.dirname(data_path), max_dbs=8, readonly=True,
-                    lock=False, create=False)
+    env = None
     try:
+        # A generous max_dbs: on a mutated file, main-DB keys can spuriously
+        # open as sub-DBs and each consumes a handle slot; too small a limit
+        # would abort the walk early and mask a crash further in.
+        env = lmdb.open(os.path.dirname(data_path), max_dbs=1024, readonly=True,
+                        lock=False, create=False)
         with env.begin() as t:
             for k, _ in t.cursor():
                 try:
@@ -92,27 +97,51 @@ def engine_walk(data_path):
     except lmdb.Error:
         pass
     finally:
-        env.close()
+        if env is not None:
+            env.close()
+
+
+# Child exit codes: 0 = engine survived; 3 = an unexpected Python-level
+# exception in the harness itself (NOT an engine crash -- do not count it as a
+# counterexample); a negative wait status / signal is a real engine crash.
+CHILD_OK = 0
+CHILD_HARNESS_ERROR = 3
+CHILD_TIMEOUT = 60   # seconds before a hung engine is killed
 
 
 def run_child(data_path):
-    """Fork a child to run engine_walk; return (survived, detail)."""
+    """Fork a child to run engine_walk; return (survived, detail).
+
+    survived is True (engine fine), False (engine crashed), or None (the
+    harness itself errored -- not a counterexample)."""
     pid = os.fork()
     if pid == 0:
         # Silence the child's stderr noise from expected corruption errors.
         try:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, 2)
+            os.close(devnull)
+            # A corrupt file can send the engine into an infinite loop; a
+            # hung child would otherwise block the whole run forever.
+            signal.alarm(CHILD_TIMEOUT)
             engine_walk(data_path)
-            os._exit(0)
+            os._exit(CHILD_OK)
         except BaseException:
-            os._exit(3)
+            os._exit(CHILD_HARNESS_ERROR)
     _, status = os.waitpid(pid, 0)
     if os.WIFSIGNALED(status):
-        return False, 'signal %d' % os.WTERMSIG(status)
-    if os.WIFEXITED(status) and os.WEXITSTATUS(status) not in (0,):
-        return False, 'exit %d' % os.WEXITSTATUS(status)
-    return True, ''
+        sig = os.WTERMSIG(status)
+        if sig == signal.SIGALRM:
+            return False, 'timeout (engine hung >%ds)' % CHILD_TIMEOUT
+        return False, 'signal %d' % sig
+    if os.WIFEXITED(status):
+        code = os.WEXITSTATUS(status)
+        if code == CHILD_OK:
+            return True, ''
+        if code == CHILD_HARNESS_ERROR:
+            return None, 'harness error (not a counterexample)'
+        return False, 'exit %d' % code
+    return False, 'unknown wait status %d' % status
 
 
 def main():
@@ -122,6 +151,7 @@ def main():
     ap.add_argument('--maxflips', type=int, default=4)
     ap.add_argument('--seed', type=int, default=1234)
     args = ap.parse_args()
+    args.maxflips = max(1, args.maxflips)   # randint(1, 0) would raise
     os.environ['LMDB_DEFAULT_LIB_VERSION'] = args.engine
     rnd = random.Random(args.seed)
 
@@ -132,7 +162,7 @@ def main():
     with open(os.path.join(base, 'data.mdb'), 'rb') as f:
         pristine = f.read()
 
-    accepted = crashed = rejected = 0
+    accepted = crashed = rejected = harness_errors = 0
     counterexamples = []
     work = tempfile.mkdtemp(prefix='fuzz_work_')
     data = os.path.join(work, 'data.mdb')
@@ -157,7 +187,11 @@ def main():
                 continue
             accepted += 1
             survived, detail = run_child(data)
-            if not survived:
+            if survived is None:
+                # The harness itself failed; not an engine counterexample.
+                harness_errors += 1
+                print('HARNESS ERROR: %s' % detail)
+            elif not survived:
                 crashed += 1
                 ce = os.path.join(tempfile.mkdtemp(prefix='fuzz_ce_'), 'data.mdb')
                 shutil.copy(data, ce)
@@ -171,8 +205,10 @@ def main():
         shutil.rmtree(base, ignore_errors=True)
         shutil.rmtree(work, ignore_errors=True)
 
-    print('engine=%s iters=%d accepted=%d rejected=%d engine-crashes-among-accepted=%d'
-          % (args.engine, args.iters, accepted, rejected, crashed))
+    print('engine=%s iters=%d accepted=%d rejected=%d '
+          'engine-crashes-among-accepted=%d harness-errors=%d'
+          % (args.engine, args.iters, accepted, rejected, crashed,
+             harness_errors))
     sys.exit(1 if counterexamples else 0)
 
 
