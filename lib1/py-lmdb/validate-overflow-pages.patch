@@ -6,7 +6,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  				return rc2;
  			ovpages = ovp.op_pages;
 +			/* Validate overflow extent stays within the database. */
-+			if (ovp.op_pgno + ovpages > mc->mc_txn->mt_next_pgno) {
++			if (ovpages > mc->mc_txn->mt_next_pgno || ovp.op_pgno > mc->mc_txn->mt_next_pgno - ovpages) {
 +				mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
 +				return MDB_CORRUPTED;
 +			}
@@ -17,7 +17,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					if (ni->mn_flags & F_BIGDATA) {
  						MDB_ovpage ovp;
  						memcpy(&ovp, NODEDATA(ni), sizeof(ovp));
-+						if (ovp.op_pgno + ovp.op_pages > txn->mt_next_pgno) {
++						if (ovp.op_pages > txn->mt_next_pgno || ovp.op_pgno > txn->mt_next_pgno - ovp.op_pages) {
 +							rc = MDB_CORRUPTED;
 +							goto done;
 +						}
