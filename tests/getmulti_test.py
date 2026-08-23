@@ -117,5 +117,25 @@ class GetMultiTestDupsortDupfixedKeyfixed(GetMultiTestBase):
         self.assertEqual(all(asserts), True)
 
 
+class GetMultiKeyfixedMixedKeySizes(unittest.TestCase):
+    """keyfixed=True packs a structured array assuming every key is the width
+    of the first; keys of differing size must be rejected rather than silently
+    reading past a shorter key."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def test_mixed_key_sizes_raises(self):
+        _, env = testlib.temp_env(max_dbs=1)
+        with env.begin(write=True) as txn:
+            db = env.open_db(b'mixed', txn=txn, dupsort=True, dupfixed=True)
+            txn.put(b'a', struct.pack('b', 1), db=db)      # 1-byte key
+            txn.put(b'bb', struct.pack('b', 2), db=db)     # 2-byte key
+            c = txn.cursor(db=db)
+            self.assertRaises(
+                ValueError, c.getmulti, [b'a', b'bb'],
+                dupdata=True, dupfixed_bytes=1, keyfixed=True)
+
+
 if __name__ == '__main__':
     unittest.main()
