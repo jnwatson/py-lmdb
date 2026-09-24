@@ -37,6 +37,7 @@ if is_win32:
     import msvcrt
 
 import lmdb
+from lmdb import _envid
 try:
     from lmdb import _config
 except ImportError:
@@ -84,9 +85,10 @@ __all__ += [
 
 O_0755 = int('0755', 8)
 
-# Global set of canonical paths for open environments, to prevent
-# opening the same environment twice in one process (causes segfaults).
-_open_env_paths: set[str] = set()
+# Identities of the files of every open environment (see lmdb/_envid.py),
+# to prevent opening the same environment twice in one process (causes
+# segfaults).
+_open_env_keys: set[tuple] = set()
 O_0111 = int('0111', 8)
 EMPTY_BYTES = b""
 
@@ -739,7 +741,11 @@ class Environment:
 
     It is a serious error to have open the same LMDB file in the same process at
     the same time.  Failure to heed this may lead to data corruption and
-    interpreter crash.
+    interpreter crash.  :py:class:`Error` is raised instead if the data or
+    lock file is already in use by an open :py:class:`Environment`.  Files are
+    compared by identity, not path: the same files under another name are
+    refused, while an environment deleted and re-created at the same path
+    may be opened even though one on the old files remains open.
 
     Equivalent to `mdb_env_open()
     <http://lmdb.tech/doc/group__mdb.html#ga1fe2740e25b1689dc412e7b9faadba1b>`_
@@ -892,8 +898,8 @@ class Environment:
                 if e.errno != errno.EEXIST:
                     raise
 
-        self._open_path = os.path.realpath(path)
-        if self._open_path in _open_env_paths:
+        self._open_keys = ()
+        if not _open_env_keys.isdisjoint(_envid.env_keys(path, subdir)):
             raise Error("The environment %r is already open in this process."
                         % (path,))
 
@@ -963,6 +969,7 @@ class Environment:
         if not lock:
             flags |= _lib.MDB_NOLOCK
 
+        orig_path = path
         if isinstance(path, str):
             path = path.encode(sys.getfilesystemencoding())
 
@@ -985,7 +992,10 @@ class Environment:
 
         self._dbs = {None: self._db}
         self._pid = _cached_pid
-        _open_env_paths.add(self._open_path)
+        # Taken again now the files exist: a new environment had none to
+        # identify before mdb_env_open created them.
+        self._open_keys = _envid.env_keys(orig_path, subdir)
+        _open_env_keys.update(self._open_keys)
 
     def __enter__(self):
         return self
@@ -1181,10 +1191,10 @@ class Environment:
                 self._env = _invalid
                 self._lib.mdb_env_close(env)
 
-            open_path = getattr(self, '_open_path', None)
-            if open_path:
-                _open_env_paths.discard(open_path)
-                self._open_path = None
+            open_keys = getattr(self, '_open_keys', None)
+            if open_keys:
+                _open_env_keys.difference_update(open_keys)
+                self._open_keys = None
 
     def path(self):
         """Directory path or file name prefix where this environment is
