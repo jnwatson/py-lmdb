@@ -64,6 +64,20 @@ Bug fixes
 - ``Environment.dbs()`` strips the trailing NUL that LMDB 1.0 stores with
     sub-database names, so it returns the same list on either engine.
 
+- The guard against opening one environment twice in a process (#230, added
+    in 2.0.0) now compares files rather than paths (issue #491).  It keyed on
+    ``os.path.realpath()``, so an environment deleted and re-created at the
+    same path could not be opened while an ``Environment`` on the old,
+    deleted files was still open -- a transaction still reading them, say --
+    although the two share nothing.  Each environment is now identified by
+    the ``(st_dev, st_ino)`` of its data file and of its lock file, so that
+    case is allowed, while the same files reached through a hard link, which
+    the path check missed, are now refused.  An environment whose data file
+    alone was replaced is still refused: it would share the lock file, and
+    with it the reader table and ``fcntl()`` locks, of the one still open.
+    Where a filesystem reports no inode number the resolved path is used as
+    before.
+
 - An ``MDB_DUPFIXED`` database with 1-byte values no longer fails with
     ``MDB_CORRUPTED`` from the fifth duplicate onwards (issue #481,
     a regression in 2.3.0 affecting both engines).  py-lmdb's

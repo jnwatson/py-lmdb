@@ -200,6 +200,83 @@ class OpenTest(unittest.TestCase):
         env2 = lmdb.open(path)
         env2.close()
 
+    def test_open_same_path_twice_nosubdir(self):
+        path = testlib.temp_file(create=False)
+        _, env = testlib.temp_env(path, subdir=False)
+        self.assertRaises(lmdb.Error,
+            lambda: lmdb.open(path, subdir=False))
+
+    @unittest.skipIf(sys.platform == 'win32',
+                     'open files cannot be deleted on Windows')
+    def test_open_same_path_after_delete(self):
+        # Deleting an open environment and re-creating it at the same path
+        # yields new, unrelated files, which may be opened (issue #491).
+        path, env = testlib.temp_env()
+        with env.begin(write=True) as txn:
+            txn.put(B('old'), B('1'))
+        rtxn = env.begin()
+        for name in 'data.mdb', 'lock.mdb':
+            os.unlink(os.path.join(path, name))
+
+        _, env2 = testlib.temp_env(path)
+        with env2.begin(write=True) as txn:
+            txn.put(B('new'), B('2'))
+        # The two environments stay independent.
+        assert rtxn.get(B('old')) == B('1')
+        assert rtxn.get(B('new')) is None
+        with env2.begin() as txn:
+            assert txn.get(B('old')) is None
+            assert txn.get(B('new')) == B('2')
+        rtxn.abort()
+
+        # Closing the old one must not forget the new one.
+        env.close()
+        self.assertRaises(lmdb.Error, lambda: lmdb.open(path))
+        env2.close()
+        lmdb.open(path).close()
+
+    @unittest.skipIf(sys.platform == 'win32',
+                     'open files cannot be deleted on Windows')
+    def test_open_same_path_after_delete_nosubdir(self):
+        path = testlib.temp_file(create=False)
+        _, env = testlib.temp_env(path, subdir=False)
+        os.unlink(path)
+        os.unlink(path + '-lock')
+        _, env2 = testlib.temp_env(path, subdir=False)
+        with env2.begin(write=True) as txn:
+            txn.put(B('a'), B('b'))
+
+    @unittest.skipIf(sys.platform == 'win32',
+                     'open files cannot be deleted on Windows')
+    def test_open_same_lock_file_after_data_delete(self):
+        # With only the data file replaced, a second environment would share
+        # the lock file -- and so the reader table and fcntl() locks -- of
+        # the one still open, so it is still refused.
+        path, env = testlib.temp_env()
+        os.unlink(os.path.join(path, 'data.mdb'))
+        self.assertRaises(lmdb.Error, lambda: lmdb.open(path))
+
+    def test_open_hard_link_twice(self):
+        # The same files reached by another name are still the same
+        # environment.
+        path = testlib.temp_file(create=False)
+        _, env = testlib.temp_env(path, subdir=False)
+        link = testlib.temp_file(create=False)
+        try:
+            os.link(path, link)
+        except (AttributeError, OSError) as e:
+            self.skipTest('hard links unsupported: %s' % (e,))
+        self.assertRaises(lmdb.Error,
+            lambda: lmdb.open(link, subdir=False))
+
+    @unittest.skipIf(sys.platform == 'win32',
+                     'symlinks need privileges on Windows')
+    def test_open_symlink_twice(self):
+        path, env = testlib.temp_env()
+        link = testlib.temp_dir(create=False)
+        os.symlink(path, link)
+        self.assertRaises(lmdb.Error, lambda: lmdb.open(link))
+
     def test_metasync(self):
         for flag in True, False:
             path, env = testlib.temp_env(metasync=flag)
