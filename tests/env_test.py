@@ -553,11 +553,8 @@ class SetMapSizeConcurrencyTest(unittest.TestCase):
 
         def tolerated(e):
             """A handle invalidated by a concurrent resize surfaces as
-            lmdb.Error (CPython backend) or as a TypeError mentioning the
-            _invalid sentinel (CFFI backend)."""
-            return (isinstance(e, lmdb.Error) or
-                    (isinstance(e, TypeError) and
-                     '_LMDB_Resource' in str(e)))
+            lmdb.Error on both implementations (issue #503)."""
+            return isinstance(e, lmdb.Error)
 
         def worker_read():
             while not stop.is_set():
@@ -939,6 +936,7 @@ class OtherMethodsTest(unittest.TestCase):
         _, env = testlib.temp_env()
         env.sync(False)
         env.sync(True)
+        env.sync(force=True)  # keyword accepted on both (issue #499)
         env.close()
         self.assertRaises(Exception,
             lambda: env.sync(False))
@@ -1127,6 +1125,29 @@ class OpenDbTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.open_db('subdb3'))  # type: ignore[arg-type]
 
+    def test_handle_from_aborted_txn_not_reused(self):
+        '''Issue #502: a database created in a transaction that aborted
+        does not exist afterwards; CFFI used to return its cached handle.
+        Same when the creating child commits but its parent aborts.'''
+        _, env = testlib.temp_env(max_dbs=4)
+        txn = env.begin(write=True)
+        env.open_db(B('gone'), txn=txn)
+        txn.abort()
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db(B('gone'), create=False))
+
+        parent = env.begin(write=True)
+        child = env.begin(write=True, parent=parent)
+        env.open_db(B('nested'), txn=child)
+        child.commit()
+        parent.abort()
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db(B('nested'), create=False))
+
+        with env.begin(write=True) as txn:
+            env.open_db(B('kept'), txn=txn)
+        env.open_db(B('kept'), create=False)
+
     def test_sub_rotxn(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=False)
@@ -1287,6 +1308,16 @@ class SpareTxnTest(unittest.TestCase):
 
         t2.abort()
         del t2
+        assert 0 == reader_count(env)
+
+    def test_default_is_no_caching(self):
+        '''Issue #501: both implementations default to max_spare_txns=0,
+        so a finished read txn leaves no reader slot behind.'''
+        _, env = testlib.temp_env()
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+        t1.abort()
+        del t1
         assert 0 == reader_count(env)
 
     def test_one(self):

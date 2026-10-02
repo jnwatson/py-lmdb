@@ -23,6 +23,7 @@
 import os
 import sys
 import struct
+import time
 import unittest
 import weakref
 
@@ -685,6 +686,87 @@ class DoubleWriteTxnTest(unittest.TestCase):
         child.abort()
         parent.abort()
 
+    def test_readonly_child_txn(self):
+        '''Issue #496: LMDB 1.0 supports read-only children of a write txn;
+        0.9 does not, and says so.  It used to segfault on the C extension
+        (the child was reset into the spare cache) and silently return an
+        unrelated snapshot on CFFI.'''
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        parent.put(B('k'), B('v'))
+        if env.lib_version()[0] < 1:
+            self.assertRaises(lmdb.InvalidParameterError,
+                              lambda: env.begin(parent=parent))
+            parent.abort()
+            return
+        children = [env.begin(parent=parent) for _ in range(2)]
+        for child in children:
+            self.assertEqual(child.get(B('k')), B('v'))  # sees parent write
+        children[0].abort()
+        children[1].commit()
+        # A finished child is not recycled as a top-level snapshot.
+        with env.begin() as txn:
+            self.assertIsNone(txn.get(B('k')))
+        parent.commit()
+        with env.begin() as txn:
+            self.assertEqual(txn.get(B('k')), B('v'))
+
+    def test_child_invalid_after_parent_finishes(self):
+        '''Issue #496: finishing a parent finishes its children first, so a
+        child used afterwards raises instead of touching freed memory.'''
+        for finish in ('abort', 'commit'):
+            _, env = testlib.temp_env()
+            parent = env.begin(write=True)
+            child = env.begin(write=True, parent=parent)
+            child.put(B('k'), B('v'))
+            getattr(parent, finish)()
+            self.assertRaises(lmdb.Error, lambda: child.get(B('k')))
+            child.abort()  # no-op on a finished transaction
+            # The child's write was discarded with it, not committed.
+            with env.begin() as txn:
+                self.assertIsNone(txn.get(B('k')))
+            env.close()
+
+    def test_child_does_not_release_parent_write_slot(self):
+        '''Issue #496: ending a child write txn must not mark the parent's
+        write lock as released (it used to clear the owner on the C
+        extension, letting a second top-level writer start on this
+        thread and deadlock).'''
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        env.begin(write=True, parent=parent).commit()
+        self.assertRaises(lmdb.Error, lambda: env.begin(write=True))
+        parent.abort()
+
+    def test_nested_txn_parent_from_other_env(self):
+        _, env1 = testlib.temp_env()
+        _, env2 = testlib.temp_env()
+        parent = env1.begin(write=True)
+        self.assertRaises(lmdb.InvalidParameterError,
+                          lambda: env2.begin(write=True, parent=parent))
+        parent.abort()
+
+    def test_explicit_finish_inside_with(self):
+        '''Issue #497: commit()/abort() inside a with-block finishes the
+        transaction; leaving the block is then a no-op on both
+        implementations, and an exception from the block still
+        propagates.'''
+        for finish in ('commit', 'abort'):
+            _, env = testlib.temp_env()
+            with env.begin(write=True) as txn:
+                txn.put(B('k'), B('v'))
+                getattr(txn, finish)()
+            with env.begin() as txn:
+                expected = B('v') if finish == 'commit' else None
+                self.assertEqual(txn.get(B('k')), expected)
+
+            def raising():
+                with env.begin(write=True) as txn:
+                    getattr(txn, finish)()
+                    raise ValueError('from the block')
+            self.assertRaises(ValueError, raising)
+            env.close()
+
     def test_write_txn_after_context_manager(self):
         _, env = testlib.temp_env()
         with env.begin(write=True) as txn:
@@ -702,10 +784,18 @@ class DoubleWriteTxnTest(unittest.TestCase):
         txn2 = env.begin(write=True)
         txn2.abort()
 
-    @unittest.skipIf(lmdb.Environment.__module__ == 'lmdb.cffi',
-                     "CFFI cannot release GIL for cross-thread blocking")
+    def test_same_thread_second_write_txn_raises(self):
+        '''A second top-level write txn on the same thread would deadlock on
+        LMDB's writer mutex, so both implementations raise instead.'''
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        self.assertRaises(lmdb.Error, lambda: env.begin(write=True))
+        txn.abort()
+        env.begin(write=True).abort()
+
     def test_cross_thread_write_txn_blocks(self):
-        '''Issue #427: cross-thread write txns should block, not error.'''
+        '''Issues #427, #500: cross-thread write txns should block, not
+        error, on both implementations.'''
         import threading
         _, env = testlib.temp_env()
         results = []
@@ -729,6 +819,57 @@ class DoubleWriteTxnTest(unittest.TestCase):
         t.join(timeout=5)
         self.assertFalse(t.is_alive())
         self.assertEqual(results, ['ok'])
+
+    def _abort_while_writer_waits(self, finish):
+        '''Run `finish(txn)` on a write txn while another thread waits in
+        begin(write=True).  Both run on helper threads so a deadlock fails
+        the test instead of hanging the suite.'''
+        import threading
+        _, env = testlib.temp_env()
+        holding = threading.Event()
+        results = []
+
+        def holder():
+            txn = env.begin(write=True)
+            txn.put(B('from_holder'), B('val'))
+            holding.set()
+            time.sleep(0.2)  # let the waiter block in begin()
+            try:
+                finish(txn)
+            except ValueError:
+                pass
+            results.append('holder')
+
+        def waiter():
+            holding.wait()
+            with env.begin(write=True) as txn:
+                txn.put(B('from_waiter'), B('val'))
+            results.append('waiter')
+
+        threads = [threading.Thread(target=holder, daemon=True),
+                   threading.Thread(target=waiter, daemon=True)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+            self.assertFalse(t.is_alive(), 'deadlocked (issue #495)')
+        self.assertEqual(sorted(results), ['holder', 'waiter'])
+        with env.begin() as txn:
+            self.assertIsNone(txn.get(B('from_holder')))
+            self.assertEqual(txn.get(B('from_waiter')), B('val'))
+
+    def test_abort_while_other_thread_waits_to_write(self):
+        '''Issue #495: abort() must not wait for another thread's blocked
+        begin(write=True), which is waiting for this abort.'''
+        self._abort_while_writer_waits(lambda txn: txn.abort())
+
+    def test_with_exception_while_other_thread_waits_to_write(self):
+        '''Issue #495: a with-block exiting on an exception aborts, and must
+        not deadlock against a writer waiting on another thread.'''
+        def finish(txn):
+            with txn:
+                raise ValueError('test')
+        self._abort_while_writer_waits(finish)
 
 
 class LeakTest(unittest.TestCase):

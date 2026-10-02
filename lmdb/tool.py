@@ -30,12 +30,14 @@ Basic tools for working with LMDB.
         %prog copyfd -e source.lmdb > target.lmdb/data.mdb
 
     drop: Delete one or more sub-databases.
-        %prog drop db1
+        %prog drop -e /path/to/db db1
 
     dump: Dump one or more databases to disk in 'cdbmake' format.
-        Usage: dump [db1=file1.cdbmake db2=file2.cdbmake]
+        %prog dump -e /path/to/db [db1=file1.cdbmake db2=file2.cdbmake]
 
         If no databases are given, dumps the main database to 'main.cdbmake'.
+        With --all, dumps the main database and every named database, each
+        to '<name>.cdbmake'.
 
     edit: Add/delete/replace values from a database.
         %prog edit --set key=value --set-file key=/path \\
@@ -43,7 +45,7 @@ Basic tools for working with LMDB.
                    --delete key
 
     get: Read one or more values from a database.
-        %prog get [<key1> [<keyN> [..]]]
+        %prog get -e /path/to/db [<key1> [<keyN> [..]]]
 
     readers: Display readers in the lock table
         %prog readers -e /path/to/db [-c]
@@ -51,7 +53,7 @@ Basic tools for working with LMDB.
         If -c is specified, clear stale readers.
 
     restore: Read one or more database from disk in 'cdbmake' format.
-        %prog restore db1=file1.cdbmake db2=file2.cdbmake
+        %prog restore -e /path/to/db db1=file1.cdbmake db2=file2.cdbmake
 
         The special db name ":main:" may be used to indicate the main DB.
 
@@ -155,16 +157,16 @@ def make_parser():
     parser.usage = '%prog [options] <command>\n' + (__doc__ or '').rstrip()
     parser.add_option('-e', '--env', help='Environment file to open')
     parser.add_option('-d', '--db', help='Database to open (default: main)')
-    parser.add_option('-r', '--read', help='Open environment read-only')
+    parser.add_option('-r', '--read', action='store_true',
+                      help='Open environment read-only')
     parser.add_option('-S', '--map_size', type='int', default='10',
                       help='Map size in megabytes (default: 10)')
     parser.add_option('-s', '--use-single-file', action='store_true',
                       help='The database was created as a single file and not a subdirectory')
-    # FIXME:  implement --all
-    # parser.add_option('-a', '--all', action='store_true',
-    #                   help='Make "dump" dump all databases')
+    parser.add_option('-a', '--all', action='store_true',
+                      help='Make "dump" dump all databases')
     parser.add_option('-E', '--target_env',
-                      help='Target environment file for "dumpfd"')
+                      help='Target environment file for "rewrite"')
     parser.add_option('-x', '--xxd', action='store_true',
                       help='Print values in xxd format')
     parser.add_option('-M', '--max-dbs', type='int', default=128,
@@ -263,9 +265,26 @@ def cmd_copyfd(opts, args):
     ENV.copyfd(opts.out_fd)
 
 
+def all_dbs_map():
+    """Map the main database and every named database to an output file
+    named after it, for ``dump --all``."""
+    assert ENV is not None
+    db_map = {':main:': (ENV.open_db(None), 'main.cdbmake')}
+    for name in ENV.dbs():
+        text = name.decode('utf-8', 'backslashreplace')
+        filename = text.replace(os.sep, '_').replace('/', '_') + '.cdbmake'
+        db_map[text] = (ENV.open_db(name, create=False), filename)
+    return db_map
+
+
 def cmd_dump(opts, args):
     assert ENV is not None
-    db_map = db_map_from_args(args)
+    if opts.all:
+        if args:
+            die('--all cannot be combined with a list of databases')
+        db_map = all_dbs_map()
+    else:
+        db_map = db_map_from_args(args)
     with ENV.begin(buffers=True) as txn:
         for dbname, (db, path) in db_map.items():
             with open(path, 'wb', BUF_SIZE) as fp:
@@ -664,6 +683,12 @@ def main(argv=None):
     parser = make_parser()
     opts, args = parser.parse_args(argv)
 
+    # -r used to take a value, and only the literal "READ" enabled read-only
+    # mode; it is now a plain flag.  Accept the old "-r READ" spelling by
+    # dropping the stray argument.  Issue #506.
+    if opts.read and args[:1] == ['READ']:
+        args = args[1:]
+
     if not args:
         die('Please specify a command (see --help)')
 
@@ -678,7 +703,7 @@ def main(argv=None):
 
     global ENV
     ENV = lmdb.open(opts.env, map_size=opts.map_size * 1048576, subdir=not opts.use_single_file,
-                    max_dbs=opts.max_dbs, create=False, readonly=opts.read == 'READ')
+                    max_dbs=opts.max_dbs, create=False, readonly=bool(opts.read))
 
     if opts.db:
         global DB

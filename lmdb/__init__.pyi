@@ -196,7 +196,7 @@ class Environment:
         meminit: bool = True,
         max_readers: int = 126,
         max_dbs: int = 0,
-        max_spare_txns: int = 1,
+        max_spare_txns: int = 0,
         lock: bool = True,
         lib_version: int = -1,
     ) -> Self: ...
@@ -422,7 +422,7 @@ class Cursor(Generic[_VT_co]):
     def put(
         self,
         key: Buffer,
-        val: Buffer,
+        value: Buffer,
         dupdata: bool = True,
         overwrite: bool = True,
         append: bool = False,
@@ -435,7 +435,7 @@ class Cursor(Generic[_VT_co]):
         append: bool = False,
     ) -> tuple[int, int]: ...
     def delete(self, dupdata: bool = False) -> bool: ...
-    def replace(self, key: Buffer, val: Buffer) -> _VT_co | None: ...
+    def replace(self, key: Buffer, value: Buffer) -> _VT_co | None: ...
     def pop(self, key: Buffer) -> _VT_co | None: ...
     def count(self) -> int: ...
 

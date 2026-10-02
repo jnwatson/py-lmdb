@@ -282,6 +282,16 @@ struct EnvObject {
      *  ACTIVE_OPS_DEC to skip the broadcast when nobody is draining
      *  (the common case). */
     lmdb_atomic_t ops_waiters;
+    /** Count of threads inside a top-level write mdb_txn_begin (also counted
+     *  in active_ops).  Such a call may block indefinitely on LMDB's writer
+     *  mutex, held by a write transaction on another thread, so trans_abort
+     *  must not wait for it: the mutex is only released by that abort.
+     *  trans_abort therefore drains active_ops down to this count, while
+     *  env_clear and set_mapsize still drain active_ops fully.  Never
+     *  exceeds the begin calls' share of active_ops (see
+     *  ENV_UNLOCKED_WRITE_BEGIN), so trans_abort never undercounts other
+     *  operations.  Issue #495. */
+    lmdb_atomic_t write_begins;
     /** 1 while set_mapsize() is inside its invalidate/remap critical
      *  section.  New GIL-releasing LMDB operations fail fast with EINVAL
      *  until the resize completes (see ENV_RESIZE_BLOCKED).  Issue #475. */
@@ -321,7 +331,9 @@ enum trans_flags {
     /** Transaction can be can go on freelist instead of deallocation. */
     TRANS_RDONLY        = 2,
     /** Transaction is spare, ready for mdb_txn_renew() */
-    TRANS_SPARE         = 4
+    TRANS_SPARE         = 4,
+    /** Transaction is a child of another (see TransObject.parent). */
+    TRANS_NESTED        = 8
 };
 
 /** lmdb.Transaction */
@@ -330,6 +342,12 @@ struct TransObject {
     /** Python-managed list of weakrefs to this object. */
     PyObject *weaklist;
     EnvObject *env;
+    /** Parent transaction for a nested transaction, else NULL.  A nested
+     * transaction is linked into its parent's child list rather than the
+     * environment's, so the parent's commit, abort or invalidation finishes
+     * it first, before LMDB frees it along with the parent.  Strong
+     * reference, released by trans_clear.  Issue #496. */
+    struct TransObject *parent;
     /** Engine servicing env; cached here so teardown paths that may see
      * env==NULL can still reach the right LMDB. */
     const MdbApi *libv;
@@ -368,6 +386,9 @@ struct CursorObject {
     int last_mutation;
     /** DBI flags at time of creation. */
     unsigned int dbi_flags;
+    /** Database the cursor was opened on, so Transaction.drop() can close
+     * the cursors of a database it deletes.  Issue #503. */
+    MDB_dbi dbi;
 };
 
 
@@ -534,6 +555,13 @@ static void invalidate_txns(struct lmdb_object *parent)
 }
 
 #define INVALIDATE_TXNS(parent) invalidate_txns((void *)parent);
+
+/**
+ * Invalidate (close) the cursors among `trans`'s children that were opened
+ * on database `dbi`.  Defined after the type objects it compares against;
+ * see below.  Issue #503.
+ */
+static void invalidate_db_cursors(TransObject *trans, MDB_dbi dbi);
 #define INVALIDATE_MARK_TXNS(parent) invalidate_mark_txns((void *)parent);
 
 
@@ -602,6 +630,91 @@ static const struct error_map error_map[] = {
 /* Exceptions */
 /* ---------- */
 
+/** Set attribute `name` of `obj` to `value`, stealing the reference.
+ * Returns -1 with an exception set on failure. */
+static int
+set_obj_attr(PyObject *obj, const char *name, PyObject *value)
+{
+    int rc;
+    if(! value) {
+        return -1;
+    }
+    rc = PyObject_SetAttrString(obj, name, value);
+    Py_DECREF(value);
+    return rc;
+}
+
+/** Set attribute `name` of `obj` to the str `value`. */
+static int
+set_str_attr(PyObject *obj, const char *name, const char *value)
+{
+    return set_obj_attr(obj, name, PyUnicode_DecodeUTF8(value, strlen(value),
+                                                        "replace"));
+}
+
+/**
+ * Advice appended to the message for errors the caller can fix by
+ * configuration, as the CFFI implementation does (its MDB_HINT).
+ */
+static const char *
+err_hint(int rc)
+{
+    switch(rc) {
+    case MDB_MAP_FULL:
+        return "Please use a larger Environment(map_size=) parameter";
+    case MDB_DBS_FULL:
+        return "Please use a larger Environment(max_dbs=) parameter";
+    case MDB_READERS_FULL:
+        return "Please use a larger Environment(max_readers=) parameter";
+    case MDB_TXN_FULL:
+        return "Please do less work within your transaction";
+    }
+    return NULL;
+}
+
+/**
+ * Raise an instance of `klass` for `what` and error code `rc`, carrying the
+ * same `what`, `code` and `reason` attributes as the CFFI implementation's
+ * exceptions.  The message is "what: reason (hint)", or just `what` when
+ * `rc` is 0.  Issue #503.
+ */
+static void * NOINLINE
+err_raise(PyObject *klass, const char *what, int rc)
+{
+    /* The newest engine's error table is a superset of the others', and the
+     * shared codes have identical messages, so it can render any engine's
+     * error code. */
+    const char *reason = LMDB_NEWEST_API->strerror_fn(rc);
+    const char *hint = err_hint(rc);
+    PyObject *msg;
+    PyObject *exc;
+
+    if(! rc) {
+        msg = PyUnicode_FromString(what);
+    } else if(hint) {
+        msg = PyUnicode_FromFormat("%s: %s (%s)", what, reason, hint);
+    } else {
+        msg = PyUnicode_FromFormat("%s: %s", what, reason);
+    }
+    if(! msg) {
+        return NULL;
+    }
+    exc = PyObject_CallFunctionObjArgs(klass, msg, NULL);
+    Py_DECREF(msg);
+    if(! exc) {
+        return NULL;
+    }
+    if(set_str_attr(exc, "what", what) ||
+       set_obj_attr(exc, "code", PyLong_FromLong(rc)) ||
+       set_str_attr(exc, "reason", reason)) {
+        Py_DECREF(exc);
+        return NULL;
+    }
+    PyErr_SetObject(klass, exc);
+    Py_DECREF(exc);
+    return NULL;
+}
+
 /**
  * Raise an exception appropriate for the given `rc` MDB error code.
  */
@@ -620,12 +733,7 @@ err_set(const char *what, int rc)
             }
         }
     }
-
-    /* The newest engine's error table is a superset of the others', and the
-     * shared codes have identical messages, so it can render any engine's
-     * error code. */
-    PyErr_Format(klass, "%s: %s", what, LMDB_NEWEST_API->strerror_fn(rc));
-    return NULL;
+    return err_raise(klass, what, rc);
 }
 
 /**
@@ -634,20 +742,29 @@ err_set(const char *what, int rc)
 static void * NOINLINE
 err_format(int rc, const char *fmt, ...)
 {
-    char buf[128];
+    PyObject *what;
+    const char *utf8;
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof buf, fmt, ap);
-    buf[sizeof buf - 1] = '\0';
+    /* PyUnicode_FromFormatV rather than a fixed buffer, so long paths in
+     * the message are not truncated. */
+    what = PyUnicode_FromFormatV(fmt, ap);
     va_end(ap);
-    return err_set(buf, rc);
+    if(! what) {
+        return NULL;
+    }
+    if((utf8 = PyUnicode_AsUTF8(what))) {
+        err_set(utf8, rc);
+    }
+    Py_DECREF(what);
+    return NULL;
 }
 
 static void * NOINLINE
 err_invalid(void)
 {
-    PyErr_Format(Error, "Attempt to operate on closed/deleted/dropped object.");
-    return NULL;
+    return err_raise(Error,
+        "Attempt to operate on closed/deleted/dropped object.", 0);
 }
 
 static void * NOINLINE
@@ -951,12 +1068,26 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
         Py_END_ALLOW_THREADS \
     } while(0)
 
+/* ENV_WAKE_WAITERS: broadcast to ENV_WAIT_WHILE waiters, if there are any.
+ * The lock-free read of ops_waiters keeps the common no-waiter case free of
+ * the mutex; see ENV_WAIT_WHILE for why no wakeup is lost. */
+#define ENV_WAKE_WAITERS(_env) \
+    do { \
+        if(LMDB_ATOMIC_LOAD(&(_env)->ops_waiters) != 0) { \
+            ENV_SYNC_LOCK(_env); \
+            ENV_SYNC_BROADCAST(_env); \
+            ENV_SYNC_UNLOCK(_env); \
+        } \
+    } while(0)
+
 /* ACTIVE_OPS_INC/DEC: adjust the in-flight operation count.  This is the
  * per-operation hot path (twice per cursor step), so it is lock-free: a
- * single atomic RMW, plus — only on the 0-crossing — a lock-free read of
- * ops_waiters to decide whether any drainer needs waking.  The mutex is
- * taken only to deliver that (rare) broadcast, so a waiter between its
- * predicate check and its wait cannot miss it.  Issues #180, #475. */
+ * single atomic RMW, plus a lock-free read of ops_waiters to decide whether
+ * any drainer needs waking.  The mutex is taken only to deliver that (rare)
+ * broadcast, so a waiter between its predicate check and its wait cannot
+ * miss it.  Every decrement wakes waiters, not just the 0-crossing, since
+ * trans_abort drains down to write_begins rather than to 0 (#495).
+ * Issues #180, #475. */
 #define ACTIVE_OPS_INC(_env) \
     do { \
         LMDB_ATOMIC_INCR(&(_env)->active_ops); \
@@ -964,12 +1095,8 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 
 #define ACTIVE_OPS_DEC(_env) \
     do { \
-        if(LMDB_ATOMIC_DECR(&(_env)->active_ops) == 0 && \
-           LMDB_ATOMIC_LOAD(&(_env)->ops_waiters) != 0) { \
-            ENV_SYNC_LOCK(_env); \
-            ENV_SYNC_BROADCAST(_env); \
-            ENV_SYNC_UNLOCK(_env); \
-        } \
+        LMDB_ATOMIC_DECR(&(_env)->active_ops); \
+        ENV_WAKE_WAITERS(_env); \
     } while(0)
 
 /* CLEAR_WRITE_TXN_TID: record that this thread's write transaction is
@@ -1029,6 +1156,32 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
             Py_BEGIN_ALLOW_THREADS \
             out = (e); \
             Py_END_ALLOW_THREADS \
+            ACTIVE_OPS_DEC(_saved_env); \
+        } \
+    } while(0)
+
+/* ENV_UNLOCKED_WRITE_BEGIN: ENV_UNLOCKED for a top-level write
+ * mdb_txn_begin, which may block on LMDB's writer mutex.  The call is
+ * counted in active_ops, so env_clear and set_mapsize wait for it, and also
+ * in write_begins, so trans_abort does not (#495).  Ordering keeps
+ * write_begins <= the begins' share of active_ops at every instant: it is
+ * incremented after active_ops and decremented before it.  The increment
+ * then wakes waiters, since a trans_abort may have gone to sleep on the
+ * active_ops increment alone.  Issue #495. */
+#define ENV_UNLOCKED_WRITE_BEGIN(_env, out, e) \
+    do { \
+        EnvObject *_saved_env = (_env); \
+        if(ENV_RESIZE_BLOCKED(_saved_env)) { \
+            out = EINVAL; \
+        } \
+        else { \
+            ACTIVE_OPS_INC(_saved_env); \
+            LMDB_ATOMIC_INCR(&_saved_env->write_begins); \
+            ENV_WAKE_WAITERS(_saved_env); \
+            Py_BEGIN_ALLOW_THREADS \
+            out = (e); \
+            Py_END_ALLOW_THREADS \
+            LMDB_ATOMIC_DECR(&_saved_env->write_begins); \
             ACTIVE_OPS_DEC(_saved_env); \
         } \
     } while(0)
@@ -1321,6 +1474,15 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         if(! parent->valid) {
             return err_invalid();
         }
+        if(parent->env != env) {
+            return err_set("Parent transaction belongs to another "
+                           "environment.", EINVAL);
+        }
+        if(! write && V->major < 1) {
+            /* LMDB 0.9 has no read-only child transactions.  Issue #496. */
+            return err_set("Read-only child transactions require the "
+                           "LMDB 1.0 engine.", EINVAL);
+        }
         parent_txn = parent->txn;
     }
 
@@ -1346,7 +1508,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         return err_set(msg, EBUSY);
     }
 
-    if((!write) && env->spare_txn) {
+    /* A child must be begun under its parent, never taken from the spare
+     * cache (a top-level snapshot).  Issue #496. */
+    if((!write) && !parent && env->spare_txn) {
         txn = env->spare_txn;
         DEBUG("using cached txn", txn)
         env->spare_txn = NULL;
@@ -1364,9 +1528,11 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         if(write && !parent) {
             /* Release GIL so another thread's write txn can block on the
              * LMDB mutex instead of deadlocking on the GIL.  Use active_ops
-             * to prevent env_clear from closing the env underneath us.
-             * Issues #180, #427. */
-            ENV_UNLOCKED(env, rc,
+             * to prevent env_clear from closing the env underneath us,
+             * and write_begins so another thread's trans_abort, which
+             * this call is waiting for, does not wait for it in turn.
+             * Issues #180, #427, #495. */
+            ENV_UNLOCKED_WRITE_BEGIN(env, rc,
                 V->txn_begin(env->env, parent_txn, flags, &txn));
             if(rc) {
                 return err_set("mdb_txn_begin", rc);
@@ -1394,7 +1560,13 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
 
 
     OBJECT_INIT(self)
-    LINK_CHILD(env, self)
+    if(parent) {
+        LINK_CHILD(parent, self)
+        Py_INCREF(parent);
+    } else {
+        LINK_CHILD(env, self)
+    }
+    self->parent = parent;
     self->weaklist = NULL;
     self->env = env;
     self->libv = env->libv;
@@ -1409,6 +1581,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
     self->flags = 0;
     if(! write) {
         self->flags |= TRANS_RDONLY;
+    }
+    if(parent) {
+        self->flags |= TRANS_NESTED;
     }
     if(buffers) {
         self->flags |= TRANS_BUFFERS;
@@ -1458,6 +1633,7 @@ make_cursor(DbObject *db, TransObject *trans)
     self->libv = trans->libv;
     self->last_mutation = trans->mutations;
     self->dbi_flags = db->flags;
+    self->dbi = db->dbi;
     Py_INCREF(self->trans);
     return (PyObject *) self;
 }
@@ -1859,10 +2035,9 @@ select_engine(int requested, unsigned int data_version, const char *fspath)
                 return lmdb_engines[i];
             }
         }
-        PyErr_Format(Error,
+        return err_format(0,
             "lib_version=%d: this build has no LMDB %d.x engine.",
             requested, requested);
-        return NULL;
     }
 
     if(data_version) {
@@ -1872,12 +2047,12 @@ select_engine(int requested, unsigned int data_version, const char *fspath)
             }
         }
         if(data_version == 2) {
-            PyErr_Format(Error,
+            err_format(0,
                 "%s: written with LMDB data format v2 (a pre-1.0 development "
                 "version, e.g. lmdb-js); no released LMDB reads this format.",
                 fspath);
         } else {
-            PyErr_Format(Error,
+            err_format(0,
                 "%s: LMDB data format v%u is not supported by this build.",
                 fspath, data_version);
         }
@@ -1965,6 +2140,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->pid = _cached_pid;
     self->write_txn_tid = 0;
     self->active_ops = 0;
+    self->write_begins = 0;
     self->ops_waiters = 0;
     self->resizing = 0;
     self->resize_tid = 0;
@@ -2016,7 +2192,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             goto fail;
         }
         if(found) {
-            PyErr_Format(Error,
+            err_format(0,
                 "The environment '%s' is already open in this process.",
                 fspath);
             goto fail;
@@ -2763,18 +2939,16 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * return EINVAL anyway, but we must also avoid invalidating a write txn
      * that the caller still holds. */
     if(self->write_txn_tid) {
-        PyErr_Format(Error,
-            "Cannot set_mapsize while a write transaction is active");
-        return NULL;
+        return err_set(
+            "Cannot set_mapsize while a write transaction is active", 0);
     }
 
     /* Reject overlapping resizes.  Cannot be our own thread (no Python runs
      * between the flag being set and cleared except destructors during
      * invalidation, and re-entering set_mapsize from one is degenerate). */
     if(self->resizing) {
-        PyErr_Format(Error,
-            "Cannot set_mapsize: another set_mapsize is in progress");
-        return NULL;
+        return err_set(
+            "Cannot set_mapsize: another set_mapsize is in progress", 0);
     }
 
     /* Enter the resize critical section: from here until the flag is
@@ -2873,7 +3047,7 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
  * Environment.sync()
  */
 static PyObject *
-env_sync(EnvObject *self, PyObject *args)
+env_sync(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     const MdbApi *V = self->libv;
     struct env_sync {
@@ -2886,7 +3060,7 @@ env_sync(EnvObject *self, PyObject *args)
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg, NULL)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -2935,7 +3109,7 @@ static struct PyMethodDef env_methods[] = {
     {"reader_check", (PyCFunction)env_reader_check, METH_NOARGS},
     {"set_mapsize", (PyCFunction)env_reader_set_mapsize,
      METH_VARARGS|METH_KEYWORDS},
-    {"sync", (PyCFunction)env_sync, METH_VARARGS},
+    {"sync", (PyCFunction)env_sync, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
 
@@ -3676,7 +3850,9 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
+        /* The cursor's own database decides, not the transaction's
+         * default one.  Issue #504. */
+        flags |= (self->dbi_flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     if(! ((iter = PyObject_GetIter(arg.items)))) {
@@ -3773,7 +3949,9 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
+        /* The cursor's own database decides, not the transaction's
+         * default one.  Issue #504. */
+        flags |= (self->dbi_flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     ENV_UNLOCKED(self->trans->env, rc, V->cursor_put(self->curs, &arg.key, &arg.val, flags));
@@ -4034,8 +4212,13 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 
     /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
      * fails to update `key` and `value` on success. Therefore explicitly call
-     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE. */
-    _cursor_get_c(self, MDB_GET_CURRENT);
+     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE -- but only on success: after
+     * a miss it would re-position the cursor on wherever LMDB left it (the
+     * next key), contradicting the unpositioned-on-False contract.  Issue
+     * #505. */
+    if(ret == Py_True) {
+        _cursor_get_c(self, MDB_GET_CURRENT);
+    }
 
     return ret;
 }
@@ -4460,7 +4643,8 @@ trans_clear(TransObject *self)
         MDB_txn *txn = self->txn;
         self->txn = NULL;  /* Prevent double-abort from concurrent
                             * trans_clear calls (issue #180). */
-        if(self->env && !(self->flags & TRANS_RDONLY)) {
+        if(self->env &&
+           !(self->flags & (TRANS_RDONLY | TRANS_NESTED))) {
             /* The abort below runs with the GIL held, so a #465 waiter
              * (which needs the GIL to proceed) cannot act on the cleared
              * tid before the write mutex is actually released. */
@@ -4481,10 +4665,13 @@ trans_clear(TransObject *self)
     }
     MDEBUG("db is/was %p", self->db)
     Py_CLEAR(self->db);
-    if(self->env) {
+    if(self->parent) {
+        UNLINK_CHILD(self->parent, self)
+        Py_CLEAR(self->parent);
+    } else if(self->env) {
         UNLINK_CHILD(self->env, self)
-        Py_CLEAR(self->env);
     }
+    Py_CLEAR(self->env);
     return 0;
 }
 
@@ -4503,7 +4690,7 @@ trans_dealloc(TransObject *self)
 
     if(self->env && self->env->pid == _cached_pid) {
         if(self->env->valid && self->env->env && txn &&
-                !self->env->spare_txn &&
+                !self->env->spare_txn && !(self->flags & TRANS_NESTED) &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             V->txn_reset(txn);
@@ -4531,8 +4718,11 @@ trans_dealloc(TransObject *self)
                 /* Mutex released on this (owning) thread; wakes a
                  * close() blocked waiting for it.  Cleared after the
                  * abort so waiters never observe tid == 0 while the
-                 * transaction is still live.  Issues #465, #475. */
-                CLEAR_WRITE_TXN_TID(self->env);
+                 * transaction is still live.  A child holds no mutex of
+                 * its own.  Issues #465, #475, #496. */
+                if(!(self->flags & TRANS_NESTED)) {
+                    CLEAR_WRITE_TXN_TID(self->env);
+                }
             }
         }
         MDEBUG("deleting trans")
@@ -4543,10 +4733,13 @@ trans_dealloc(TransObject *self)
        /* Can't touch LMDB handles after fork, but still need to
         * release Python references to avoid leaking env/db. */
        Py_CLEAR(self->db);
-       if(self->env) {
+       if(self->parent) {
+           UNLINK_CHILD(self->parent, self)
+           Py_CLEAR(self->parent);
+       } else if(self->env) {
            UNLINK_CHILD(self->env, self)
-           Py_CLEAR(self->env);
        }
+       Py_CLEAR(self->env);
     }
 
     PyObject_Del(self);
@@ -4604,7 +4797,13 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
 #ifdef HAVE_MEMSINK
         ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        if(self->flags & TRANS_RDONLY) {
+        if(self->flags & TRANS_NESTED && self->flags & TRANS_RDONLY) {
+            /* A read-only child belongs to its parent: abort it outright
+             * rather than resetting it for the spare cache.  Issue #496. */
+            if(txn) {
+                V->txn_abort(txn);
+            }
+        } else if(self->flags & TRANS_RDONLY) {
             DEBUG("resetting")
             /* Reset to spare state, ready for _dealloc to freelist it. */
             if(txn) {
@@ -4625,9 +4824,15 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                  * would let a concurrent set_mapsize() pass its write-txn
                  * check and then find the txn undead at remap time (its
                  * invalidation pass skips this txn because self->txn was
-                 * already NULLed above).  Issues #465, #475. */
-                if(LMDB_ATOMIC_LOAD(&env->active_ops) > 0) {
-                    ENV_WAIT_WHILE(env, LMDB_ATOMIC_LOAD(&env->active_ops) > 0);
+                 * already NULLed above).  Issues #465, #475.
+                 *
+                 * Top-level write begins on other threads are excluded:
+                 * they are blocked on the writer mutex this abort releases,
+                 * so waiting for them would deadlock.  Issue #495. */
+                if(LMDB_ATOMIC_LOAD(&env->active_ops) >
+                   LMDB_ATOMIC_LOAD(&env->write_begins)) {
+                    ENV_WAIT_WHILE(env, LMDB_ATOMIC_LOAD(&env->active_ops) >
+                                        LMDB_ATOMIC_LOAD(&env->write_begins));
                 }
                 ACTIVE_OPS_INC(env);
                 Py_BEGIN_ALLOW_THREADS
@@ -4635,13 +4840,16 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                 Py_END_ALLOW_THREADS
                 ACTIVE_OPS_DEC(env);
                 /* Mutex released on this (owning) thread; wakes a close()
-                 * blocked waiting for it.  Issue #465. */
-                CLEAR_WRITE_TXN_TID(env);
+                 * blocked waiting for it.  A child holds no mutex of its
+                 * own.  Issues #465, #496. */
+                if(!(self->flags & TRANS_NESTED)) {
+                    CLEAR_WRITE_TXN_TID(env);
+                }
             } else {
                 if(txn) {
                     V->txn_abort(txn);
                 }
-                if(env) {
+                if(env && !(self->flags & TRANS_NESTED)) {
                     CLEAR_WRITE_TXN_TID(env);
                 }
             }
@@ -4669,7 +4877,13 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
 #ifdef HAVE_MEMSINK
     ms_notify((PyObject *) self, &self->sink_head);
 #endif
-    if(self->flags & TRANS_RDONLY) {
+    if(self->flags & TRANS_NESTED && self->flags & TRANS_RDONLY) {
+        /* A read-only child belongs to its parent: end it outright rather
+         * than resetting it for the spare cache.  Issue #496. */
+        MDB_txn *txn = self->txn;
+        self->txn = NULL;
+        V->txn_abort(txn);
+    } else if(self->flags & TRANS_RDONLY) {
         DEBUG("resetting")
         /* Reset to spare state, ready for _dealloc to freelist it. */
         V->txn_reset(self->txn);
@@ -4692,9 +4906,11 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         ACTIVE_OPS_DEC(env);
         /* Mutex released on this (owning) thread; wakes a close() blocked
          * waiting for it.  Cleared after the commit so waiters never
-         * observe tid == 0 while the transaction is still live.
-         * Issues #465, #475. */
-        CLEAR_WRITE_TXN_TID(env);
+         * observe tid == 0 while the transaction is still live.  A child
+         * holds no mutex of its own.  Issues #465, #475, #496. */
+        if(!(self->flags & TRANS_NESTED)) {
+            CLEAR_WRITE_TXN_TID(env);
+        }
         Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);
@@ -4771,6 +4987,28 @@ out:
     return NULL;
 }
 
+static void invalidate_db_cursors(TransObject *trans, MDB_dbi dbi)
+{
+    struct lmdb_object *child = ((struct lmdb_object *) trans)->children.next;
+    PyObject *held_ref = NULL;
+    while(child) {
+        struct lmdb_object *next = child->siblings.next;
+        /* tp_clear may release the GIL; hold references as invalidate()
+         * does. */
+        Py_XINCREF((PyObject *) next);
+        Py_INCREF((PyObject *) child);
+        if(Py_TYPE(child) == &PyCursor_Type &&
+           ((CursorObject *) child)->dbi == dbi) {
+            Py_TYPE(child)->tp_clear((PyObject *) child);
+        }
+        Py_DECREF((PyObject *) child);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
+        child = next;
+    }
+    Py_XDECREF(held_ref);
+}
+
 /**
  * Transaction.drop(db)
  */
@@ -4799,6 +5037,13 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+    if(arg.delete) {
+        /* The database is going away: close this transaction's cursors on
+         * it first, as CFFI does, rather than leave them pointing at a
+         * deleted DBI.  Emptying it (delete=False) leaves them valid but
+         * unpositioned, as LMDB does.  Issue #503. */
+        invalidate_db_cursors(self, arg.db->dbi);
+    }
     ENV_UNLOCKED(self->env, rc, V->drop(self->txn, arg.db->dbi, arg.delete));
     self->mutations++;
     if(rc) {
@@ -4910,7 +5155,9 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= MDB_APPEND;
+        /* On a dupsort database, append a duplicate (MDB_APPEND would
+         * reject the last key itself), as Cursor.put does.  Issue #504. */
+        flags |= (arg.db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",
@@ -5068,8 +5315,12 @@ static PyObject *trans_enter(TransObject *self, PyObject *Py_UNUSED(ignored))
  */
 static PyObject *trans_exit(TransObject *self, PyObject *args)
 {
+    /* Already finished -- by an explicit commit()/abort() inside the block,
+     * by its parent finishing, or by env.close() -- so there is nothing to
+     * commit or abort.  Returning None (falsy) still propagates any
+     * exception from the block.  Matches CFFI.  Issues #180, #497. */
     if(! self->valid) {
-        return err_invalid();
+        Py_RETURN_NONE;
     }
     if(PyTuple_GET_ITEM(args, 0) == Py_None) {
         return trans_commit(self, NULL);
@@ -5249,10 +5500,9 @@ get_version(PyObject *mod, PyObject *args, PyObject *kwds)
             }
         }
         if(! V) {
-            PyErr_Format(Error,
+            return err_format(0,
                 "lib_version=%d: this build has no LMDB %d.x engine.",
                 arg.lib_version, arg.lib_version);
-            return NULL;
         }
     }
 

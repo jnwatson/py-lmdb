@@ -152,6 +152,19 @@ class CursorTest2(unittest.TestCase):
         self.txn = self.env.begin(write=True, db=self.db)
         self.c = self.txn.cursor()
 
+    def testSetRangeDup(self):
+        '''Issue #505: set_range_dup positions on the first value >= value
+        of an exact key; on a miss it leaves the cursor unpositioned rather
+        than on the following key.'''
+        for k, v in ((b'a', b'1'), (b'a', b'3'), (b'z', b'9')):
+            self.c.put(k, v, dupdata=True)
+        self.assertTrue(self.c.set_range_dup(b'a', b'2'))
+        self.assertEqual(self.c.item(), (b'a', b'3'))
+        self.assertFalse(self.c.set_range_dup(b'm', b'0'))  # no such key
+        self.assertEqual(self.c.item(), (b'', b''))
+        self.assertFalse(self.c.set_range_dup(b'a', b'4'))  # past last value
+        self.assertEqual(self.c.item(), (b'', b''))
+
     def testIterWithDeletes(self):
         ''' A problem identified in LMDB 0.9.27 '''
         self.c.put(b'\x00\x01', b'hehe', dupdata=True)
@@ -258,11 +271,39 @@ class PutmultiTest(CursorTestBase):
             assert c.put(B('b'), B('value1'), append=True)
             assert c.put(B('b'), B('value2'), append=True)
 
+    def test_dupsort_append_uses_target_db(self):
+        '''Issue #504: append=True picks MDB_APPENDDUP from the database
+        being written, not the transaction's default database.'''
+        _, env = testlib.temp_env(max_dbs=2)
+        dup = env.open_db(B('dup'), dupsort=True)
+        plain = env.open_db(B('plain'))
+        with env.begin(write=True) as txn:  # default db: main, not dupsort
+            assert txn.put(B('k'), B('1'), db=dup)
+            assert txn.put(B('k'), B('2'), append=True, db=dup)
+            assert txn.cursor(dup).put(B('k'), B('3'), append=True)
+            assert (1, 1) == txn.cursor(dup).putmulti(
+                [(B('k'), B('4'))], append=True)
+            # Out of order is still refused.
+            assert not txn.cursor(dup).put(B('k'), B('0'), append=True)
+            self.assertEqual([v for _, v in txn.cursor(dup)],
+                             [B('1'), B('2'), B('3'), B('4')])
+        with env.begin(write=True, db=dup) as txn:  # default db: dupsort
+            assert txn.put(B('m'), B('1'), append=True, db=plain)
+            assert not txn.put(B('a'), B('1'), append=True, db=plain)
+
 class ReplaceTest(CursorTestBase):
     def test_replace(self):
         assert None is self.c.replace(B('a'), B(''))
         assert B('') == self.c.replace(B('a'), B('x'))
         assert B('x') == self.c.replace(B('a'), B('y'))
+
+    def test_value_keyword(self):
+        '''Issue #498: the value argument of Cursor.put/replace is named
+        `value` on both implementations, as on Transaction.put.'''
+        assert self.c.put(B('k'), value=B('1'))
+        assert B('1') == self.c.replace(B('k'), value=B('2'))
+        self.assertRaises(TypeError,
+            lambda: self.c.put(B('k'), val=B('3')))  # type: ignore[call-arg]
 
 
 class ContextManagerTest2(CursorTestBase):

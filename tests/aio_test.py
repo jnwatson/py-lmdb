@@ -457,6 +457,25 @@ class WriteExecutorTest(testlib.LmdbTest):
 
         run(go())
 
+    def test_concurrent_write_txns_serialize(self):
+        """Issue #500: concurrent write transactions wait their turn on both
+        implementations (CFFI used to fail the second with EBUSY)."""
+        async def writer(aenv, key):
+            async with aenv.begin(write=True) as txn:
+                await txn.put(key, b'v')
+                await asyncio.sleep(0.05)  # hold it while the other waits
+
+        async def go():
+            _, env = testlib.temp_env()
+            aenv = lmdb.aio.wrap(env)
+            await asyncio.wait_for(asyncio.gather(
+                *(writer(aenv, b'k%d' % i) for i in range(4))), timeout=30)
+            async with aenv.begin() as txn:
+                for i in range(4):
+                    self.assertEqual(await txn.get(b'k%d' % i), b'v')
+
+        run(go())
+
 
 class IntrospectionTest(unittest.TestCase):
     """Proxied methods must be real class attributes (dir/inspect/stubtest)."""

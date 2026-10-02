@@ -27,6 +27,7 @@ Please see https://lmdb.readthedocs.io/
 """
 
 import errno
+import functools
 import inspect
 import os
 import sys
@@ -451,7 +452,8 @@ class Error(Exception):
     def __init__(self, what, code=0):
         self.what = what
         self.code = code
-        self.reason = _ffi.string(_lib.mdb_strerror(code))
+        self.reason = _ffi.string(_lib.mdb_strerror(code)).decode(
+            'utf-8', 'replace')
         msg = what
         if code:
             msg = '%s: %s' % (what, self.reason)
@@ -617,6 +619,11 @@ def _error(what, rc):
     `rc`, using :py:class:`Error` if no better class exists."""
     return _error_map.get(rc, Error)(what, rc)
 
+def _invalid_error():
+    """The error for an operation on a closed, finished or dropped object,
+    matching the C extension's message."""
+    return Error("Attempt to operate on closed/deleted/dropped object.")
+
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed:
     """We need this because CFFI on PyPy treats None as cffi.NULL, instead of
     throwing an exception it feeds LMDB null pointers. That means simply
@@ -651,7 +658,10 @@ def enable_drop_gil():
 
 def _engine_for_major(lib_version):
     """Return the engine dict for LMDB major version `lib_version`, raising
-    Error if this build has no such engine."""
+    Error if this build has no such engine.  A negative value raises
+    OverflowError, as the C extension's argument parser does (#503)."""
+    if lib_version < 0:
+        raise OverflowError('Integer argument must be >= 0')
     for engine in _engines:
         if engine['major'] == lib_version:
             return engine
@@ -691,7 +701,7 @@ def _select_engine(lib_version, data_version, path):
     automatic selection, otherwise an LMDB major version (0 for 0.9.x, 1
     for 1.0.x).  `data_version` is the sniffed on-disk format (0 if
     unknown)."""
-    if lib_version is not None and lib_version >= 0:
+    if lib_version is not None:
         return _engine_for_major(lib_version)
     if data_version:
         for engine in _engines:
@@ -723,7 +733,7 @@ def version(subpatch=False, lib_version=None):
             the 1.0.x engine).  Defaults to the engine used for new
             environments.
     """
-    engine = (_default_engine if lib_version is None or lib_version < 0
+    engine = (_default_engine if lib_version is None
               else _engine_for_major(lib_version))
     if subpatch:
         return (engine['major'], engine['minor'], engine['patch'],
@@ -867,6 +877,11 @@ class Environment:
             :py:class:`Transaction`. Should match the process's maximum
             expected concurrent transactions (e.g. thread count).
 
+            Defaults to ``0``: no caching.  A cached transaction keeps its
+            slot in the reader lock table (see :py:meth:`readers`), which
+            matters if the process forks.  The C extension caches at most
+            one transaction, whatever the value.
+
         `lock`:
             If ``False``, don't do any locking. If concurrent access is
             anticipated, the caller must manage all concurrency itself. For
@@ -900,7 +915,7 @@ class Environment:
     def __init__(self, path, map_size=10485760, subdir=True,
                  readonly=False, metasync=True, sync=True, map_async=False,
                  mode=O_0755, create=True, readahead=True, writemap=False,
-                 meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
+                 meminit=True, max_readers=126, max_dbs=0, max_spare_txns=0,
                  lock=True, lib_version=None):
         self._max_spare_txns = max_spare_txns
         self._spare_txns = []
@@ -1028,6 +1043,31 @@ class Environment:
     _spare_txns = None
     _dbs = None
 
+    def _wait_for_write_txn(self):
+        """Wait until no top-level write transaction is active.  LMDB
+        serialises writers on a mutex, so a writer on another thread blocks
+        rather than failing (matching the C extension).  The wait happens
+        here, on _write_txn_cond and outside _close_lock, because the owning
+        thread needs that lock to commit or abort; the caller then claims
+        the slot under _close_lock.  A second top-level write transaction on
+        the same thread would deadlock on LMDB's mutex, so it raises
+        instead.  Issue #500."""
+        me = threading.get_ident()
+        with self._write_txn_cond:
+            while self._write_txn_tid:
+                if self._write_txn_tid == me:
+                    msg = ('Attempt to start a write transaction while '
+                           'another write transaction is active on the same '
+                           'thread. This would deadlock.')
+                    raise _error(msg, errno.EBUSY)
+                self._write_txn_cond.wait()
+
+    def _release_write_txn(self):
+        """Release a write-transaction claim that failed to start."""
+        with self._write_txn_cond:
+            self._write_txn_tid = 0
+            self._write_txn_cond.notify_all()
+
     def set_mapsize(self, map_size):
         """Change the maximum size of the map file.
 
@@ -1051,7 +1091,7 @@ class Environment:
         # closed check must come before the pre-open fast path below --
         # otherwise a call after close() hands the _invalid sentinel to C.
         if self._env is _invalid:
-            raise Error("environment is closed")
+            raise _invalid_error()
 
         # Pre-open path: env created but not yet opened (called from __init__
         # before mdb_env_open).  No mmap exists yet, just set the size.
@@ -1066,7 +1106,7 @@ class Environment:
 
         with self._close_lock:
             if self._env is _invalid:
-                raise Error("environment is closed")
+                raise _invalid_error()
 
             # Re-check under _close_lock: a write transaction begin holds
             # the lock, so one may have completed between the unlocked
@@ -1621,6 +1661,10 @@ class Environment:
         if txn:
             db = _Database(self, txn, key, reverse_key, dupsort, create,
                            integerkey, integerdup, dupfixed)
+            # The handle only outlives `txn` if it commits: LMDB discards
+            # DBIs opened in a transaction that aborts.  Let the transaction
+            # evict it from the cache in that case.  Issue #502.
+            txn._opened_dbs.append(db)
         else:
             try:
                 self._creating_db_in_readonly = True
@@ -1810,6 +1854,7 @@ class Transaction:
     _env = _invalid
     _txn = _invalid
     _parent = None
+    _opened_dbs = ()
     _write = False
 
     # Mutations occurred since transaction start. Required to know when Cursor
@@ -1824,68 +1869,94 @@ class Transaction:
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = set()
+        # Handles opened via Environment.open_db(txn=self); see _forget_dbs.
+        self._opened_dbs = []
 
         if parent:
+            if not parent._write:
+                raise _error("Read-only transactions cannot be nested.",
+                             _lib.EINVAL)
+            if not parent._txn:
+                raise _invalid_error()
+            if parent._pyenv is not env:
+                raise _error("Parent transaction belongs to another "
+                             "environment.", _lib.EINVAL)
+            if not write and env.lib_version()[0] < 1:
+                # LMDB 0.9 has no read-only child transactions.  Issue #496.
+                raise _error("Read-only child transactions require the "
+                             "LMDB 1.0 engine.", _lib.EINVAL)
             self._parent = parent
             parent_txn = parent._txn
         else:
             parent_txn = _ffi.NULL
 
-        # Hold _close_lock across the mdb_txn_begin C call to prevent
-        # env.close() from calling mdb_env_close while we're inside
-        # mdb_txn_begin (which releases the GIL).  Issue #180.
-        with env._close_lock:
-            if not env._env:
-                raise _error("env has been closed", _lib.EINVAL)
-            self._env = env._env
-            env._deps.add(self)
-            if parent:
-                parent._deps.add(self)
+        if write and env.readonly:
+            msg = 'Cannot start write transaction with read-only env'
+            raise _error(msg, _lib.EACCES)
 
-            if write:
-                if env.readonly:
-                    msg = 'Cannot start write transaction with read-only env'
-                    raise _error(msg, _lib.EACCES)
-
-                if not parent and env._write_txn_tid:
-                    msg = ('A write transaction is already active on this '
-                           'environment. Only one top-level write '
-                           'transaction is allowed at a time.')
-                    raise _error(msg, errno.EBUSY)
-
-                if not parent:
-                    env._write_txn_tid = threading.get_ident()
-                txnpp = _ffi.new('MDB_txn **')
-                rc = self._lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
-                if rc:
-                    if not parent:
-                        env._write_txn_tid = 0
+        top_writer = write and not parent
+        claimed = False
+        try:
+            while True:
+                if top_writer:
+                    env._wait_for_write_txn()
+                # Hold _close_lock across the mdb_txn_begin C call to prevent
+                # env.close() from calling mdb_env_close while we're inside
+                # mdb_txn_begin (which releases the GIL).  Issue #180.
+                with env._close_lock:
+                    if top_writer:
+                        # Claim under _close_lock, as set_mapsize() checks
+                        # _write_txn_tid under it; retry if another thread
+                        # claimed first.  Issue #500.
                         with env._write_txn_cond:
-                            env._write_txn_cond.notify_all()
-                    raise _error("mdb_txn_begin", rc)
-                self._txn = txnpp[0]
-                self._write = True
-            else:
-                try:  # Exception catch in order to avoid racy 'if txns:' test
-                    if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
-                        raise IndexError
-                    self._txn = env._spare_txns.pop()
-                    env._max_spare_txns += 1
-                    rc = self._lib.mdb_txn_renew(self._txn)
-                    if rc:
-                        while self._deps:
-                            self._deps.pop()._invalidate()
-                        self._lib.mdb_txn_abort(self._txn)
-                        self._txn = _invalid
-                        self._invalidate()
-                        raise _error("mdb_txn_renew", rc)
-                except IndexError:
-                    txnpp = _ffi.new('MDB_txn **')
-                    flags = _lib.MDB_RDONLY
-                    rc = self._lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
-                    if rc:
-                        raise _error("mdb_txn_begin", rc)
-                    self._txn = txnpp[0]
+                            if env._write_txn_tid:
+                                continue
+                            env._write_txn_tid = threading.get_ident()
+                        claimed = True
+                    if not env._env:
+                        raise _invalid_error()
+                    self._env = env._env
+                    env._deps.add(self)
+                    if parent:
+                        parent._deps.add(self)
+
+                    if write:
+                        txnpp = _ffi.new('MDB_txn **')
+                        rc = self._lib.mdb_txn_begin(self._env, parent_txn, 0,
+                                                     txnpp)
+                        if rc:
+                            raise _error("mdb_txn_begin", rc)
+                        self._txn = txnpp[0]
+                        self._write = True
+                        claimed = False  # now owned by this transaction
+                    else:
+                        try:  # Exception catch in order to avoid racy 'if txns:' test
+                            # Don't use spare txns for creating a DB when
+                            # read-only, nor for a child, which must be
+                            # begun under its parent (issue #496).
+                            if env._creating_db_in_readonly or parent:
+                                raise IndexError
+                            self._txn = env._spare_txns.pop()
+                            env._max_spare_txns += 1
+                            rc = self._lib.mdb_txn_renew(self._txn)
+                            if rc:
+                                while self._deps:
+                                    self._deps.pop()._invalidate()
+                                self._lib.mdb_txn_abort(self._txn)
+                                self._txn = _invalid
+                                self._invalidate()
+                                raise _error("mdb_txn_renew", rc)
+                        except IndexError:
+                            txnpp = _ffi.new('MDB_txn **')
+                            flags = _lib.MDB_RDONLY
+                            rc = self._lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                            if rc:
+                                raise _error("mdb_txn_begin", rc)
+                            self._txn = txnpp[0]
+                break
+        finally:
+            if claimed:
+                env._release_write_txn()
 
     def _invalidate(self):
         if self._txn:
@@ -1959,8 +2030,12 @@ class Transaction:
                 If ``True`` (the default), also delete the named database and
                 invalidate the handle; if ``False``, only empty it.
         """
-        while db._deps:
-            db._deps.pop()._invalidate()
+        if delete:
+            # The database is going away, so its cursors are closed.
+            # Emptying it (delete=False) leaves them valid but unpositioned,
+            # as LMDB does and the C extension did.  Issue #503.
+            while db._deps:
+                db._deps.pop()._invalidate()
         # Issue #475: serialize against close()/set_mapsize().
         with self._pyenv._close_lock:
             rc = self._lib.mdb_drop(self._txn, db._dbi, delete)
@@ -1977,7 +2052,10 @@ class Transaction:
         # and in any case a correctly configured program should not be opening
         # more read-only transactions than there are configured spares.
         spare_txns = self._pyenv._spare_txns
-        if spare_txns is not None and self._pyenv._max_spare_txns > 0:
+        # A read-only child belongs to its parent and is never cached.
+        # Issue #496.
+        if (spare_txns is not None and self._pyenv._max_spare_txns > 0
+                and not self._parent):
             with self._pyenv._close_lock:
                 # Grab and clear _txn inside the lock so that a concurrent
                 # close() will see _txn as valid and properly abort it
@@ -2018,11 +2096,27 @@ class Transaction:
                     with self._pyenv._write_txn_cond:
                         self._pyenv._write_txn_cond.notify_all()
                 if not self._pyenv._env:
-                    raise _error("env has been closed", _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_txn_commit(txn)
             if rc:
+                self._forget_dbs()
                 raise _error("mdb_txn_commit", rc)
+            if self._parent:
+                # Still provisional until the parent commits.  Issue #502.
+                self._parent._opened_dbs.extend(self._opened_dbs)
+            self._opened_dbs = []
             self._invalidate()
+
+    def _forget_dbs(self):
+        """Evict handles opened in this transaction from the environment's
+        open_db() cache: the transaction did not commit, so LMDB has
+        discarded them.  Issue #502."""
+        dbs = self._pyenv._dbs
+        if dbs is not None:
+            for db in self._opened_dbs:
+                if dbs.get(db._name) is db:
+                    del dbs[db._name]
+        self._opened_dbs = []
 
     def abort(self):
         """Abort the pending transaction. Repeat calls to :py:meth:`abort` have
@@ -2033,6 +2127,7 @@ class Transaction:
         Equivalent to `mdb_txn_abort()
         <http://lmdb.tech/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
         """
+        self._forget_dbs()
         if self._txn:
             while self._deps:
                 self._deps.pop()._invalidate()
@@ -2103,6 +2198,9 @@ class Transaction:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will fail and return ``False``.
+                On a `dupsort=True` database, `value` is appended as the last
+                duplicate of `key` instead, and must sort after its existing
+                values.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
@@ -2113,13 +2211,19 @@ class Transaction:
             flags |= _lib.MDB_NODUPDATA
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
+        db = db or self._db
         if append:
-            flags |= _lib.MDB_APPEND
+            # On a dupsort database, append a duplicate (MDB_APPEND would
+            # reject the last key itself), as Cursor.put does.  Issue #504.
+            if db._flags & _lib.MDB_DUPSORT:
+                flags |= _lib.MDB_APPENDDUP
+            else:
+                flags |= _lib.MDB_APPEND
 
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
         with self._pyenv._close_lock:
-            rc = self._lib.pymdb_put(self._txn, (db or self._db)._dbi,
+            rc = self._lib.pymdb_put(self._txn, db._dbi,
                                 key, len(key), value, len(value), flags)
         self._mutations += 1
         if rc:
@@ -2491,8 +2595,7 @@ class Cursor:
         # mdb_cursor_get is running.  Issue #180.
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         self._last_mutation = self._pytxn._mutations
@@ -2507,8 +2610,7 @@ class Cursor:
     def _cursor_get_kv(self, op, k, v):
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
                                        self._key, self._val, op)
         self._valid = v = not rc
@@ -2739,14 +2841,15 @@ class Cursor:
                 Incompatible with ``dupdata=True``.
 
         """
+        # Same exceptions and messages as the C extension.  Issue #503.
         if dupfixed_bytes and dupfixed_bytes < 0:
-            raise Error("dupfixed_bytes must be a positive integer.")
+            raise OverflowError('Integer argument must be >= 0')
         elif (dupfixed_bytes or keyfixed) and not dupdata:
-            raise Error("dupdata is required for dupfixed_bytes/key_bytes.")
+            raise TypeError("dupdata is required for dupfixed_bytes/keyfixed.")
         elif keyfixed and not dupfixed_bytes:
-            raise Error("dupfixed_bytes is required for key_bytes.")
+            raise TypeError("dupfixed_bytes is required for keyfixed.")
         elif not values and dupdata:
-            raise Error("values=False is incompatible with dupdata.")
+            raise TypeError("values=False is incompatible with dupdata.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
@@ -2835,8 +2938,12 @@ class Cursor:
         rc = self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
         # issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation,
         # and fails to update `key` and `value` on success. Therefore
-        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE.
-        self._cursor_get(_lib.MDB_GET_CURRENT)
+        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE -- but
+        # only on success: after a miss it would re-position the cursor on
+        # wherever LMDB left it (the next key), contradicting the
+        # unpositioned-on-False contract.  Issue #505.
+        if rc:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return rc
 
     def delete(self, dupdata=False):
@@ -2855,8 +2962,7 @@ class Cursor:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_cursor_del(self._cur, flags)
             self._pytxn._mutations += 1
             if rc:
@@ -2877,14 +2983,13 @@ class Cursor:
         countp = _ffi.new('size_t *')
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
 
-    def put(self, key, val, dupdata=True, overwrite=True, append=False):
+    def put(self, key, value, dupdata=True, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `overwrite=False`. On
         success, the cursor is positioned on the key.
@@ -2895,7 +3000,7 @@ class Cursor:
             `key`:
                 Bytestring key to store.
 
-            `val`:
+            `value`:
                 Bytestring value to store.
 
             `dupdata`:
@@ -2912,6 +3017,9 @@ class Cursor:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will fail and return ``False``.
+                On a `dupsort=True` database, `value` is appended as the last
+                duplicate of `key` instead, and must sort after its existing
+                values.
         """
         flags = 0
         if not dupdata:
@@ -2919,16 +3027,17 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
+            # The cursor's own database decides, not the transaction's
+            # default one.  Issue #504.
+            if self._pydb._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
 
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+                raise _invalid_error()
+            rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), value, len(value), flags)
         self._pytxn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -2972,18 +3081,24 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
+            # The cursor's own database decides, not the transaction's
+            # default one.  Issue #504.
+            if self._pydb._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
 
         added = 0
         skipped = 0
-        for key, value in items:
+        for item in items:
+            # Exactly 2-tuples, as documented and as the C extension
+            # enforces.  Issue #503.
+            if type(item) is not tuple or len(item) != 2:
+                raise TypeError('putmulti() elements must be 2-tuples')
+            key, value = item
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.pymdb_cursor_put(self._cur, key, len(key),
                                            value, len(value), flags)
             self._pytxn._mutations += 1
@@ -2996,7 +3111,7 @@ class Cursor:
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return added, added - skipped
 
-    def replace(self, key, val):
+    def replace(self, key, value):
         """Store a record, returning its previous value if one existed. Returns
         ``None`` if no previous value existed. This uses the best available
         mechanism to minimize the cost of a `set-and-return-previous`
@@ -3019,16 +3134,15 @@ class Cursor:
                 self.delete(True)
             else:
                 old = None
-            self.put(key, val)
+            self.put(key, value)
             return old
 
         flags = _lib.MDB_NOOVERWRITE
         keylen = len(key)
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+                raise _invalid_error()
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), flags)
         self._pytxn._mutations += 1
         if not rc:
             return
@@ -3040,9 +3154,8 @@ class Cursor:
         old = _mvstr(self._val)
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+                raise _invalid_error()
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), 0)
         self._pytxn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
@@ -3065,8 +3178,7 @@ class Cursor:
             old = _mvstr(self._val)
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_cursor_del(self._cur, 0)
             self._pytxn._mutations += 1
             if rc:
@@ -3090,3 +3202,46 @@ class Cursor:
             if not found:
                 return iter(())
             return self.iternext()
+
+
+def _translate_invalid(cls):
+    """Make operations on a closed, finished or dropped object raise
+    :py:class:`Error`, as the C extension does, instead of the raw cffi
+    ``TypeError`` that passing the `_invalid` sentinel to LMDB produces.
+    Wraps each public method of `cls` (generator methods included, so
+    iteration is covered too).  The common path costs only a ``try``.
+    Issue #503."""
+    def is_invalid(e):
+        return 'Some_LMDB_Resource_That_Was_Deleted_Or_Closed' in str(e)
+
+    def wrap(fn):
+        if inspect.isgeneratorfunction(fn):
+            @functools.wraps(fn)
+            def gen_wrapper(*args, **kwargs):
+                try:
+                    return (yield from fn(*args, **kwargs))
+                except TypeError as e:
+                    if is_invalid(e):
+                        raise _invalid_error() from None
+                    raise
+            return gen_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except TypeError as e:
+                if is_invalid(e):
+                    raise _invalid_error() from None
+                raise
+        return wrapper
+
+    for name, fn in list(vars(cls).items()):
+        if inspect.isfunction(fn) and not name.startswith('_'):
+            setattr(cls, name, wrap(fn))
+    return cls
+
+
+for _cls in (Environment, _Database, Transaction, Cursor):
+    _translate_invalid(_cls)
+del _cls

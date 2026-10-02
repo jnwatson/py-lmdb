@@ -900,7 +900,7 @@ The safe patterns for multiprocessing are:
 .. caution::
 
     If the process will be forked while an :py:class:`Environment` is open,
-    set ``max_spare_txns=0`` when opening the environment.  Cached read-only
+    leave ``max_spare_txns`` at its default of ``0``.  Cached read-only
     transactions hold a slot in the LMDB reader lock table; after ``fork()``,
     the child inherits these stale slots that it cannot clean up, which can
     exhaust the reader table.
@@ -1274,12 +1274,14 @@ These functions are useful for e.g. backup jobs.
             python -mlmdb copyfd -e source.lmdb > target.lmdb/data.mdb
 
         drop: Delete one or more sub-databases.
-            python -mlmdb drop db1
+            python -mlmdb drop -e /path/to/db db1
 
         dump: Dump one or more databases to disk in 'cdbmake' format.
-            Usage: dump [db1=file1.cdbmake db2=file2.cdbmake]
+            python -mlmdb dump -e /path/to/db [db1=file1.cdbmake db2=file2.cdbmake]
 
             If no databases are given, dumps the main database to 'main.cdbmake'.
+            With --all, dumps the main database and every named database, each
+            to '<name>.cdbmake'.
 
         edit: Add/delete/replace values from a database.
             python -mlmdb edit --set key=value --set-file key=/path \
@@ -1287,7 +1289,7 @@ These functions are useful for e.g. backup jobs.
                        --delete key
 
         get: Read one or more values from a database.
-            python -mlmdb get [<key1> [<keyN> [..]]]
+            python -mlmdb get -e /path/to/db [<key1> [<keyN> [..]]]
 
         readers: Display readers in the lock table
             python -mlmdb readers -e /path/to/db [-c]
@@ -1295,7 +1297,7 @@ These functions are useful for e.g. backup jobs.
             If -c is specified, clear stale readers.
 
         restore: Read one or more database from disk in 'cdbmake' format.
-            python -mlmdb restore db1=file1.cdbmake db2=file2.cdbmake
+            python -mlmdb restore -e /path/to/db db1=file1.cdbmake db2=file2.cdbmake
 
             The special db name ":main:" may be used to indicate the main DB.
 
@@ -1325,14 +1327,15 @@ These functions are useful for e.g. backup jobs.
       -h, --help            show this help message and exit
       -e ENV, --env=ENV     Environment file to open
       -d DB, --db=DB        Database to open (default: main)
-      -r READ, --read=READ  Open environment read-only
+      -r, --read            Open environment read-only
       -S MAP_SIZE, --map_size=MAP_SIZE
                             Map size in megabytes (default: 10)
       -s, --use-single-file
                             The database was created as a single file and not a
                             subdirectory
+      -a, --all             Make "dump" dump all databases
       -E TARGET_ENV, --target_env=TARGET_ENV
-                            Target environment file for "dumpfd"
+                            Target environment file for "rewrite"
       -x, --xxd             Print values in xxd format
       -M MAX_DBS, --max-dbs=MAX_DBS
                             Maximum open DBs (default: 128)
