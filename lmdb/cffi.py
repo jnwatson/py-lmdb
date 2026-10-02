@@ -873,6 +873,11 @@ class Environment:
             :py:class:`Transaction`. Should match the process's maximum
             expected concurrent transactions (e.g. thread count).
 
+            Defaults to ``0``: no caching.  A cached transaction keeps its
+            slot in the reader lock table (see :py:meth:`readers`), which
+            matters if the process forks.  The C extension caches at most
+            one transaction, whatever the value.
+
         `lock`:
             If ``False``, don't do any locking. If concurrent access is
             anticipated, the caller must manage all concurrency itself. For
@@ -906,7 +911,7 @@ class Environment:
     def __init__(self, path, map_size=10485760, subdir=True,
                  readonly=False, metasync=True, sync=True, map_async=False,
                  mode=O_0755, create=True, readahead=True, writemap=False,
-                 meminit=True, max_readers=126, max_dbs=0, max_spare_txns=1,
+                 meminit=True, max_readers=126, max_dbs=0, max_spare_txns=0,
                  lock=True, lib_version=None):
         self._max_spare_txns = max_spare_txns
         self._spare_txns = []

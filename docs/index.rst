@@ -900,7 +900,7 @@ The safe patterns for multiprocessing are:
 .. caution::
 
     If the process will be forked while an :py:class:`Environment` is open,
-    set ``max_spare_txns=0`` when opening the environment.  Cached read-only
+    leave ``max_spare_txns`` at its default of ``0``.  Cached read-only
     transactions hold a slot in the LMDB reader lock table; after ``fork()``,
     the child inherits these stale slots that it cannot clean up, which can
     exhaust the reader table.

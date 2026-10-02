@@ -196,7 +196,7 @@ class Environment:
         meminit: bool = True,
         max_readers: int = 126,
         max_dbs: int = 0,
-        max_spare_txns: int = 1,
+        max_spare_txns: int = 0,
         lock: bool = True,
         lib_version: int = -1,
     ) -> Self: ...

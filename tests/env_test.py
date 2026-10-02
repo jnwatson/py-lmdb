@@ -1287,6 +1287,16 @@ class SpareTxnTest(unittest.TestCase):
         del t2
         assert 0 == reader_count(env)
 
+    def test_default_is_no_caching(self):
+        '''Issue #501: both implementations default to max_spare_txns=0,
+        so a finished read txn leaves no reader slot behind.'''
+        _, env = testlib.temp_env()
+        t1 = env.begin()
+        assert 1 == reader_count(env)
+        t1.abort()
+        del t1
+        assert 0 == reader_count(env)
+
     def test_one(self):
         _, env = testlib.temp_env(max_spare_txns=1)
         # 1 here, since CFFI uses a temporary reader during init.
