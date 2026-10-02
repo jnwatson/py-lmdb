@@ -4212,8 +4212,13 @@ cursor_set_range_dup(CursorObject *self, PyObject *args, PyObject *kwds)
 
     /* issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation, and
      * fails to update `key` and `value` on success. Therefore explicitly call
-     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE. */
-    _cursor_get_c(self, MDB_GET_CURRENT);
+     * MDB_GET_CURRENT after MDB_GET_BOTH_RANGE -- but only on success: after
+     * a miss it would re-position the cursor on wherever LMDB left it (the
+     * next key), contradicting the unpositioned-on-False contract.  Issue
+     * #505. */
+    if(ret == Py_True) {
+        _cursor_get_c(self, MDB_GET_CURRENT);
+    }
 
     return ret;
 }

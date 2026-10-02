@@ -152,6 +152,19 @@ class CursorTest2(unittest.TestCase):
         self.txn = self.env.begin(write=True, db=self.db)
         self.c = self.txn.cursor()
 
+    def testSetRangeDup(self):
+        '''Issue #505: set_range_dup positions on the first value >= value
+        of an exact key; on a miss it leaves the cursor unpositioned rather
+        than on the following key.'''
+        for k, v in ((b'a', b'1'), (b'a', b'3'), (b'z', b'9')):
+            self.c.put(k, v, dupdata=True)
+        self.assertTrue(self.c.set_range_dup(b'a', b'2'))
+        self.assertEqual(self.c.item(), (b'a', b'3'))
+        self.assertFalse(self.c.set_range_dup(b'm', b'0'))  # no such key
+        self.assertEqual(self.c.item(), (b'', b''))
+        self.assertFalse(self.c.set_range_dup(b'a', b'4'))  # past last value
+        self.assertEqual(self.c.item(), (b'', b''))
+
     def testIterWithDeletes(self):
         ''' A problem identified in LMDB 0.9.27 '''
         self.c.put(b'\x00\x01', b'hehe', dupdata=True)

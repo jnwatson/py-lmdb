@@ -2938,8 +2938,12 @@ class Cursor:
         rc = self._cursor_get_kv(_lib.MDB_GET_BOTH_RANGE, key, value)
         # issue #126: MDB_GET_BOTH_RANGE does not satisfy its documentation,
         # and fails to update `key` and `value` on success. Therefore
-        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE.
-        self._cursor_get(_lib.MDB_GET_CURRENT)
+        # explicitly call MDB_GET_CURRENT after MDB_GET_BOTH_RANGE -- but
+        # only on success: after a miss it would re-position the cursor on
+        # wherever LMDB left it (the next key), contradicting the
+        # unpositioned-on-False contract.  Issue #505.
+        if rc:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
         return rc
 
     def delete(self, dupdata=False):
