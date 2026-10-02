@@ -331,7 +331,9 @@ enum trans_flags {
     /** Transaction can be can go on freelist instead of deallocation. */
     TRANS_RDONLY        = 2,
     /** Transaction is spare, ready for mdb_txn_renew() */
-    TRANS_SPARE         = 4
+    TRANS_SPARE         = 4,
+    /** Transaction is a child of another (see TransObject.parent). */
+    TRANS_NESTED        = 8
 };
 
 /** lmdb.Transaction */
@@ -340,6 +342,12 @@ struct TransObject {
     /** Python-managed list of weakrefs to this object. */
     PyObject *weaklist;
     EnvObject *env;
+    /** Parent transaction for a nested transaction, else NULL.  A nested
+     * transaction is linked into its parent's child list rather than the
+     * environment's, so the parent's commit, abort or invalidation finishes
+     * it first, before LMDB frees it along with the parent.  Strong
+     * reference, released by trans_clear.  Issue #496. */
+    struct TransObject *parent;
     /** Engine servicing env; cached here so teardown paths that may see
      * env==NULL can still reach the right LMDB. */
     const MdbApi *libv;
@@ -1367,6 +1375,15 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         if(! parent->valid) {
             return err_invalid();
         }
+        if(parent->env != env) {
+            return err_set("Parent transaction belongs to another "
+                           "environment.", EINVAL);
+        }
+        if(! write && V->major < 1) {
+            /* LMDB 0.9 has no read-only child transactions.  Issue #496. */
+            return err_set("Read-only child transactions require the "
+                           "LMDB 1.0 engine.", EINVAL);
+        }
         parent_txn = parent->txn;
     }
 
@@ -1392,7 +1409,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         return err_set(msg, EBUSY);
     }
 
-    if((!write) && env->spare_txn) {
+    /* A child must be begun under its parent, never taken from the spare
+     * cache (a top-level snapshot).  Issue #496. */
+    if((!write) && !parent && env->spare_txn) {
         txn = env->spare_txn;
         DEBUG("using cached txn", txn)
         env->spare_txn = NULL;
@@ -1442,7 +1461,13 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
 
 
     OBJECT_INIT(self)
-    LINK_CHILD(env, self)
+    if(parent) {
+        LINK_CHILD(parent, self)
+        Py_INCREF(parent);
+    } else {
+        LINK_CHILD(env, self)
+    }
+    self->parent = parent;
     self->weaklist = NULL;
     self->env = env;
     self->libv = env->libv;
@@ -1457,6 +1482,9 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
     self->flags = 0;
     if(! write) {
         self->flags |= TRANS_RDONLY;
+    }
+    if(parent) {
+        self->flags |= TRANS_NESTED;
     }
     if(buffers) {
         self->flags |= TRANS_BUFFERS;
@@ -4509,7 +4537,8 @@ trans_clear(TransObject *self)
         MDB_txn *txn = self->txn;
         self->txn = NULL;  /* Prevent double-abort from concurrent
                             * trans_clear calls (issue #180). */
-        if(self->env && !(self->flags & TRANS_RDONLY)) {
+        if(self->env &&
+           !(self->flags & (TRANS_RDONLY | TRANS_NESTED))) {
             /* The abort below runs with the GIL held, so a #465 waiter
              * (which needs the GIL to proceed) cannot act on the cleared
              * tid before the write mutex is actually released. */
@@ -4530,10 +4559,13 @@ trans_clear(TransObject *self)
     }
     MDEBUG("db is/was %p", self->db)
     Py_CLEAR(self->db);
-    if(self->env) {
+    if(self->parent) {
+        UNLINK_CHILD(self->parent, self)
+        Py_CLEAR(self->parent);
+    } else if(self->env) {
         UNLINK_CHILD(self->env, self)
-        Py_CLEAR(self->env);
     }
+    Py_CLEAR(self->env);
     return 0;
 }
 
@@ -4552,7 +4584,7 @@ trans_dealloc(TransObject *self)
 
     if(self->env && self->env->pid == _cached_pid) {
         if(self->env->valid && self->env->env && txn &&
-                !self->env->spare_txn &&
+                !self->env->spare_txn && !(self->flags & TRANS_NESTED) &&
                 self->env->max_spare_txns && (self->flags & TRANS_RDONLY)) {
             MDEBUG("caching trans")
             V->txn_reset(txn);
@@ -4580,8 +4612,11 @@ trans_dealloc(TransObject *self)
                 /* Mutex released on this (owning) thread; wakes a
                  * close() blocked waiting for it.  Cleared after the
                  * abort so waiters never observe tid == 0 while the
-                 * transaction is still live.  Issues #465, #475. */
-                CLEAR_WRITE_TXN_TID(self->env);
+                 * transaction is still live.  A child holds no mutex of
+                 * its own.  Issues #465, #475, #496. */
+                if(!(self->flags & TRANS_NESTED)) {
+                    CLEAR_WRITE_TXN_TID(self->env);
+                }
             }
         }
         MDEBUG("deleting trans")
@@ -4592,10 +4627,13 @@ trans_dealloc(TransObject *self)
        /* Can't touch LMDB handles after fork, but still need to
         * release Python references to avoid leaking env/db. */
        Py_CLEAR(self->db);
-       if(self->env) {
+       if(self->parent) {
+           UNLINK_CHILD(self->parent, self)
+           Py_CLEAR(self->parent);
+       } else if(self->env) {
            UNLINK_CHILD(self->env, self)
-           Py_CLEAR(self->env);
        }
+       Py_CLEAR(self->env);
     }
 
     PyObject_Del(self);
@@ -4653,7 +4691,13 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
 #ifdef HAVE_MEMSINK
         ms_notify((PyObject *) self, &self->sink_head);
 #endif
-        if(self->flags & TRANS_RDONLY) {
+        if(self->flags & TRANS_NESTED && self->flags & TRANS_RDONLY) {
+            /* A read-only child belongs to its parent: abort it outright
+             * rather than resetting it for the spare cache.  Issue #496. */
+            if(txn) {
+                V->txn_abort(txn);
+            }
+        } else if(self->flags & TRANS_RDONLY) {
             DEBUG("resetting")
             /* Reset to spare state, ready for _dealloc to freelist it. */
             if(txn) {
@@ -4690,13 +4734,16 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                 Py_END_ALLOW_THREADS
                 ACTIVE_OPS_DEC(env);
                 /* Mutex released on this (owning) thread; wakes a close()
-                 * blocked waiting for it.  Issue #465. */
-                CLEAR_WRITE_TXN_TID(env);
+                 * blocked waiting for it.  A child holds no mutex of its
+                 * own.  Issues #465, #496. */
+                if(!(self->flags & TRANS_NESTED)) {
+                    CLEAR_WRITE_TXN_TID(env);
+                }
             } else {
                 if(txn) {
                     V->txn_abort(txn);
                 }
-                if(env) {
+                if(env && !(self->flags & TRANS_NESTED)) {
                     CLEAR_WRITE_TXN_TID(env);
                 }
             }
@@ -4724,7 +4771,13 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
 #ifdef HAVE_MEMSINK
     ms_notify((PyObject *) self, &self->sink_head);
 #endif
-    if(self->flags & TRANS_RDONLY) {
+    if(self->flags & TRANS_NESTED && self->flags & TRANS_RDONLY) {
+        /* A read-only child belongs to its parent: end it outright rather
+         * than resetting it for the spare cache.  Issue #496. */
+        MDB_txn *txn = self->txn;
+        self->txn = NULL;
+        V->txn_abort(txn);
+    } else if(self->flags & TRANS_RDONLY) {
         DEBUG("resetting")
         /* Reset to spare state, ready for _dealloc to freelist it. */
         V->txn_reset(self->txn);
@@ -4747,9 +4800,11 @@ trans_commit(TransObject *self, PyObject *Py_UNUSED(ignored))
         ACTIVE_OPS_DEC(env);
         /* Mutex released on this (owning) thread; wakes a close() blocked
          * waiting for it.  Cleared after the commit so waiters never
-         * observe tid == 0 while the transaction is still live.
-         * Issues #465, #475. */
-        CLEAR_WRITE_TXN_TID(env);
+         * observe tid == 0 while the transaction is still live.  A child
+         * holds no mutex of its own.  Issues #465, #475, #496. */
+        if(!(self->flags & TRANS_NESTED)) {
+            CLEAR_WRITE_TXN_TID(env);
+        }
         Py_DECREF((PyObject *) env);
         if(rc) {
             return err_set("mdb_txn_commit", rc);

@@ -686,6 +686,66 @@ class DoubleWriteTxnTest(unittest.TestCase):
         child.abort()
         parent.abort()
 
+    def test_readonly_child_txn(self):
+        '''Issue #496: LMDB 1.0 supports read-only children of a write txn;
+        0.9 does not, and says so.  It used to segfault on the C extension
+        (the child was reset into the spare cache) and silently return an
+        unrelated snapshot on CFFI.'''
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        parent.put(B('k'), B('v'))
+        if env.lib_version()[0] < 1:
+            self.assertRaises(lmdb.InvalidParameterError,
+                              lambda: env.begin(parent=parent))
+            parent.abort()
+            return
+        children = [env.begin(parent=parent) for _ in range(2)]
+        for child in children:
+            self.assertEqual(child.get(B('k')), B('v'))  # sees parent write
+        children[0].abort()
+        children[1].commit()
+        # A finished child is not recycled as a top-level snapshot.
+        with env.begin() as txn:
+            self.assertIsNone(txn.get(B('k')))
+        parent.commit()
+        with env.begin() as txn:
+            self.assertEqual(txn.get(B('k')), B('v'))
+
+    def test_child_invalid_after_parent_finishes(self):
+        '''Issue #496: finishing a parent finishes its children first, so a
+        child used afterwards raises instead of touching freed memory.'''
+        for finish in ('abort', 'commit'):
+            _, env = testlib.temp_env()
+            parent = env.begin(write=True)
+            child = env.begin(write=True, parent=parent)
+            child.put(B('k'), B('v'))
+            getattr(parent, finish)()
+            self.assertRaises(lmdb.Error, lambda: child.get(B('k')))
+            child.abort()  # no-op on a finished transaction
+            # The child's write was discarded with it, not committed.
+            with env.begin() as txn:
+                self.assertIsNone(txn.get(B('k')))
+            env.close()
+
+    def test_child_does_not_release_parent_write_slot(self):
+        '''Issue #496: ending a child write txn must not mark the parent's
+        write lock as released (it used to clear the owner on the C
+        extension, letting a second top-level writer start on this
+        thread and deadlock).'''
+        _, env = testlib.temp_env()
+        parent = env.begin(write=True)
+        env.begin(write=True, parent=parent).commit()
+        self.assertRaises(lmdb.Error, lambda: env.begin(write=True))
+        parent.abort()
+
+    def test_nested_txn_parent_from_other_env(self):
+        _, env1 = testlib.temp_env()
+        _, env2 = testlib.temp_env()
+        parent = env1.begin(write=True)
+        self.assertRaises(lmdb.InvalidParameterError,
+                          lambda: env2.begin(write=True, parent=parent))
+        parent.abort()
+
     def test_write_txn_after_context_manager(self):
         _, env = testlib.temp_env()
         with env.begin(write=True) as txn:

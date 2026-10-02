@@ -553,11 +553,8 @@ class SetMapSizeConcurrencyTest(unittest.TestCase):
 
         def tolerated(e):
             """A handle invalidated by a concurrent resize surfaces as
-            lmdb.Error (CPython backend) or as a TypeError mentioning the
-            _invalid sentinel (CFFI backend)."""
-            return (isinstance(e, lmdb.Error) or
-                    (isinstance(e, TypeError) and
-                     '_LMDB_Resource' in str(e)))
+            lmdb.Error on both implementations (issue #503)."""
+            return isinstance(e, lmdb.Error)
 
         def worker_read():
             while not stop.is_set():

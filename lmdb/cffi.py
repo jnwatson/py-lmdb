@@ -27,6 +27,7 @@ Please see https://lmdb.readthedocs.io/
 """
 
 import errno
+import functools
 import inspect
 import os
 import sys
@@ -616,6 +617,11 @@ def _error(what, rc):
     """Lookup and instantiate the correct exception class for the error code
     `rc`, using :py:class:`Error` if no better class exists."""
     return _error_map.get(rc, Error)(what, rc)
+
+def _invalid_error():
+    """The error for an operation on a closed, finished or dropped object,
+    matching the C extension's message."""
+    return Error("Attempt to operate on closed/deleted/dropped object.")
 
 class Some_LMDB_Resource_That_Was_Deleted_Or_Closed:
     """We need this because CFFI on PyPy treats None as cffi.NULL, instead of
@@ -1851,6 +1857,18 @@ class Transaction:
         self._deps = set()
 
         if parent:
+            if not parent._write:
+                raise _error("Read-only transactions cannot be nested.",
+                             _lib.EINVAL)
+            if not parent._txn:
+                raise _invalid_error()
+            if parent._pyenv is not env:
+                raise _error("Parent transaction belongs to another "
+                             "environment.", _lib.EINVAL)
+            if not write and env.lib_version()[0] < 1:
+                # LMDB 0.9 has no read-only child transactions.  Issue #496.
+                raise _error("Read-only child transactions require the "
+                             "LMDB 1.0 engine.", _lib.EINVAL)
             self._parent = parent
             parent_txn = parent._txn
         else:
@@ -1897,7 +1915,10 @@ class Transaction:
                         claimed = False  # now owned by this transaction
                     else:
                         try:  # Exception catch in order to avoid racy 'if txns:' test
-                            if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
+                            # Don't use spare txns for creating a DB when
+                            # read-only, nor for a child, which must be
+                            # begun under its parent (issue #496).
+                            if env._creating_db_in_readonly or parent:
                                 raise IndexError
                             self._txn = env._spare_txns.pop()
                             env._max_spare_txns += 1
@@ -2011,7 +2032,10 @@ class Transaction:
         # and in any case a correctly configured program should not be opening
         # more read-only transactions than there are configured spares.
         spare_txns = self._pyenv._spare_txns
-        if spare_txns is not None and self._pyenv._max_spare_txns > 0:
+        # A read-only child belongs to its parent and is never cached.
+        # Issue #496.
+        if (spare_txns is not None and self._pyenv._max_spare_txns > 0
+                and not self._parent):
             with self._pyenv._close_lock:
                 # Grab and clear _txn inside the lock so that a concurrent
                 # close() will see _txn as valid and properly abort it
@@ -3124,3 +3148,46 @@ class Cursor:
             if not found:
                 return iter(())
             return self.iternext()
+
+
+def _translate_invalid(cls):
+    """Make operations on a closed, finished or dropped object raise
+    :py:class:`Error`, as the C extension does, instead of the raw cffi
+    ``TypeError`` that passing the `_invalid` sentinel to LMDB produces.
+    Wraps each public method of `cls` (generator methods included, so
+    iteration is covered too).  The common path costs only a ``try``.
+    Issue #503."""
+    def is_invalid(e):
+        return 'Some_LMDB_Resource_That_Was_Deleted_Or_Closed' in str(e)
+
+    def wrap(fn):
+        if inspect.isgeneratorfunction(fn):
+            @functools.wraps(fn)
+            def gen_wrapper(*args, **kwargs):
+                try:
+                    return (yield from fn(*args, **kwargs))
+                except TypeError as e:
+                    if is_invalid(e):
+                        raise _invalid_error() from None
+                    raise
+            return gen_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except TypeError as e:
+                if is_invalid(e):
+                    raise _invalid_error() from None
+                raise
+        return wrapper
+
+    for name, fn in list(vars(cls).items()):
+        if inspect.isfunction(fn) and not name.startswith('_'):
+            setattr(cls, name, wrap(fn))
+    return cls
+
+
+for _cls in (Environment, _Database, Transaction, Cursor):
+    _translate_invalid(_cls)
+del _cls
