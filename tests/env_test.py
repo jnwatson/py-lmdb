@@ -1125,6 +1125,29 @@ class OpenDbTest(unittest.TestCase):
         self.assertRaises(Exception,
             lambda: env.open_db('subdb3'))  # type: ignore[arg-type]
 
+    def test_handle_from_aborted_txn_not_reused(self):
+        '''Issue #502: a database created in a transaction that aborted
+        does not exist afterwards; CFFI used to return its cached handle.
+        Same when the creating child commits but its parent aborts.'''
+        _, env = testlib.temp_env(max_dbs=4)
+        txn = env.begin(write=True)
+        env.open_db(B('gone'), txn=txn)
+        txn.abort()
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db(B('gone'), create=False))
+
+        parent = env.begin(write=True)
+        child = env.begin(write=True, parent=parent)
+        env.open_db(B('nested'), txn=child)
+        child.commit()
+        parent.abort()
+        self.assertRaises(lmdb.NotFoundError,
+            lambda: env.open_db(B('nested'), create=False))
+
+        with env.begin(write=True) as txn:
+            env.open_db(B('kept'), txn=txn)
+        env.open_db(B('kept'), create=False)
+
     def test_sub_rotxn(self):
         _, env = testlib.temp_env()
         txn = env.begin(write=False)

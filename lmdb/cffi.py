@@ -1657,6 +1657,10 @@ class Environment:
         if txn:
             db = _Database(self, txn, key, reverse_key, dupsort, create,
                            integerkey, integerdup, dupfixed)
+            # The handle only outlives `txn` if it commits: LMDB discards
+            # DBIs opened in a transaction that aborts.  Let the transaction
+            # evict it from the cache in that case.  Issue #502.
+            txn._opened_dbs.append(db)
         else:
             try:
                 self._creating_db_in_readonly = True
@@ -1846,6 +1850,7 @@ class Transaction:
     _env = _invalid
     _txn = _invalid
     _parent = None
+    _opened_dbs = ()
     _write = False
 
     # Mutations occurred since transaction start. Required to know when Cursor
@@ -1860,6 +1865,8 @@ class Transaction:
         self._val = _ffi.new('MDB_val *')
         self._to_py = _mvbuf if buffers else _mvstr
         self._deps = set()
+        # Handles opened via Environment.open_db(txn=self); see _forget_dbs.
+        self._opened_dbs = []
 
         if parent:
             if not parent._write:
@@ -2084,8 +2091,24 @@ class Transaction:
                     raise _error("env has been closed", _lib.EINVAL)
                 rc = self._lib.mdb_txn_commit(txn)
             if rc:
+                self._forget_dbs()
                 raise _error("mdb_txn_commit", rc)
+            if self._parent:
+                # Still provisional until the parent commits.  Issue #502.
+                self._parent._opened_dbs.extend(self._opened_dbs)
+            self._opened_dbs = []
             self._invalidate()
+
+    def _forget_dbs(self):
+        """Evict handles opened in this transaction from the environment's
+        open_db() cache: the transaction did not commit, so LMDB has
+        discarded them.  Issue #502."""
+        dbs = self._pyenv._dbs
+        if dbs is not None:
+            for db in self._opened_dbs:
+                if dbs.get(db._name) is db:
+                    del dbs[db._name]
+        self._opened_dbs = []
 
     def abort(self):
         """Abort the pending transaction. Repeat calls to :py:meth:`abort` have
@@ -2096,6 +2119,7 @@ class Transaction:
         Equivalent to `mdb_txn_abort()
         <http://lmdb.tech/doc/group__mdb.html#ga73a5938ae4c3239ee11efa07eb22b882>`_
         """
+        self._forget_dbs()
         if self._txn:
             while self._deps:
                 self._deps.pop()._invalidate()
