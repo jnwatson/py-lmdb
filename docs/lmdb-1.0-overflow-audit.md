@@ -7,6 +7,11 @@ Audit of the 20 CodeQL "Multiplication result converted to larger type"
 alerts raised against `lib1/mdb.c` when the LMDB 1.0.1 tree was vendored in
 PR #479, plus the analysis behind classifying each one.
 
+Line numbers are 1.0.1's. In the bundled 1.0.2 tree, lines after 4896 are one
+higher and lines after 6380 are six higher. 1.0.2 changed none of the code
+discussed here; its only code change is ITS#10575, in `mdb_env_write_meta()`
+and `mdb_env_open()`.
+
 ## Why we do not simply dismiss these
 
 py-lmdb's threat model is deliberately stricter than upstream LMDB's.

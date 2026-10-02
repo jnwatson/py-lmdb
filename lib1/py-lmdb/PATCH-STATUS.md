@@ -1,13 +1,48 @@
-# py-lmdb patch status against LMDB 1.0.1
+# py-lmdb patch status against LMDB 1.0.2
 
 Outcome of porting the `lib/py-lmdb/` patch series (written against LMDB
-0.9.x, now 0.9.36) to the bundled LMDB 1.0.1 tree (tag `LMDB_1.0.1`, released
-2026-08-06). The ported series lives alongside this file and is registered in
-`setup.py`'s `ENGINES` table.
+0.9.x, now 0.9.36) to the bundled LMDB 1.0 tree, now 1.0.2 (tag
+`LMDB_1.0.2`, released 2026-09-08). The port was done against 1.0.1; see
+"LMDB 1.0.2" below for the re-check. The ported series lives alongside this
+file and is registered in `setup.py`'s `ENGINES` table.
 
 Each patch here is diffed against the tree state after all preceding patches,
 so the series applies without fuzz. Regenerate with the replay approach
 described under "Maintaining this series" below.
+
+## LMDB 1.0.2
+
+1.0.2 changes two places in `mdb.c`, both for ITS#10575 ("fix write_meta on
+Windows with WRITEMAP"), plus the version number in `lmdb.h`. The other two
+items in its CHANGES, ITS#10569 and ITS#10572, touch only the Makefile's
+`lmdb.pc` and `upgrading.doc`. ITS#10575 is the upstream fix for issue #486,
+the Windows `MDB_WRITEMAP` commit failure; `mdb_env_open()` now opens
+`me_mfd` under `MDB_WRITEMAP` when Windows write-through is in effect.
+
+Neither site overlaps any patch in this series, so **every patch is still
+needed** and none changed content. The series was regenerated only because
+the new lines shift later hunks: by 1 line for `cve-2019-16228-validate-psize`
+and by 6 for everything after `mdb_env_open()`. Each regenerated patch
+differs from its predecessor in `@@` lines alone.
+
+Cross-checked by test. All 40 tests that are skipped under `LMDB_PURE` on
+the 1.0 engine were run one at a time against pristine 1.0.1 and pristine
+1.0.2. Every test gave the same outcome on both: 16 crash (SIGSEGV, SIGBUS,
+SIGFPE, SIGABRT) and 14 fail, so those patches are still load-bearing on
+1.0.2. The other 10 pass unpatched on both versions and so prove nothing
+either way:
+
+- 7 check that valid input still works, or that a malformed value LMDB
+  already rejects stays rejected.
+- 1 is the `mdb_env_set_mapsize` concurrency stress test, which fails only
+  intermittently without its patch.
+- `PageSplitNodeDszTest` and `NodeShrinkUnderflowTest` accept any
+  `lmdb.Error`, or merely the absence of a crash, so they cannot tell
+  patched from unpatched. `NodeShrinkUnderflowTest` also writes `mp_upper`
+  at the 0.9 header offset (+14), which is the wrong field on 1.0. For
+  `validate-nodedsz-page-split` and `validate-node-shrink-delta`, the case
+  that they are still needed rests on the source diff above, not on these
+  tests.
 
 ## Dropped: fixed upstream or no longer applicable
 
@@ -55,9 +90,9 @@ divisor during `mdb_env_open()`, raising SIGFPE. This affects **both** upstream
 release lines, at different sites:
 
 - 0.9.35 — `mdb.c:4552`, `env->me_maxpg = env->me_mapsize / env->me_psize;`
-- 1.0.1 — `mdb.c:5570`, `pgno_t maxpgno = fsize / env->me_psize;` (the
-  ITS#9291 root-page sanity check, which precedes the `me_maxpg` division that
-  1.0 also still has)
+- 1.0.1 — `mdb.c:5570` (5571 in 1.0.2, which is still affected),
+  `pgno_t maxpgno = fsize / env->me_psize;` (the ITS#9291 root-page sanity
+  check, which precedes the `me_maxpg` division that 1.0 also still has)
 
 `cve-2019-16228-validate-psize` fixes both. Confirmed by C reproducer against
 pristine trees: unpatched 0.9.35 and 1.0.1 both die with SIGFPE; the patched

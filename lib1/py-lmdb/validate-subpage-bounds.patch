@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -8930,6 +8930,31 @@
+@@ -8936,6 +8936,31 @@
  					mc->mc_db->md_leaf_pages++;
  			}
  			if (mp != fp) {

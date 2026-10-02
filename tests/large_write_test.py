@@ -10,8 +10,9 @@
 #
 # The mdb_page_flush half is now fixed upstream on both engines (ITS#10054),
 # which caps each pwrite at MAX_WRITE.  The mdb_env_copythr half is ITS#9223,
-# present in LMDB 1.0.1 but not 0.9.36, so on the 0.9 engine it still comes
-# from fix-large-write.patch.  Both paths are covered here either way.
+# present in LMDB 1.0.1 and later but not 0.9.36, so on the 0.9 engine it
+# still comes from fix-large-write.patch.  Both paths are covered here either
+# way.
 #
 # Opt-in: needs a >2 GiB value in RAM plus >2 GiB of disk for the env (and
 # again for the compacting copy), so it is skipped unless LMDB_TEST_LARGE is

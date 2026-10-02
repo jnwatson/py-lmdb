@@ -5,7 +5,7 @@ Features
 --------
 
 - py-lmdb now bundles both LMDB release lines and links them into a single
-    extension module: LMDB 0.9.36 (data format v1) and LMDB 1.0.1 (data
+    extension module: LMDB 0.9.36 (data format v1) and LMDB 1.0.2 (data
     format v3).  The two formats are mutually unreadable, so each
     ``Environment`` is bound to one engine at construction: an existing
     database is opened with whatever engine matches its on-disk format, and a
@@ -22,7 +22,15 @@ Features
     also retires two of py-lmdb's own patches: ``fix-win-flush-large-write``
     was contributed upstream and landed as ITS#10538, and ``fix-large-write``
     is reduced to its compacting-copy hunk now that ITS#10054 has fixed
-    ``mdb_page_flush``.  The LMDB 1.0 tree is unchanged.
+    ``mdb_page_flush``.
+
+- Update the bundled LMDB 1.0 tree from 1.0.1 to 1.0.2 (2026-09-08).  Its
+    only code change is ITS#10575, which fixes committing a write transaction
+    under ``writemap=True`` on Windows with the 1.0 engine.  The commit failed
+    with "The handle is invalid" unless ``sync=False`` or
+    ``metasync=False`` was also given (issue #486).  Every py-lmdb patch is
+    still needed on 1.0.2; the series was regenerated only for shifted line
+    numbers.
 
 - New ``lib_version=`` argument to ``lmdb.open()``/``Environment()`` selects
     the LMDB version for a *new* environment (``0`` for 0.9.x, ``1`` for
@@ -63,6 +71,12 @@ Bug fixes
 
 - ``Environment.dbs()`` strips the trailing NUL that LMDB 1.0 stores with
     sub-database names, so it returns the same list on either engine.
+
+- Building against a system LMDB 1.0.x (``LMDB_FORCE_SYSTEM=1``) no longer
+    fails the test suite (issue #493).  2.3.0 raised a plain ``lmdb.Error``
+    rather than ``ReadonlyError`` for a write in a read-only transaction, and
+    ``dbs()`` returned names with a trailing NUL.  Both are fixed by the 1.0
+    support above.
 
 - The guard against opening one environment twice in a process (#230, added
     in 2.0.0) now compares files rather than paths (issue #491).  It keyed on

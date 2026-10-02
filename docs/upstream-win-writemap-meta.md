@@ -2,10 +2,20 @@
 
 Draft for filing at <https://bugs.openldap.org/>, following the OpenLDAP
 bug-writing guidelines. Tracked on the py-lmdb side as issue #486, where
-py-lmdb skips the affected configuration rather than patching it.
+py-lmdb skipped the affected configuration rather than patching it.
 
-**Not yet filed.** Reproduced and confirmed on Windows against pristine
-upstream sources — see "Confirmation".
+**Superseded — do not file.** Fixed upstream in LMDB 1.0.2 as ITS#10575
+("fix write_meta on Windows with WRITEMAP"), before this draft was sent. The
+fix is the first of the candidates under "Suggested fix": with
+`MDB_USE_WRITE_THROUGH` in effect, which is the Windows default,
+`mdb_env_open()` now opens `me_mfd` under `MDB_WRITEMAP` too, so the meta
+write in step 3 below has a valid handle. Builds that define
+`MDB_USE_WRITE_THROUGH` to 0 take the fast path in `mdb_env_write_meta()`
+instead, as on other platforms. py-lmdb bundles 1.0.2 and no longer skips
+the affected configuration. The draft is kept as the record of the analysis.
+
+The `me_ovfd` note at the end is **not** addressed by 1.0.2: that handle is
+still not initialised in `mdb_env_create()`.
 
 ---
 
@@ -179,7 +189,8 @@ avoid the flush, option 3 may be closest to it.
 ## Reproducer
 
 `misc/win-writemap-sync-repro.c` in the py-lmdb tree. Build and run, from a
-tree containing the 1.0.1 sources in `lib1/`:
+tree containing the 1.0.1 sources in `lib1/` (py-lmdb's `lib1/` now holds
+1.0.2, where the bug is fixed; check out the `LMDB_1.0.1` tag to reproduce):
 
     cl /O2 /I lib1 misc\win-writemap-sync-repro.c lib1\mdb.c lib1\midl.c ^
        /Fe:repro.exe /link advapi32.lib
