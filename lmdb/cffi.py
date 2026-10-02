@@ -704,9 +704,10 @@ def _select_engine(lib_version, data_version, path):
 
 def version(subpatch=False, lib_version=None):
     """
-    Return a tuple of integers `(major, minor, patch)` describing the LMDB
-    library version that the binding is linked against. The version of the
-    binding itself is available from ``lmdb.__version__``.
+    Return a tuple of integers `(major, minor, patch)` describing a bundled
+    LMDB engine: by default the one used for new environments (see
+    `lib_version` below). The version of the binding itself is available from
+    ``lmdb.__version__``.
 
         `subpatch`:
             If true, returns a 4 integer tuple consisting of the same plus
@@ -756,8 +757,9 @@ class Environment:
 
         `map_size`:
             Maximum size database may grow to; used to size the memory mapping.
-            If database grows larger than ``map_size``, an exception will be
-            raised and the user must close and reopen :py:class:`Environment`.
+            If the database grows larger than ``map_size``,
+            :py:class:`MapFullError` is raised; call :py:meth:`set_mapsize` to
+            grow the map.
             On 64-bit there is no penalty for making this huge (say 1TB). Must
             be <2GB on 32-bit.
 
@@ -773,8 +775,9 @@ class Environment:
 
         `readonly`:
             If ``True``, disallow any write operations. Note the lock file is
-            still modified. If specified, the ``write`` flag to
-            :py:meth:`begin` or :py:class:`Transaction` is ignored.
+            still modified. If specified, :py:meth:`begin` or
+            :py:class:`Transaction` with ``write=True`` raises
+            :py:class:`ReadonlyError`.
 
         `metasync`:
             If ``False``, flush system buffers to disk only once per
@@ -804,10 +807,14 @@ class Environment:
             is called. `map_async=True, writemap=True` may be preferable.
 
         `mode`:
-            File creation mode.
+            Permissions for the directory created when `subdir=True` (default
+            ``0o755``); the data and lock files are created with the same mode
+            minus the execute bits.
 
         `create`:
-            If ``False``, do not create the directory `path` if it is missing.
+            If ``False``, do not create the directory `path` if it is missing
+            (raising :py:class:`Error`).  LMDB still creates the data and lock
+            files if they are absent.
 
         `readahead`:
             If ``False``, LMDB will disable the OS filesystem readahead
@@ -818,7 +825,8 @@ class Environment:
             If ``True``, use a writeable memory map unless `readonly=True`.
             This is faster and uses fewer mallocs, but loses protection from
             application bugs like wild pointer writes and other bad updates
-            into the database. Incompatible with nested transactions.
+            into the database. Nested (child) write transactions are not
+            supported.
 
             Processes with and without `writemap` on the same environment do
             not cooperate well.
@@ -829,8 +837,8 @@ class Environment:
             to be written saved in the unused portion of the buffer. Do not use
             this option if your application manipulates confidential data (e.g.
             plaintext passwords) in memory. This option is only meaningful when
-            `writemap=False`; new pages are always zero-initialized when
-            `writemap=True`.
+            `writemap=False`; with `writemap=True` writes go directly to the
+            map and no heap buffers are used.
 
         `map_async`:
              When ``writemap=True``, use asynchronous flushes to disk. As with
@@ -851,10 +859,9 @@ class Environment:
         `max_spare_txns`:
             Read-only transactions to cache after becoming unused. Caching
             transactions avoids two allocations, one lock and linear scan
-            of the shared environment per invocation of :py:meth:`begin`,
-            :py:class:`Transaction`, :py:meth:`get`, :py:meth:`gets`, or
-            :py:meth:`cursor`. Should match the process's maximum expected
-            concurrent transactions (e.g. thread count).
+            of the shared environment per invocation of :py:meth:`begin` or
+            :py:class:`Transaction`. Should match the process's maximum
+            expected concurrent transactions (e.g. thread count).
 
         `lock`:
             If ``False``, don't do any locking. If concurrent access is
@@ -868,13 +875,16 @@ class Environment:
             Which bundled LMDB version to use for a **new** environment:
             ``0`` for 0.9.x (data format v1) or ``1`` for 1.0.x (data format
             v3).  Defaults to 0.9.x, so new databases stay readable by other
-            tools and by older py-lmdb releases.
+            tools and by older py-lmdb releases, unless the
+            ``LMDB_DEFAULT_LIB_VERSION`` environment variable names another
+            bundled major version.
 
-            This is ignored when opening an environment that already exists:
-            the file's own format decides which engine services it, so
+            When opening an environment that already exists, leave this as
+            ``None``: the file's own format then selects the engine, so
             databases written by either version open without the caller doing
-            anything.  Passing the version that does not match an existing
-            file raises rather than converting it.
+            anything.  An explicit value always selects that engine; if it does
+            not match the file's format, :py:class:`InvalidError` is raised
+            and nothing is converted.
 
             Raises :py:class:`lmdb.Error` if this build has no such engine —
             notably ``LMDB_FORCE_SYSTEM=1`` builds, which contain only the
@@ -1022,7 +1032,13 @@ class Environment:
         not be active.
 
         `map_size`:
-            The new size in bytes.
+            The new size in bytes; it should be a multiple of the OS page
+            size.  ``0`` adopts the current size, which is how a process picks
+            up a map that another process has grown (see
+            :py:class:`MapResizedError`).  A size smaller than the space
+            already in use is silently raised to it.
+
+        Raises :py:class:`Error` if a write transaction is active.
 
         Equivalent to `mdb_env_set_mapsize()
         <http://lmdb.tech/doc/group__mdb.html#gaa2506ec8dab3d969b0e609cd82e619e5>`_
@@ -1211,7 +1227,7 @@ class Environment:
 
     def copy(self, path, compact=False, txn=None):
         """Make a consistent copy of the environment in the given destination
-        directory.
+        directory, which must already exist, be empty and be writable.
 
         `compact`:
             If ``True``, perform compaction while copying: omit free pages and
@@ -1266,9 +1282,10 @@ class Environment:
             If provided, the backup will be taken from the database with
             respect to that transaction, otherwise a temporary read-only
             transaction will be created.  Note:  this parameter being non-None
-            is not available if the module was built with LMDB_PURE.
+            is not available if the module was built with LMDB_PURE.  Note:
+            this parameter may be set only if compact=True.
 
-        Equivalent to `mdb_env_copyfd2() or mdb_env_copyfd3
+        Equivalent to `mdb_env_copyfd2() or mdb_env_copyfd3()
         <http://lmdb.tech/doc/group__mdb.html#ga5d51d6130325f7353db0955dbedbc378>`_
         """
         if txn and not _have_patched_lmdb:
@@ -1362,7 +1379,9 @@ class Environment:
         """Return some nice environment information as a dict:
 
         +--------------------+---------------------------------------------+
-        | ``map_addr``       | Address of database map in RAM.             |
+        | ``map_addr``       | Address of the memory map with LMDB 1.0;    |
+        |                    | with LMDB 0.9 only for a fixed-address map, |
+        |                    | otherwise ``0``.                            |
         +--------------------+---------------------------------------------+
         | ``map_size``       | Size of database map in RAM.                |
         +--------------------+---------------------------------------------+
@@ -1372,7 +1391,7 @@ class Environment:
         +--------------------+---------------------------------------------+
         | ``max_readers``    | Number of reader slots allocated in the     |
         |                    | lock file. Equivalent to the value of       |
-        |                    | `maxreaders=` specified by the first        |
+        |                    | ``max_readers=`` specified by the first     |
         |                    | process opening the Environment.            |
         +--------------------+---------------------------------------------+
         | ``num_readers``    | Maximum number of reader slots in           |
@@ -1434,8 +1453,10 @@ class Environment:
                 self._lib.MDB_VERSION_PATCH)
 
     def max_key_size(self):
-        """Return the maximum size in bytes of a record's key part. This
-        matches the ``MDB_MAXKEYSIZE`` constant set at compile time."""
+        """Return the maximum size in bytes of a record's key part (and of a
+        value in a ``dupsort`` database) for this environment's engine: 511
+        with LMDB 0.9, a compile-time constant; with LMDB 1.0 it is derived
+        from the page size (1978 bytes with 4 KiB pages)."""
         # Issue #475: serialize against close()/set_mapsize().
         with self._close_lock:
             return self._lib.mdb_env_get_maxkeysize(self._env)
@@ -1484,8 +1505,9 @@ class Environment:
                 dupfixed=False):
         """
         Open a database, returning an instance of :py:class:`_Database`. Repeat
-        :py:meth:`Environment.open_db` calls for the same name will return the
-        same handle. As a special case, the main database is always open.
+        :py:meth:`Environment.open_db` calls for the same name return a handle
+        to the same LMDB database. As a special case, the main database is
+        always open.
 
         Equivalent to `mdb_dbi_open()
         <http://lmdb.tech/doc/group__mdb.html#gac08cad5b096925642ca359a6d6f0562a>`_
@@ -1503,10 +1525,11 @@ class Environment:
 
             >>> env = lmdb.open('/tmp/test', max_dbs=2)
             >>> with env.begin(write=True) as txn:
-            ...     txn.put('somename', 'somedata')
+            ...     txn.put(b'somename', b'somedata')
 
             >>> # Error: database cannot share name of existing key!
-            >>> subdb = env.open_db('somename')
+            >>> # Raises lmdb.IncompatibleError.
+            >>> subdb = env.open_db(b'somename')
 
         A newly created database will not exist if the transaction that created
         it aborted, nor if another process deleted it. The handle resides in
@@ -1514,12 +1537,12 @@ class Environment:
         process. Only one thread should call this function; it is not
         mutex-protected in a read-only transaction.
 
-        The `dupsort`, `integerkey`, `integerdup`, and `dupfixed` parameters are
-        ignored if the database already exists.  The state of those settings are
-        persistent and immutable per database.  See :py:meth:`_Database.flags`
-        to view the state of those options for an opened database.  A consequence
-        of the immutability of these flags is that the default non-named database
-        will never have these flags set.
+        The `reverse_key`, `dupsort`, `integerkey`, `integerdup`, and
+        `dupfixed` parameters are ignored if the database already exists.  The
+        state of those settings are persistent and immutable per database.  See
+        :py:meth:`_Database.flags` to view the state of those options for an
+        opened database.  A consequence of the immutability of these flags is
+        that the default non-named database will never have these flags set.
 
         Preexisting transactions, other than the current transaction and any
         parents, must not use the new handle, nor must their children.
@@ -1535,10 +1558,12 @@ class Environment:
 
             `txn`:
                 Transaction used to create the database if it does not exist.
-                If unspecified, a temporarily write transaction is used. Do not
-                call :py:meth:`open_db` from inside an existing transaction
-                without supplying it here. Note the passed transaction must
-                have `write=True`.
+                If unspecified, a temporary transaction is used (read-only if
+                the environment is read-only). Do not call :py:meth:`open_db`
+                from inside an existing transaction without supplying it here.
+                The transaction must have ``write=True`` if the database may
+                need to be created; a read-only transaction suffices to open
+                an existing one.
 
             `reverse_key`:
                 If ``True``, keys are compared from right to left (e.g. DNS
@@ -1610,7 +1635,8 @@ class Environment:
         This works by iterating the main database and attempting to open
         each key as a named database.  It only returns reliable results
         when the main database is not used to store regular key-value
-        pairs.
+        pairs.  Each name found is opened as a database handle, so at most
+        `max_dbs` names are returned; any more are silently omitted.
 
         LMDB 1.0 stores sub-database names with a trailing NUL where 0.9
         does not.  That byte is stripped here, so this returns the same
@@ -1703,8 +1729,8 @@ class _Database:
         self._flags = flags_[0]
 
     def flags(self, *args):
-        """Return the database's associated flags as a dict of _Database
-        constructor kwargs."""
+        """Return the database's associated flags as a dict of
+        :py:meth:`Environment.open_db` keyword arguments."""
         if len(args) > 1:
             raise TypeError('flags takes 0 or 1 arguments')
 
@@ -1760,7 +1786,7 @@ class Transaction:
             :py:class:`Environment` was opened with ``readonly=True``.
 
         `buffers`:
-            If ``True``, indicates :py:func:`memoryview` objects should be
+            If ``True``, indicates :py:class:`memoryview` objects should be
             yielded instead of bytestrings. This setting applies to the
             :py:class:`Transaction` instance itself and any :py:class:`Cursors
             <Cursor>` created within the transaction.
@@ -1896,8 +1922,9 @@ class Transaction:
         """stat(db=None)
 
         Return statistics like :py:meth:`Environment.stat`, except for a single
-        DBI. `db` must be a database handle returned by :py:meth:`open_db`.
-        If `db` is ``None``, the transaction's default database is used.
+        DBI. `db` must be a database handle returned by
+        :py:meth:`Environment.open_db`. If `db` is ``None``, the transaction's
+        default database is used.
         """
         if db is None:
             db = self._db
@@ -2332,9 +2359,10 @@ class Cursor:
 
     def iternext(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
-        calling :py:meth:`next`, repeating until the end of the database is
-        reached. As a convenience, :py:class:`Cursor` implements the iterator
-        protocol by automatically returning a forward iterator when invoked:
+        calling :py:meth:`~lmdb.Cursor.next`, repeating until the end of the
+        database is reached. As a convenience, :py:class:`~lmdb.Cursor`
+        implements the iterator protocol by automatically returning a forward
+        iterator when invoked:
 
             ::
 
@@ -2352,8 +2380,9 @@ class Cursor:
 
     def iternext_dup(self, keys=False, values=True):
         """Return a forward iterator that yields the current value
-        ("duplicate") of the current key before calling :py:meth:`next_dup`,
-        repeating until the last value of the current key is reached.
+        ("duplicate") of the current key before calling
+        :py:meth:`~lmdb.Cursor.next_dup`, repeating until the last value of the
+        current key is reached.
 
         Only meaningful for databases opened with `dupsort=True`.
 
@@ -2369,8 +2398,9 @@ class Cursor:
 
     def iternext_nodup(self, keys=True, values=False):
         """Return a forward iterator that yields the current value
-        ("duplicate") of the current key before calling :py:meth:`next_nodup`,
-        repeating until the end of the database is reached.
+        ("duplicate") of the current key before calling
+        :py:meth:`~lmdb.Cursor.next_nodup`, repeating until the end of the
+        database is reached.
 
         Only meaningful for databases opened with `dupsort=True`.
 
@@ -2388,7 +2418,8 @@ class Cursor:
 
     def iterprev(self, keys=True, values=True):
         """Return a reverse iterator that yields the current element before
-        calling :py:meth:`prev`, until the start of the database is reached.
+        calling :py:meth:`~lmdb.Cursor.prev`, until the start of the database
+        is reached.
 
         If the cursor is not yet positioned, it is moved to the last key in
         the database, otherwise iteration proceeds from the current position.
@@ -2405,8 +2436,9 @@ class Cursor:
 
     def iterprev_dup(self, keys=False, values=True):
         """Return a reverse iterator that yields the current value
-        ("duplicate") of the current key before calling :py:meth:`prev_dup`,
-        repeating until the first value of the current key is reached.
+        ("duplicate") of the current key before calling
+        :py:meth:`~lmdb.Cursor.prev_dup`, repeating until the first value of
+        the current key is reached.
 
         Only meaningful for databases opened with `dupsort=True`.
         """
@@ -2414,8 +2446,9 @@ class Cursor:
 
     def iterprev_nodup(self, keys=True, values=False):
         """Return a reverse iterator that yields the current value
-        ("duplicate") of the current key before calling :py:meth:`prev_nodup`,
-        repeating until the start of the database is reached.
+        ("duplicate") of the current key before calling
+        :py:meth:`~lmdb.Cursor.prev_nodup`, repeating until the start of the
+        database is reached.
 
         If the cursor is not yet positioned, it is moved to the last key in
         the database, otherwise iteration proceeds from the current position.

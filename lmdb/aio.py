@@ -44,8 +44,8 @@ from . import Cursor, Environment, Transaction
 def wrap(env, executor=None):
     """Wrap an :class:`lmdb.Environment` for async use.
 
-    *executor* is passed to :meth:`loop.run_in_executor`.  ``None`` (the
-    default) uses the loop's default executor.
+    *executor* is passed to :meth:`asyncio.loop.run_in_executor`.  ``None``
+    (the default) uses the loop's default executor.
     """
     return AsyncEnvironment(env, executor)
 
