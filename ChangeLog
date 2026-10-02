@@ -186,6 +186,49 @@ Bug fixes
   control, leave ``writemap`` at its default of ``False``.  Tracked in
   issue #484; the analysis is in ``lib1/py-lmdb/PATCH-STATUS.md``.
 
+- **Deadlock (C extension):** ``abort()`` on a write transaction -- including
+  a ``with`` block exiting on an exception -- hung forever while another
+  thread was waiting in ``begin(write=True)`` (issue #495).
+
+- **Crash with nested transactions (C extension):** a read-only child of a
+  write transaction (LMDB 1.0) crashed the process when finished, and any
+  child used after its parent committed or aborted touched freed memory.
+  Children are now finished with their parent, and a later use raises
+  ``lmdb.Error``.  Ending a child write transaction also no longer marks the
+  parent's writer lock as released.  On CFFI a read-only child silently
+  ignored ``parent`` and returned an unrelated snapshot; it now works on the
+  1.0 engine and, on 0.9, which has no read-only children, raises
+  ``InvalidParameterError`` on both implementations (issue #496).
+
+- Calling ``commit()`` or ``abort()`` inside a ``with env.begin(...)`` block
+  no longer makes leaving the block raise on the C extension (issue #497).
+
+- ``Environment.sync(force=True)`` is accepted by keyword on the C extension
+  (issue #499).
+
+- CFFI: a write transaction begun while another thread holds one now waits
+  for it, as on the C extension, instead of raising ``EBUSY``; concurrent
+  ``lmdb.aio`` write transactions therefore work on PyPy.  A second write
+  transaction on the *same* thread still raises, on both (issue #500).
+
+- CFFI: ``open_db()`` no longer returns a cached handle for a database
+  whose creating transaction aborted (issue #502).
+
+- ``append=True`` now appends a duplicate on a ``dupsort`` database whichever
+  database the transaction defaults to, and ``Transaction.put(append=True)``
+  does so too; both used the transaction's default database's flags
+  (issue #504).
+
+- ``Cursor.set_range_dup()`` leaves the cursor unpositioned when it returns
+  ``False``, as documented, instead of on the following key (issue #505).
+
+- ``drop(db, delete=True)`` closes the transaction's cursors on that database
+  on the C extension too; ``drop(db, delete=False)`` leaves them usable on
+  CFFI too, as LMDB does (issue #503).
+
+- ``python -m lmdb``: ``dump --all`` is implemented, and the help text and
+  usage examples are corrected (issue #506).
+
 Behaviour changes
 -----------------
 
@@ -195,6 +238,31 @@ Behaviour changes
   rather than creating one: LMDB 1.0 already rejected it, so both engines
   now behave the same.  Zero-length values in non-``dupsort`` databases are
   unaffected and remain valid.
+
+- The C extension and CFFI now raise the same exceptions with the same
+  messages (issue #503):
+
+  - Exceptions carry ``what``, ``code`` and ``reason`` attributes on the C
+    extension too, and ``reason`` is a ``str`` on CFFI (it was ``bytes``).
+    Configuration hints such as "Please use a larger Environment(map_size=)
+    parameter" are appended on both.
+  - Using a closed or finished object raises ``lmdb.Error`` "Attempt to
+    operate on closed/deleted/dropped object." on CFFI too, rather than a
+    raw cffi ``TypeError`` or ``InvalidParameterError``.
+  - CFFI rejects ``putmulti()`` items that are not exactly 2-tuples, raises
+    ``TypeError`` (``OverflowError`` for a negative ``dupfixed_bytes``) for
+    invalid ``getmulti()`` arguments, and ``OverflowError`` for a negative
+    ``lib_version=``, as the C extension does.
+
+- ``Cursor.put()`` and ``Cursor.replace()`` take the value as ``value=`` on
+  CFFI, as on the C extension and ``Transaction.put()``; CFFI's ``val=``
+  keyword is gone (issue #498).
+
+- CFFI's ``max_spare_txns`` defaults to ``0``, matching the C extension, so
+  read transactions are not cached unless asked for (issue #501).
+
+- ``python -m lmdb -r`` is now a plain flag.  The old ``-r READ`` spelling
+  still works (issue #506).
 
 Notes
 -----
