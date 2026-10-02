@@ -452,7 +452,8 @@ class Error(Exception):
     def __init__(self, what, code=0):
         self.what = what
         self.code = code
-        self.reason = _ffi.string(_lib.mdb_strerror(code))
+        self.reason = _ffi.string(_lib.mdb_strerror(code)).decode(
+            'utf-8', 'replace')
         msg = what
         if code:
             msg = '%s: %s' % (what, self.reason)
@@ -657,7 +658,10 @@ def enable_drop_gil():
 
 def _engine_for_major(lib_version):
     """Return the engine dict for LMDB major version `lib_version`, raising
-    Error if this build has no such engine."""
+    Error if this build has no such engine.  A negative value raises
+    OverflowError, as the C extension's argument parser does (#503)."""
+    if lib_version < 0:
+        raise OverflowError('Integer argument must be >= 0')
     for engine in _engines:
         if engine['major'] == lib_version:
             return engine
@@ -697,7 +701,7 @@ def _select_engine(lib_version, data_version, path):
     automatic selection, otherwise an LMDB major version (0 for 0.9.x, 1
     for 1.0.x).  `data_version` is the sniffed on-disk format (0 if
     unknown)."""
-    if lib_version is not None and lib_version >= 0:
+    if lib_version is not None:
         return _engine_for_major(lib_version)
     if data_version:
         for engine in _engines:
@@ -729,7 +733,7 @@ def version(subpatch=False, lib_version=None):
             the 1.0.x engine).  Defaults to the engine used for new
             environments.
     """
-    engine = (_default_engine if lib_version is None or lib_version < 0
+    engine = (_default_engine if lib_version is None
               else _engine_for_major(lib_version))
     if subpatch:
         return (engine['major'], engine['minor'], engine['patch'],
@@ -1087,7 +1091,7 @@ class Environment:
         # closed check must come before the pre-open fast path below --
         # otherwise a call after close() hands the _invalid sentinel to C.
         if self._env is _invalid:
-            raise Error("environment is closed")
+            raise _invalid_error()
 
         # Pre-open path: env created but not yet opened (called from __init__
         # before mdb_env_open).  No mmap exists yet, just set the size.
@@ -1102,7 +1106,7 @@ class Environment:
 
         with self._close_lock:
             if self._env is _invalid:
-                raise Error("environment is closed")
+                raise _invalid_error()
 
             # Re-check under _close_lock: a write transaction begin holds
             # the lock, so one may have completed between the unlocked
@@ -1910,7 +1914,7 @@ class Transaction:
                             env._write_txn_tid = threading.get_ident()
                         claimed = True
                     if not env._env:
-                        raise _error("env has been closed", _lib.EINVAL)
+                        raise _invalid_error()
                     self._env = env._env
                     env._deps.add(self)
                     if parent:
@@ -2026,8 +2030,12 @@ class Transaction:
                 If ``True`` (the default), also delete the named database and
                 invalidate the handle; if ``False``, only empty it.
         """
-        while db._deps:
-            db._deps.pop()._invalidate()
+        if delete:
+            # The database is going away, so its cursors are closed.
+            # Emptying it (delete=False) leaves them valid but unpositioned,
+            # as LMDB does and the C extension did.  Issue #503.
+            while db._deps:
+                db._deps.pop()._invalidate()
         # Issue #475: serialize against close()/set_mapsize().
         with self._pyenv._close_lock:
             rc = self._lib.mdb_drop(self._txn, db._dbi, delete)
@@ -2088,7 +2096,7 @@ class Transaction:
                     with self._pyenv._write_txn_cond:
                         self._pyenv._write_txn_cond.notify_all()
                 if not self._pyenv._env:
-                    raise _error("env has been closed", _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_txn_commit(txn)
             if rc:
                 self._forget_dbs()
@@ -2578,8 +2586,7 @@ class Cursor:
         # mdb_cursor_get is running.  Issue #180.
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.mdb_cursor_get(self._cur, self._key, self._val, op)
         self._valid = v = not rc
         self._last_mutation = self._pytxn._mutations
@@ -2594,8 +2601,7 @@ class Cursor:
     def _cursor_get_kv(self, op, k, v):
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.pymdb_cursor_get(self._cur, k, len(k), v, len(v),
                                        self._key, self._val, op)
         self._valid = v = not rc
@@ -2826,14 +2832,15 @@ class Cursor:
                 Incompatible with ``dupdata=True``.
 
         """
+        # Same exceptions and messages as the C extension.  Issue #503.
         if dupfixed_bytes and dupfixed_bytes < 0:
-            raise Error("dupfixed_bytes must be a positive integer.")
+            raise OverflowError('Integer argument must be >= 0')
         elif (dupfixed_bytes or keyfixed) and not dupdata:
-            raise Error("dupdata is required for dupfixed_bytes/key_bytes.")
+            raise TypeError("dupdata is required for dupfixed_bytes/keyfixed.")
         elif keyfixed and not dupfixed_bytes:
-            raise Error("dupfixed_bytes is required for key_bytes.")
+            raise TypeError("dupfixed_bytes is required for keyfixed.")
         elif not values and dupdata:
-            raise Error("values=False is incompatible with dupdata.")
+            raise TypeError("values=False is incompatible with dupdata.")
 
         if dupfixed_bytes:
             get_op = _lib.MDB_GET_MULTIPLE
@@ -2942,8 +2949,7 @@ class Cursor:
             flags = _lib.MDB_NODUPDATA if dupdata else 0
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_cursor_del(self._cur, flags)
             self._pytxn._mutations += 1
             if rc:
@@ -2964,8 +2970,7 @@ class Cursor:
         countp = _ffi.new('size_t *')
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.mdb_cursor_count(self._cur, countp)
         if rc:
             raise _error("mdb_cursor_count", rc)
@@ -3013,8 +3018,7 @@ class Cursor:
 
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), value, len(value), flags)
         self._pytxn._mutations += 1
         if rc:
@@ -3066,11 +3070,15 @@ class Cursor:
 
         added = 0
         skipped = 0
-        for key, value in items:
+        for item in items:
+            # Exactly 2-tuples, as documented and as the C extension
+            # enforces.  Issue #503.
+            if type(item) is not tuple or len(item) != 2:
+                raise TypeError('putmulti() elements must be 2-tuples')
+            key, value = item
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.pymdb_cursor_put(self._cur, key, len(key),
                                            value, len(value), flags)
             self._pytxn._mutations += 1
@@ -3113,8 +3121,7 @@ class Cursor:
         keylen = len(key)
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), flags)
         self._pytxn._mutations += 1
         if not rc:
@@ -3127,8 +3134,7 @@ class Cursor:
         old = _mvstr(self._val)
         with self._pytxn._pyenv._close_lock:
             if not self._cur:
-                raise _error("Attempt to operate on closed cursor",
-                              _lib.EINVAL)
+                raise _invalid_error()
             rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), 0)
         self._pytxn._mutations += 1
         if rc:
@@ -3152,8 +3158,7 @@ class Cursor:
             old = _mvstr(self._val)
             with self._pytxn._pyenv._close_lock:
                 if not self._cur:
-                    raise _error("Attempt to operate on closed cursor",
-                                  _lib.EINVAL)
+                    raise _invalid_error()
                 rc = self._lib.mdb_cursor_del(self._cur, 0)
             self._pytxn._mutations += 1
             if rc:

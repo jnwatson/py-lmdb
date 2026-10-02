@@ -386,6 +386,9 @@ struct CursorObject {
     int last_mutation;
     /** DBI flags at time of creation. */
     unsigned int dbi_flags;
+    /** Database the cursor was opened on, so Transaction.drop() can close
+     * the cursors of a database it deletes.  Issue #503. */
+    MDB_dbi dbi;
 };
 
 
@@ -552,6 +555,13 @@ static void invalidate_txns(struct lmdb_object *parent)
 }
 
 #define INVALIDATE_TXNS(parent) invalidate_txns((void *)parent);
+
+/**
+ * Invalidate (close) the cursors among `trans`'s children that were opened
+ * on database `dbi`.  Defined after the type objects it compares against;
+ * see below.  Issue #503.
+ */
+static void invalidate_db_cursors(TransObject *trans, MDB_dbi dbi);
 #define INVALIDATE_MARK_TXNS(parent) invalidate_mark_txns((void *)parent);
 
 
@@ -620,6 +630,91 @@ static const struct error_map error_map[] = {
 /* Exceptions */
 /* ---------- */
 
+/** Set attribute `name` of `obj` to `value`, stealing the reference.
+ * Returns -1 with an exception set on failure. */
+static int
+set_obj_attr(PyObject *obj, const char *name, PyObject *value)
+{
+    int rc;
+    if(! value) {
+        return -1;
+    }
+    rc = PyObject_SetAttrString(obj, name, value);
+    Py_DECREF(value);
+    return rc;
+}
+
+/** Set attribute `name` of `obj` to the str `value`. */
+static int
+set_str_attr(PyObject *obj, const char *name, const char *value)
+{
+    return set_obj_attr(obj, name, PyUnicode_DecodeUTF8(value, strlen(value),
+                                                        "replace"));
+}
+
+/**
+ * Advice appended to the message for errors the caller can fix by
+ * configuration, as the CFFI implementation does (its MDB_HINT).
+ */
+static const char *
+err_hint(int rc)
+{
+    switch(rc) {
+    case MDB_MAP_FULL:
+        return "Please use a larger Environment(map_size=) parameter";
+    case MDB_DBS_FULL:
+        return "Please use a larger Environment(max_dbs=) parameter";
+    case MDB_READERS_FULL:
+        return "Please use a larger Environment(max_readers=) parameter";
+    case MDB_TXN_FULL:
+        return "Please do less work within your transaction";
+    }
+    return NULL;
+}
+
+/**
+ * Raise an instance of `klass` for `what` and error code `rc`, carrying the
+ * same `what`, `code` and `reason` attributes as the CFFI implementation's
+ * exceptions.  The message is "what: reason (hint)", or just `what` when
+ * `rc` is 0.  Issue #503.
+ */
+static void * NOINLINE
+err_raise(PyObject *klass, const char *what, int rc)
+{
+    /* The newest engine's error table is a superset of the others', and the
+     * shared codes have identical messages, so it can render any engine's
+     * error code. */
+    const char *reason = LMDB_NEWEST_API->strerror_fn(rc);
+    const char *hint = err_hint(rc);
+    PyObject *msg;
+    PyObject *exc;
+
+    if(! rc) {
+        msg = PyUnicode_FromString(what);
+    } else if(hint) {
+        msg = PyUnicode_FromFormat("%s: %s (%s)", what, reason, hint);
+    } else {
+        msg = PyUnicode_FromFormat("%s: %s", what, reason);
+    }
+    if(! msg) {
+        return NULL;
+    }
+    exc = PyObject_CallFunctionObjArgs(klass, msg, NULL);
+    Py_DECREF(msg);
+    if(! exc) {
+        return NULL;
+    }
+    if(set_str_attr(exc, "what", what) ||
+       set_obj_attr(exc, "code", PyLong_FromLong(rc)) ||
+       set_str_attr(exc, "reason", reason)) {
+        Py_DECREF(exc);
+        return NULL;
+    }
+    PyErr_SetObject(klass, exc);
+    Py_DECREF(exc);
+    return NULL;
+}
+
 /**
  * Raise an exception appropriate for the given `rc` MDB error code.
  */
@@ -638,12 +733,7 @@ err_set(const char *what, int rc)
             }
         }
     }
-
-    /* The newest engine's error table is a superset of the others', and the
-     * shared codes have identical messages, so it can render any engine's
-     * error code. */
-    PyErr_Format(klass, "%s: %s", what, LMDB_NEWEST_API->strerror_fn(rc));
-    return NULL;
+    return err_raise(klass, what, rc);
 }
 
 /**
@@ -652,20 +742,29 @@ err_set(const char *what, int rc)
 static void * NOINLINE
 err_format(int rc, const char *fmt, ...)
 {
-    char buf[128];
+    PyObject *what;
+    const char *utf8;
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof buf, fmt, ap);
-    buf[sizeof buf - 1] = '\0';
+    /* PyUnicode_FromFormatV rather than a fixed buffer, so long paths in
+     * the message are not truncated. */
+    what = PyUnicode_FromFormatV(fmt, ap);
     va_end(ap);
-    return err_set(buf, rc);
+    if(! what) {
+        return NULL;
+    }
+    if((utf8 = PyUnicode_AsUTF8(what))) {
+        err_set(utf8, rc);
+    }
+    Py_DECREF(what);
+    return NULL;
 }
 
 static void * NOINLINE
 err_invalid(void)
 {
-    PyErr_Format(Error, "Attempt to operate on closed/deleted/dropped object.");
-    return NULL;
+    return err_raise(Error,
+        "Attempt to operate on closed/deleted/dropped object.", 0);
 }
 
 static void * NOINLINE
@@ -1534,6 +1633,7 @@ make_cursor(DbObject *db, TransObject *trans)
     self->libv = trans->libv;
     self->last_mutation = trans->mutations;
     self->dbi_flags = db->flags;
+    self->dbi = db->dbi;
     Py_INCREF(self->trans);
     return (PyObject *) self;
 }
@@ -1935,10 +2035,9 @@ select_engine(int requested, unsigned int data_version, const char *fspath)
                 return lmdb_engines[i];
             }
         }
-        PyErr_Format(Error,
+        return err_format(0,
             "lib_version=%d: this build has no LMDB %d.x engine.",
             requested, requested);
-        return NULL;
     }
 
     if(data_version) {
@@ -1948,12 +2047,12 @@ select_engine(int requested, unsigned int data_version, const char *fspath)
             }
         }
         if(data_version == 2) {
-            PyErr_Format(Error,
+            err_format(0,
                 "%s: written with LMDB data format v2 (a pre-1.0 development "
                 "version, e.g. lmdb-js); no released LMDB reads this format.",
                 fspath);
         } else {
-            PyErr_Format(Error,
+            err_format(0,
                 "%s: LMDB data format v%u is not supported by this build.",
                 fspath, data_version);
         }
@@ -2093,7 +2192,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
             goto fail;
         }
         if(found) {
-            PyErr_Format(Error,
+            err_format(0,
                 "The environment '%s' is already open in this process.",
                 fspath);
             goto fail;
@@ -2840,18 +2939,16 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
      * return EINVAL anyway, but we must also avoid invalidating a write txn
      * that the caller still holds. */
     if(self->write_txn_tid) {
-        PyErr_Format(Error,
-            "Cannot set_mapsize while a write transaction is active");
-        return NULL;
+        return err_set(
+            "Cannot set_mapsize while a write transaction is active", 0);
     }
 
     /* Reject overlapping resizes.  Cannot be our own thread (no Python runs
      * between the flag being set and cleared except destructors during
      * invalidation, and re-entering set_mapsize from one is degenerate). */
     if(self->resizing) {
-        PyErr_Format(Error,
-            "Cannot set_mapsize: another set_mapsize is in progress");
-        return NULL;
+        return err_set(
+            "Cannot set_mapsize: another set_mapsize is in progress", 0);
     }
 
     /* Enter the resize critical section: from here until the flag is
@@ -4881,6 +4978,28 @@ out:
     return NULL;
 }
 
+static void invalidate_db_cursors(TransObject *trans, MDB_dbi dbi)
+{
+    struct lmdb_object *child = ((struct lmdb_object *) trans)->children.next;
+    PyObject *held_ref = NULL;
+    while(child) {
+        struct lmdb_object *next = child->siblings.next;
+        /* tp_clear may release the GIL; hold references as invalidate()
+         * does. */
+        Py_XINCREF((PyObject *) next);
+        Py_INCREF((PyObject *) child);
+        if(Py_TYPE(child) == &PyCursor_Type &&
+           ((CursorObject *) child)->dbi == dbi) {
+            Py_TYPE(child)->tp_clear((PyObject *) child);
+        }
+        Py_DECREF((PyObject *) child);
+        Py_XDECREF(held_ref);
+        held_ref = (PyObject *) next;
+        child = next;
+    }
+    Py_XDECREF(held_ref);
+}
+
 /**
  * Transaction.drop(db)
  */
@@ -4909,6 +5028,13 @@ trans_drop(TransObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
+    if(arg.delete) {
+        /* The database is going away: close this transaction's cursors on
+         * it first, as CFFI does, rather than leave them pointing at a
+         * deleted DBI.  Emptying it (delete=False) leaves them valid but
+         * unpositioned, as LMDB does.  Issue #503. */
+        invalidate_db_cursors(self, arg.db->dbi);
+    }
     ENV_UNLOCKED(self->env, rc, V->drop(self->txn, arg.db->dbi, arg.delete));
     self->mutations++;
     if(rc) {
@@ -5363,10 +5489,9 @@ get_version(PyObject *mod, PyObject *args, PyObject *kwds)
             }
         }
         if(! V) {
-            PyErr_Format(Error,
+            return err_format(0,
                 "lib_version=%d: this build has no LMDB %d.x engine.",
                 arg.lib_version, arg.lib_version);
-            return NULL;
         }
     }
 
