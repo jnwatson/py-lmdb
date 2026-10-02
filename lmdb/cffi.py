@@ -1028,6 +1028,31 @@ class Environment:
     _spare_txns = None
     _dbs = None
 
+    def _wait_for_write_txn(self):
+        """Wait until no top-level write transaction is active.  LMDB
+        serialises writers on a mutex, so a writer on another thread blocks
+        rather than failing (matching the C extension).  The wait happens
+        here, on _write_txn_cond and outside _close_lock, because the owning
+        thread needs that lock to commit or abort; the caller then claims
+        the slot under _close_lock.  A second top-level write transaction on
+        the same thread would deadlock on LMDB's mutex, so it raises
+        instead.  Issue #500."""
+        me = threading.get_ident()
+        with self._write_txn_cond:
+            while self._write_txn_tid:
+                if self._write_txn_tid == me:
+                    msg = ('Attempt to start a write transaction while '
+                           'another write transaction is active on the same '
+                           'thread. This would deadlock.')
+                    raise _error(msg, errno.EBUSY)
+                self._write_txn_cond.wait()
+
+    def _release_write_txn(self):
+        """Release a write-transaction claim that failed to start."""
+        with self._write_txn_cond:
+            self._write_txn_tid = 0
+            self._write_txn_cond.notify_all()
+
     def set_mapsize(self, map_size):
         """Change the maximum size of the map file.
 
@@ -1831,61 +1856,70 @@ class Transaction:
         else:
             parent_txn = _ffi.NULL
 
-        # Hold _close_lock across the mdb_txn_begin C call to prevent
-        # env.close() from calling mdb_env_close while we're inside
-        # mdb_txn_begin (which releases the GIL).  Issue #180.
-        with env._close_lock:
-            if not env._env:
-                raise _error("env has been closed", _lib.EINVAL)
-            self._env = env._env
-            env._deps.add(self)
-            if parent:
-                parent._deps.add(self)
+        if write and env.readonly:
+            msg = 'Cannot start write transaction with read-only env'
+            raise _error(msg, _lib.EACCES)
 
-            if write:
-                if env.readonly:
-                    msg = 'Cannot start write transaction with read-only env'
-                    raise _error(msg, _lib.EACCES)
-
-                if not parent and env._write_txn_tid:
-                    msg = ('A write transaction is already active on this '
-                           'environment. Only one top-level write '
-                           'transaction is allowed at a time.')
-                    raise _error(msg, errno.EBUSY)
-
-                if not parent:
-                    env._write_txn_tid = threading.get_ident()
-                txnpp = _ffi.new('MDB_txn **')
-                rc = self._lib.mdb_txn_begin(self._env, parent_txn, 0, txnpp)
-                if rc:
-                    if not parent:
-                        env._write_txn_tid = 0
+        top_writer = write and not parent
+        claimed = False
+        try:
+            while True:
+                if top_writer:
+                    env._wait_for_write_txn()
+                # Hold _close_lock across the mdb_txn_begin C call to prevent
+                # env.close() from calling mdb_env_close while we're inside
+                # mdb_txn_begin (which releases the GIL).  Issue #180.
+                with env._close_lock:
+                    if top_writer:
+                        # Claim under _close_lock, as set_mapsize() checks
+                        # _write_txn_tid under it; retry if another thread
+                        # claimed first.  Issue #500.
                         with env._write_txn_cond:
-                            env._write_txn_cond.notify_all()
-                    raise _error("mdb_txn_begin", rc)
-                self._txn = txnpp[0]
-                self._write = True
-            else:
-                try:  # Exception catch in order to avoid racy 'if txns:' test
-                    if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
-                        raise IndexError
-                    self._txn = env._spare_txns.pop()
-                    env._max_spare_txns += 1
-                    rc = self._lib.mdb_txn_renew(self._txn)
-                    if rc:
-                        while self._deps:
-                            self._deps.pop()._invalidate()
-                        self._lib.mdb_txn_abort(self._txn)
-                        self._txn = _invalid
-                        self._invalidate()
-                        raise _error("mdb_txn_renew", rc)
-                except IndexError:
-                    txnpp = _ffi.new('MDB_txn **')
-                    flags = _lib.MDB_RDONLY
-                    rc = self._lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
-                    if rc:
-                        raise _error("mdb_txn_begin", rc)
-                    self._txn = txnpp[0]
+                            if env._write_txn_tid:
+                                continue
+                            env._write_txn_tid = threading.get_ident()
+                        claimed = True
+                    if not env._env:
+                        raise _error("env has been closed", _lib.EINVAL)
+                    self._env = env._env
+                    env._deps.add(self)
+                    if parent:
+                        parent._deps.add(self)
+
+                    if write:
+                        txnpp = _ffi.new('MDB_txn **')
+                        rc = self._lib.mdb_txn_begin(self._env, parent_txn, 0,
+                                                     txnpp)
+                        if rc:
+                            raise _error("mdb_txn_begin", rc)
+                        self._txn = txnpp[0]
+                        self._write = True
+                        claimed = False  # now owned by this transaction
+                    else:
+                        try:  # Exception catch in order to avoid racy 'if txns:' test
+                            if env._creating_db_in_readonly:  # Don't use spare txns for creating a DB when read-only
+                                raise IndexError
+                            self._txn = env._spare_txns.pop()
+                            env._max_spare_txns += 1
+                            rc = self._lib.mdb_txn_renew(self._txn)
+                            if rc:
+                                while self._deps:
+                                    self._deps.pop()._invalidate()
+                                self._lib.mdb_txn_abort(self._txn)
+                                self._txn = _invalid
+                                self._invalidate()
+                                raise _error("mdb_txn_renew", rc)
+                        except IndexError:
+                            txnpp = _ffi.new('MDB_txn **')
+                            flags = _lib.MDB_RDONLY
+                            rc = self._lib.mdb_txn_begin(self._env, parent_txn, flags, txnpp)
+                            if rc:
+                                raise _error("mdb_txn_begin", rc)
+                            self._txn = txnpp[0]
+                break
+        finally:
+            if claimed:
+                env._release_write_txn()
 
     def _invalidate(self):
         if self._txn:

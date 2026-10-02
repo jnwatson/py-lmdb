@@ -282,6 +282,16 @@ struct EnvObject {
      *  ACTIVE_OPS_DEC to skip the broadcast when nobody is draining
      *  (the common case). */
     lmdb_atomic_t ops_waiters;
+    /** Count of threads inside a top-level write mdb_txn_begin (also counted
+     *  in active_ops).  Such a call may block indefinitely on LMDB's writer
+     *  mutex, held by a write transaction on another thread, so trans_abort
+     *  must not wait for it: the mutex is only released by that abort.
+     *  trans_abort therefore drains active_ops down to this count, while
+     *  env_clear and set_mapsize still drain active_ops fully.  Never
+     *  exceeds the begin calls' share of active_ops (see
+     *  ENV_UNLOCKED_WRITE_BEGIN), so trans_abort never undercounts other
+     *  operations.  Issue #495. */
+    lmdb_atomic_t write_begins;
     /** 1 while set_mapsize() is inside its invalidate/remap critical
      *  section.  New GIL-releasing LMDB operations fail fast with EINVAL
      *  until the resize completes (see ENV_RESIZE_BLOCKED).  Issue #475. */
@@ -951,12 +961,26 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
         Py_END_ALLOW_THREADS \
     } while(0)
 
+/* ENV_WAKE_WAITERS: broadcast to ENV_WAIT_WHILE waiters, if there are any.
+ * The lock-free read of ops_waiters keeps the common no-waiter case free of
+ * the mutex; see ENV_WAIT_WHILE for why no wakeup is lost. */
+#define ENV_WAKE_WAITERS(_env) \
+    do { \
+        if(LMDB_ATOMIC_LOAD(&(_env)->ops_waiters) != 0) { \
+            ENV_SYNC_LOCK(_env); \
+            ENV_SYNC_BROADCAST(_env); \
+            ENV_SYNC_UNLOCK(_env); \
+        } \
+    } while(0)
+
 /* ACTIVE_OPS_INC/DEC: adjust the in-flight operation count.  This is the
  * per-operation hot path (twice per cursor step), so it is lock-free: a
- * single atomic RMW, plus — only on the 0-crossing — a lock-free read of
- * ops_waiters to decide whether any drainer needs waking.  The mutex is
- * taken only to deliver that (rare) broadcast, so a waiter between its
- * predicate check and its wait cannot miss it.  Issues #180, #475. */
+ * single atomic RMW, plus a lock-free read of ops_waiters to decide whether
+ * any drainer needs waking.  The mutex is taken only to deliver that (rare)
+ * broadcast, so a waiter between its predicate check and its wait cannot
+ * miss it.  Every decrement wakes waiters, not just the 0-crossing, since
+ * trans_abort drains down to write_begins rather than to 0 (#495).
+ * Issues #180, #475. */
 #define ACTIVE_OPS_INC(_env) \
     do { \
         LMDB_ATOMIC_INCR(&(_env)->active_ops); \
@@ -964,12 +988,8 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
 
 #define ACTIVE_OPS_DEC(_env) \
     do { \
-        if(LMDB_ATOMIC_DECR(&(_env)->active_ops) == 0 && \
-           LMDB_ATOMIC_LOAD(&(_env)->ops_waiters) != 0) { \
-            ENV_SYNC_LOCK(_env); \
-            ENV_SYNC_BROADCAST(_env); \
-            ENV_SYNC_UNLOCK(_env); \
-        } \
+        LMDB_ATOMIC_DECR(&(_env)->active_ops); \
+        ENV_WAKE_WAITERS(_env); \
     } while(0)
 
 /* CLEAR_WRITE_TXN_TID: record that this thread's write transaction is
@@ -1029,6 +1049,32 @@ val_from_buffer(MDB_val *val, PyObject *buf, BufViewList *bvl)
             Py_BEGIN_ALLOW_THREADS \
             out = (e); \
             Py_END_ALLOW_THREADS \
+            ACTIVE_OPS_DEC(_saved_env); \
+        } \
+    } while(0)
+
+/* ENV_UNLOCKED_WRITE_BEGIN: ENV_UNLOCKED for a top-level write
+ * mdb_txn_begin, which may block on LMDB's writer mutex.  The call is
+ * counted in active_ops, so env_clear and set_mapsize wait for it, and also
+ * in write_begins, so trans_abort does not (#495).  Ordering keeps
+ * write_begins <= the begins' share of active_ops at every instant: it is
+ * incremented after active_ops and decremented before it.  The increment
+ * then wakes waiters, since a trans_abort may have gone to sleep on the
+ * active_ops increment alone.  Issue #495. */
+#define ENV_UNLOCKED_WRITE_BEGIN(_env, out, e) \
+    do { \
+        EnvObject *_saved_env = (_env); \
+        if(ENV_RESIZE_BLOCKED(_saved_env)) { \
+            out = EINVAL; \
+        } \
+        else { \
+            ACTIVE_OPS_INC(_saved_env); \
+            LMDB_ATOMIC_INCR(&_saved_env->write_begins); \
+            ENV_WAKE_WAITERS(_saved_env); \
+            Py_BEGIN_ALLOW_THREADS \
+            out = (e); \
+            Py_END_ALLOW_THREADS \
+            LMDB_ATOMIC_DECR(&_saved_env->write_begins); \
             ACTIVE_OPS_DEC(_saved_env); \
         } \
     } while(0)
@@ -1364,9 +1410,11 @@ make_trans(EnvObject *env, DbObject *db, TransObject *parent, int write,
         if(write && !parent) {
             /* Release GIL so another thread's write txn can block on the
              * LMDB mutex instead of deadlocking on the GIL.  Use active_ops
-             * to prevent env_clear from closing the env underneath us.
-             * Issues #180, #427. */
-            ENV_UNLOCKED(env, rc,
+             * to prevent env_clear from closing the env underneath us,
+             * and write_begins so another thread's trans_abort, which
+             * this call is waiting for, does not wait for it in turn.
+             * Issues #180, #427, #495. */
+            ENV_UNLOCKED_WRITE_BEGIN(env, rc,
                 V->txn_begin(env->env, parent_txn, flags, &txn));
             if(rc) {
                 return err_set("mdb_txn_begin", rc);
@@ -1965,6 +2013,7 @@ env_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->pid = _cached_pid;
     self->write_txn_tid = 0;
     self->active_ops = 0;
+    self->write_begins = 0;
     self->ops_waiters = 0;
     self->resizing = 0;
     self->resize_tid = 0;
@@ -4625,9 +4674,15 @@ trans_abort(TransObject *self, PyObject *Py_UNUSED(ignored))
                  * would let a concurrent set_mapsize() pass its write-txn
                  * check and then find the txn undead at remap time (its
                  * invalidation pass skips this txn because self->txn was
-                 * already NULLed above).  Issues #465, #475. */
-                if(LMDB_ATOMIC_LOAD(&env->active_ops) > 0) {
-                    ENV_WAIT_WHILE(env, LMDB_ATOMIC_LOAD(&env->active_ops) > 0);
+                 * already NULLed above).  Issues #465, #475.
+                 *
+                 * Top-level write begins on other threads are excluded:
+                 * they are blocked on the writer mutex this abort releases,
+                 * so waiting for them would deadlock.  Issue #495. */
+                if(LMDB_ATOMIC_LOAD(&env->active_ops) >
+                   LMDB_ATOMIC_LOAD(&env->write_begins)) {
+                    ENV_WAIT_WHILE(env, LMDB_ATOMIC_LOAD(&env->active_ops) >
+                                        LMDB_ATOMIC_LOAD(&env->write_begins));
                 }
                 ACTIVE_OPS_INC(env);
                 Py_BEGIN_ALLOW_THREADS

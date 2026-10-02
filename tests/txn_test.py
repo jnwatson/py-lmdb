@@ -23,6 +23,7 @@
 import os
 import sys
 import struct
+import time
 import unittest
 import weakref
 
@@ -702,10 +703,18 @@ class DoubleWriteTxnTest(unittest.TestCase):
         txn2 = env.begin(write=True)
         txn2.abort()
 
-    @unittest.skipIf(lmdb.Environment.__module__ == 'lmdb.cffi',
-                     "CFFI cannot release GIL for cross-thread blocking")
+    def test_same_thread_second_write_txn_raises(self):
+        '''A second top-level write txn on the same thread would deadlock on
+        LMDB's writer mutex, so both implementations raise instead.'''
+        _, env = testlib.temp_env()
+        txn = env.begin(write=True)
+        self.assertRaises(lmdb.Error, lambda: env.begin(write=True))
+        txn.abort()
+        env.begin(write=True).abort()
+
     def test_cross_thread_write_txn_blocks(self):
-        '''Issue #427: cross-thread write txns should block, not error.'''
+        '''Issues #427, #500: cross-thread write txns should block, not
+        error, on both implementations.'''
         import threading
         _, env = testlib.temp_env()
         results = []
@@ -729,6 +738,57 @@ class DoubleWriteTxnTest(unittest.TestCase):
         t.join(timeout=5)
         self.assertFalse(t.is_alive())
         self.assertEqual(results, ['ok'])
+
+    def _abort_while_writer_waits(self, finish):
+        '''Run `finish(txn)` on a write txn while another thread waits in
+        begin(write=True).  Both run on helper threads so a deadlock fails
+        the test instead of hanging the suite.'''
+        import threading
+        _, env = testlib.temp_env()
+        holding = threading.Event()
+        results = []
+
+        def holder():
+            txn = env.begin(write=True)
+            txn.put(B('from_holder'), B('val'))
+            holding.set()
+            time.sleep(0.2)  # let the waiter block in begin()
+            try:
+                finish(txn)
+            except ValueError:
+                pass
+            results.append('holder')
+
+        def waiter():
+            holding.wait()
+            with env.begin(write=True) as txn:
+                txn.put(B('from_waiter'), B('val'))
+            results.append('waiter')
+
+        threads = [threading.Thread(target=holder, daemon=True),
+                   threading.Thread(target=waiter, daemon=True)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+            self.assertFalse(t.is_alive(), 'deadlocked (issue #495)')
+        self.assertEqual(sorted(results), ['holder', 'waiter'])
+        with env.begin() as txn:
+            self.assertIsNone(txn.get(B('from_holder')))
+            self.assertEqual(txn.get(B('from_waiter')), B('val'))
+
+    def test_abort_while_other_thread_waits_to_write(self):
+        '''Issue #495: abort() must not wait for another thread's blocked
+        begin(write=True), which is waiting for this abort.'''
+        self._abort_while_writer_waits(lambda txn: txn.abort())
+
+    def test_with_exception_while_other_thread_waits_to_write(self):
+        '''Issue #495: a with-block exiting on an exception aborts, and must
+        not deadlock against a writer waiting on another thread.'''
+        def finish(txn):
+            with txn:
+                raise ValueError('test')
+        self._abort_while_writer_waits(finish)
 
 
 class LeakTest(unittest.TestCase):
