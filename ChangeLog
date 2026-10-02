@@ -234,7 +234,10 @@ Bug fixes
   raises ``lmdb.Error``, as on the C extension, instead of stepping the freed
   cursor.  ``Cursor.key()``, ``value()`` and ``item()`` on a closed cursor
   raise too, rather than reading freed or unmapped memory, which could
-  segfault.
+  segfault.  A ``close()`` or ``abort()`` on another thread now waits until
+  a cursor's ``key()``, ``value()``, ``item()``, ``getmulti()``,
+  ``replace()`` or ``pop()`` has copied the data it read, instead of
+  unmapping or freeing it mid-copy.
 
 Behaviour changes
 -----------------
