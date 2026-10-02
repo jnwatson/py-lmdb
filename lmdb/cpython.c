@@ -3385,9 +3385,7 @@ cursor_get_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    if(arg.dupfixed_bytes < 0) {
-        return type_error("dupfixed_bytes must be a positive integer.");
-    }else if ((arg.dupfixed_bytes > 0 || arg.keyfixed) && !arg.dupdata) {
+    if((arg.dupfixed_bytes > 0 || arg.keyfixed) && !arg.dupdata) {
         return type_error("dupdata is required for dupfixed_bytes/keyfixed.");
     }else if (arg.keyfixed && !arg.dupfixed_bytes){
         return type_error("dupfixed_bytes is required for keyfixed.");

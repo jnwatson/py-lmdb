@@ -81,6 +81,39 @@ class CrashTest(unittest.TestCase):
             it = txn.cursor(db=db).iternext()
         self.assertRaises(Exception, (lambda: list(it)))
 
+    def testCursorCloseActiveIter(self):
+        # cffi cached the native cursor before its iteration loop and kept
+        # stepping it after close() had freed it.
+        txn = self.env.begin()
+        c = txn.cursor()
+        it = c.iternext()
+        self.assertEqual(B('dave'), next(it)[0])
+        c.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+        c = txn.cursor()
+        it = c.iternext()
+        c.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+    def testEnvCloseActiveIter(self):
+        txn = self.env.begin()
+        it = txn.cursor().iternext()
+        self.assertEqual(B('dave'), next(it)[0])
+        self.env.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+    def testCursorAccessorsAfterEnvClose(self):
+        # A positioned cffi cursor's key/value point into the map, which
+        # env.close() unmaps: reading them must raise, not segfault.
+        txn = self.env.begin()
+        c = txn.cursor()
+        self.assertTrue(c.set_key(B('dave')))
+        self.env.close()
+        self.assertRaises(lmdb.Error, c.key)
+        self.assertRaises(lmdb.Error, c.value)
+        self.assertRaises(lmdb.Error, c.item)
+
 
 class IteratorTest(unittest.TestCase):
     def tearDown(self):

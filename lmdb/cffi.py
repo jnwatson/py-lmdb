@@ -2444,6 +2444,8 @@ class Cursor:
 
     def key(self):
         """Return the current key."""
+        if not self._cur:
+            raise _invalid_error()
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
@@ -2451,6 +2453,8 @@ class Cursor:
 
     def value(self):
         """Return the current value."""
+        if not self._cur:
+            raise _invalid_error()
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
@@ -2459,6 +2463,8 @@ class Cursor:
 
     def item(self):
         """Return the current `(key, value)` pair."""
+        if not self._cur:
+            raise _invalid_error()
         # Must refresh `key` and `val` following mutation.
         if self._last_mutation != self._pytxn._mutations:
             self._cursor_get(_lib.MDB_GET_CURRENT)
@@ -2473,21 +2479,12 @@ class Cursor:
         else:
             get = self.item
 
-        cur = self._cur
-        key = self._key
-        val = self._val
-        rc = 0
-
+        # Step through _cursor_get rather than a handle cached before the
+        # loop: the cursor may be closed while suspended at the yield, and
+        # _cursor_get re-checks it under _close_lock.
         while self._valid:
             yield get()
-            rc = self._lib.mdb_cursor_get(cur, key, val, op)
-            self._valid = not rc
-
-        if rc:
-            self._key.mv_size = 0
-            self._val.mv_size = 0
-            if rc != _lib.MDB_NOTFOUND:
-                raise _error("mdb_cursor_get", rc)
+            self._cursor_get(op)
 
     def iternext(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
