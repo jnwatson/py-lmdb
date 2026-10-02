@@ -229,6 +229,16 @@ Bug fixes
 - ``python -m lmdb``: ``dump --all`` is implemented, and the help text and
   usage examples are corrected (issue #506).
 
+- CFFI: an iterator whose cursor is closed between steps (by
+  ``Cursor.close()``, ending the transaction or closing the environment) now
+  raises ``lmdb.Error``, as on the C extension, instead of stepping the freed
+  cursor.  ``Cursor.key()``, ``value()`` and ``item()`` on a closed cursor
+  raise too, rather than reading freed or unmapped memory, which could
+  segfault.  A ``close()`` or ``abort()`` on another thread now waits until
+  a cursor's ``key()``, ``value()``, ``item()``, ``getmulti()``,
+  ``replace()`` or ``pop()`` has copied the data it read, instead of
+  unmapping or freeing it mid-copy.
+
 Behaviour changes
 -----------------
 

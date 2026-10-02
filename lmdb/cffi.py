@@ -2444,26 +2444,39 @@ class Cursor:
 
     def key(self):
         """Return the current key."""
-        # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self._pytxn._mutations:
-            self._cursor_get(_lib.MDB_GET_CURRENT)
-        return self._to_py(self._key)
+        # `_key` and `_val` point into LMDB memory.  Hold _close_lock from the
+        # check until they are copied, so a concurrent close() or abort()
+        # cannot unmap or free that memory in between; the same applies
+        # wherever a cursor copies them.
+        with self._pytxn._pyenv._close_lock:
+            if not self._cur:
+                raise _invalid_error()
+            # Must refresh `key` and `val` following mutation.
+            if self._last_mutation != self._pytxn._mutations:
+                self._cursor_get(_lib.MDB_GET_CURRENT)
+            return self._to_py(self._key)
 
     def value(self):
         """Return the current value."""
-        # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self._pytxn._mutations:
-            self._cursor_get(_lib.MDB_GET_CURRENT)
-        preload(self._val)
-        return self._to_py(self._val)
+        with self._pytxn._pyenv._close_lock:
+            if not self._cur:
+                raise _invalid_error()
+            # Must refresh `key` and `val` following mutation.
+            if self._last_mutation != self._pytxn._mutations:
+                self._cursor_get(_lib.MDB_GET_CURRENT)
+            preload(self._val)
+            return self._to_py(self._val)
 
     def item(self):
         """Return the current `(key, value)` pair."""
-        # Must refresh `key` and `val` following mutation.
-        if self._last_mutation != self._pytxn._mutations:
-            self._cursor_get(_lib.MDB_GET_CURRENT)
-        preload(self._val)
-        return self._to_py(self._key), self._to_py(self._val)
+        with self._pytxn._pyenv._close_lock:
+            if not self._cur:
+                raise _invalid_error()
+            # Must refresh `key` and `val` following mutation.
+            if self._last_mutation != self._pytxn._mutations:
+                self._cursor_get(_lib.MDB_GET_CURRENT)
+            preload(self._val)
+            return self._to_py(self._key), self._to_py(self._val)
 
     def _iter(self, op, keys, values):
         if not values:
@@ -2473,21 +2486,12 @@ class Cursor:
         else:
             get = self.item
 
-        cur = self._cur
-        key = self._key
-        val = self._val
-        rc = 0
-
+        # Step through _cursor_get rather than a handle cached before the
+        # loop: the cursor may be closed while suspended at the yield, and
+        # _cursor_get re-checks it under _close_lock.
         while self._valid:
             yield get()
-            rc = self._lib.mdb_cursor_get(cur, key, val, op)
-            self._valid = not rc
-
-        if rc:
-            self._key.mv_size = 0
-            self._val.mv_size = 0
-            if rc != _lib.MDB_NOTFOUND:
-                raise _error("mdb_cursor_get", rc)
+            self._cursor_get(op)
 
     def iternext(self, keys=True, values=True):
         """Return a forward iterator that yields the current element before
@@ -2861,8 +2865,13 @@ class Cursor:
         a = bytearray()
         lst = list()
         keyfixed_size = None
+        lock = self._pytxn._pyenv._close_lock
         for key in keys:
-            if self.set_key(key):
+            # Lock per key, not around the loop: `keys` may be a generator
+            # that waits on another thread.
+            with lock:
+                if not self.set_key(key):
+                    continue
                 if not values:
                     lst.append(self._to_py(self._key))
                     continue
@@ -3127,40 +3136,41 @@ class Cursor:
             `value`:
                 Bytestring value to store.
         """
-        if self._pydb._flags & _lib.MDB_DUPSORT:
-            if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
-                preload(self._val)
-                old = _mvstr(self._val)
-                self.delete(True)
-            else:
-                old = None
-            self.put(key, value)
-            return old
-
-        flags = _lib.MDB_NOOVERWRITE
-        keylen = len(key)
+        # Held throughout so the old value cannot be freed before it is copied
+        # (see key()).
         with self._pytxn._pyenv._close_lock:
+            if self._pydb._flags & _lib.MDB_DUPSORT:
+                if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+                    preload(self._val)
+                    old = _mvstr(self._val)
+                    self.delete(True)
+                else:
+                    old = None
+                self.put(key, value)
+                return old
+
+            flags = _lib.MDB_NOOVERWRITE
+            keylen = len(key)
             if not self._cur:
                 raise _invalid_error()
             rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), flags)
-        self._pytxn._mutations += 1
-        if not rc:
-            return
-        if rc != _lib.MDB_KEYEXIST:
-            raise _error("mdb_cursor_put", rc)
+            self._pytxn._mutations += 1
+            if not rc:
+                return
+            if rc != _lib.MDB_KEYEXIST:
+                raise _error("mdb_cursor_put", rc)
 
-        self._cursor_get(_lib.MDB_GET_CURRENT)
-        preload(self._val)
-        old = _mvstr(self._val)
-        with self._pytxn._pyenv._close_lock:
+            self._cursor_get(_lib.MDB_GET_CURRENT)
+            preload(self._val)
+            old = _mvstr(self._val)
             if not self._cur:
                 raise _invalid_error()
             rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), 0)
-        self._pytxn._mutations += 1
-        if rc:
-            raise _error("mdb_cursor_put", rc)
-        self._cursor_get(_lib.MDB_GET_CURRENT)
-        return old
+            self._pytxn._mutations += 1
+            if rc:
+                raise _error("mdb_cursor_put", rc)
+            self._cursor_get(_lib.MDB_GET_CURRENT)
+            return old
 
     def pop(self, key):
         """Fetch a record's value then delete it. Returns ``None`` if no
@@ -3173,18 +3183,20 @@ class Cursor:
             `key`:
                 Bytestring key to delete.
         """
-        if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
-            preload(self._val)
-            old = _mvstr(self._val)
-            with self._pytxn._pyenv._close_lock:
+        # Held throughout so the value cannot be freed before it is copied
+        # (see key()).
+        with self._pytxn._pyenv._close_lock:
+            if self._cursor_get_kv(_lib.MDB_SET_KEY, key, EMPTY_BYTES):
+                preload(self._val)
+                old = _mvstr(self._val)
                 if not self._cur:
                     raise _invalid_error()
                 rc = self._lib.mdb_cursor_del(self._cur, 0)
-            self._pytxn._mutations += 1
-            if rc:
-                raise _error("mdb_cursor_del", rc)
-            self._cursor_get(_lib.MDB_GET_CURRENT)
-            return old
+                self._pytxn._mutations += 1
+                if rc:
+                    raise _error("mdb_cursor_del", rc)
+                self._cursor_get(_lib.MDB_GET_CURRENT)
+                return old
 
     def _iter_from(self, k, reverse):
         """Helper for centidb. Please do not rely on this interface, it may be

@@ -81,6 +81,39 @@ class CrashTest(unittest.TestCase):
             it = txn.cursor(db=db).iternext()
         self.assertRaises(Exception, (lambda: list(it)))
 
+    def testCursorCloseActiveIter(self):
+        # cffi cached the native cursor before its iteration loop and kept
+        # stepping it after close() had freed it.
+        txn = self.env.begin()
+        c = txn.cursor()
+        it = c.iternext()
+        self.assertEqual(B('dave'), next(it)[0])
+        c.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+        c = txn.cursor()
+        it = c.iternext()
+        c.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+    def testEnvCloseActiveIter(self):
+        txn = self.env.begin()
+        it = txn.cursor().iternext()
+        self.assertEqual(B('dave'), next(it)[0])
+        self.env.close()
+        self.assertRaises(lmdb.Error, next, it)
+
+    def testCursorAccessorsAfterEnvClose(self):
+        # A positioned cffi cursor's key/value point into the map, which
+        # env.close() unmaps: reading them must raise, not segfault.
+        txn = self.env.begin()
+        c = txn.cursor()
+        self.assertTrue(c.set_key(B('dave')))
+        self.env.close()
+        self.assertRaises(lmdb.Error, c.key)
+        self.assertRaises(lmdb.Error, c.value)
+        self.assertRaises(lmdb.Error, c.item)
+
 
 class IteratorTest(unittest.TestCase):
     def tearDown(self):
@@ -512,6 +545,112 @@ class ChildCommitRaceTest(unittest.TestCase):
             except lmdb.Error:
                 pass
         env.close()
+
+
+@unittest.skipIf(lmdb.Environment.__module__ == 'builtins',
+                 'CFFI only: patches lmdb.cffi._mvstr')
+class CloseDuringCopyTest(unittest.TestCase):
+    """close() or abort() on another thread must wait while a cursor copies a
+    key or value out of LMDB memory.  CFFI cursors held _close_lock only for
+    the LMDB call, so the data could be unmapped or freed between the lookup
+    and the copy."""
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def setUp(self):
+        self.path, self.env = testlib.temp_env()
+        self.dupdb = self.env.open_db(B('dup'), dupsort=True)
+        with self.env.begin(write=True) as txn:
+            txn.put(B('a'), B('1'))
+            txn.put(B('a'), B('1'), db=self.dupdb)
+
+    def _check(self, begin, op, invalidate):
+        """Run op(txn) on txn = begin(), pausing its first copy out of LMDB
+        memory while another thread runs invalidate(txn); fail if that
+        finishes before the copy does."""
+        import lmdb.cffi
+        real = lmdb.cffi._mvstr
+        done = threading.Event()
+        threads = []
+
+        def run_invalidate():
+            try:
+                invalidate(txn)
+            finally:
+                done.set()
+
+        def copy(mv):
+            if not threads:
+                threads.append(threading.Thread(target=run_invalidate))
+                threads[0].start()
+                # invalidate() must block on _close_lock until we return.
+                self.assertFalse(done.wait(0.2), 'invalidated mid-copy')
+            return real(mv)
+
+        lmdb.cffi._mvstr = copy  # txn._to_py binds it at begin()
+        try:
+            txn = begin()
+            try:
+                op(txn)
+            except lmdb.Error:
+                pass  # invalidated after the copy
+        finally:
+            lmdb.cffi._mvstr = real
+            for t in threads:
+                t.join()
+        self.assertTrue(threads, 'op never copied')
+
+    def _read(self, op):
+        self._check(self.env.begin, op, lambda txn: self.env.close())
+
+    def _positioned(self, txn):
+        cur = txn.cursor()
+        self.assertTrue(cur.set_key(B('a')))
+        return cur
+
+    def test_txn_get(self):
+        # Control: Transaction.get already held the lock across its copy.
+        self._read(lambda txn: txn.get(B('a')))
+
+    def test_key(self):
+        self._read(lambda txn: self._positioned(txn).key())
+
+    def test_value(self):
+        self._read(lambda txn: self._positioned(txn).value())
+
+    def test_item(self):
+        self._read(lambda txn: self._positioned(txn).item())
+
+    def test_getmulti(self):
+        self._read(lambda txn: txn.cursor().getmulti([B('a')]))
+
+    def test_getmulti_keys(self):
+        self._read(lambda txn: txn.cursor().getmulti([B('a')], values=False))
+
+    def _write(self, op, db=None):
+        parent = self.env.begin(write=True)
+
+        def begin():
+            child = self.env.begin(write=True, parent=parent)
+            # Put the key on a page the child owns, which its abort frees.
+            child.put(B('a'), B('2'), db=db)
+            return child
+
+        try:
+            self._check(begin, op, lambda txn: txn.abort())
+        finally:
+            parent.abort()
+
+    def test_replace(self):
+        self._write(lambda txn: txn.replace(B('a'), B('3')))
+
+    def test_replace_dupsort(self):
+        self._write(lambda txn: txn.replace(B('a'), B('3'), db=self.dupdb),
+                    db=self.dupdb)
+
+    def test_pop(self):
+        self._write(lambda txn: txn.pop(B('a')))
 
 
 MINDBSIZE = 64 * 1024 * 2  # certain ppcle Linux distros have a 64K page size
