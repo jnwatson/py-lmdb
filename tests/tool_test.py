@@ -153,6 +153,41 @@ class MakeParserTest(testlib.LmdbTest):
         self.assertEqual(opts.env, '/tmp/test')
         self.assertEqual(args, ['stat'])
 
+    def test_read_is_a_flag(self):
+        '''Issue #506: -r takes no value.'''
+        parser = lmdb.tool.make_parser()
+        opts, args = parser.parse_args(['-r', 'stat'])
+        self.assertTrue(opts.read)
+        self.assertEqual(args, ['stat'])
+        opts, args = parser.parse_args(['stat'])
+        self.assertFalse(opts.read)
+
+
+class ReadOnlyOptionTest(testlib.LmdbTest):
+    '''Issue #506: -r opens the environment read-only; the old "-r READ"
+    spelling still works.'''
+
+    def _readonly_after(self, argv):
+        path, env = testlib.temp_env()
+        env.close()
+        try:
+            lmdb.tool.main(argv[:1] + [path] + argv[1:])
+            assert lmdb.tool.ENV is not None
+            return lmdb.tool.ENV.flags()['readonly']
+        finally:
+            if lmdb.tool.ENV is not None:
+                lmdb.tool.ENV.close()
+                lmdb.tool.ENV = None
+
+    def test_flag(self):
+        self.assertTrue(self._readonly_after(['-e', '-r', 'stat']))
+
+    def test_legacy_value(self):
+        self.assertTrue(self._readonly_after(['-e', '-r', 'READ', 'stat']))
+
+    def test_default_writable(self):
+        self.assertFalse(self._readonly_after(['-e', 'stat']))
+
 
 # ---------------------------------------------------------------------------
 # Dump / restore format tests
@@ -391,6 +426,27 @@ class CmdDumpRestoreTest(ToolTestBase):
                 content = f.read()
             self.assertIn(b'key1', content)
             self.assertIn(b'value1', content)
+        finally:
+            os.chdir(old_cwd)
+
+    def test_dump_all(self):
+        '''Issue #506: --all dumps the main database and every named one.'''
+        for name in (b'db1', b'db2'):
+            db = self.env.open_db(name)
+            with self.env.begin(write=True, db=db) as txn:
+                txn.put(b'k_' + name, b'v')
+        self.env.close()
+        dump_dir = testlib.temp_dir()
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(dump_dir)
+            call_tool('-e %s dump --all' % self.path)
+            self.assertEqual(sorted(os.listdir('.')),
+                             ['db1.cdbmake', 'db2.cdbmake', 'main.cdbmake'])
+            with open('db2.cdbmake', 'rb') as f:
+                self.assertIn(b'k_db2', f.read())
+            with self.assertRaises(SystemExit):
+                call_tool('-e %s dump --all db1=x.cdbmake' % self.path)
         finally:
             os.chdir(old_cwd)
 
