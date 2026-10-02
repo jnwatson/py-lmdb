@@ -3850,7 +3850,9 @@ cursor_put_multi(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
+        /* The cursor's own database decides, not the transaction's
+         * default one.  Issue #504. */
+        flags |= (self->dbi_flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     if(! ((iter = PyObject_GetIter(arg.items)))) {
@@ -3947,7 +3949,9 @@ cursor_put(CursorObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= (self->trans->db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
+        /* The cursor's own database decides, not the transaction's
+         * default one.  Issue #504. */
+        flags |= (self->dbi_flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     ENV_UNLOCKED(self->trans->env, rc, V->cursor_put(self->curs, &arg.key, &arg.val, flags));
@@ -5146,7 +5150,9 @@ trans_put(TransObject *self, PyObject *args, PyObject *kwds)
         flags |= MDB_NOOVERWRITE;
     }
     if(arg.append) {
-        flags |= MDB_APPEND;
+        /* On a dupsort database, append a duplicate (MDB_APPEND would
+         * reject the last key itself), as Cursor.put does.  Issue #504. */
+        flags |= (arg.db->flags & MDB_DUPSORT) ? MDB_APPENDDUP : MDB_APPEND;
     }
 
     DEBUG("inserting '%.*s' (%d) -> '%.*s' (%d)",

@@ -258,6 +258,26 @@ class PutmultiTest(CursorTestBase):
             assert c.put(B('b'), B('value1'), append=True)
             assert c.put(B('b'), B('value2'), append=True)
 
+    def test_dupsort_append_uses_target_db(self):
+        '''Issue #504: append=True picks MDB_APPENDDUP from the database
+        being written, not the transaction's default database.'''
+        _, env = testlib.temp_env(max_dbs=2)
+        dup = env.open_db(B('dup'), dupsort=True)
+        plain = env.open_db(B('plain'))
+        with env.begin(write=True) as txn:  # default db: main, not dupsort
+            assert txn.put(B('k'), B('1'), db=dup)
+            assert txn.put(B('k'), B('2'), append=True, db=dup)
+            assert txn.cursor(dup).put(B('k'), B('3'), append=True)
+            assert (1, 1) == txn.cursor(dup).putmulti(
+                [(B('k'), B('4'))], append=True)
+            # Out of order is still refused.
+            assert not txn.cursor(dup).put(B('k'), B('0'), append=True)
+            self.assertEqual([v for _, v in txn.cursor(dup)],
+                             [B('1'), B('2'), B('3'), B('4')])
+        with env.begin(write=True, db=dup) as txn:  # default db: dupsort
+            assert txn.put(B('m'), B('1'), append=True, db=plain)
+            assert not txn.put(B('a'), B('1'), append=True, db=plain)
+
 class ReplaceTest(CursorTestBase):
     def test_replace(self):
         assert None is self.c.replace(B('a'), B(''))

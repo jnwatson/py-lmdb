@@ -2198,6 +2198,9 @@ class Transaction:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will fail and return ``False``.
+                On a `dupsort=True` database, `value` is appended as the last
+                duplicate of `key` instead, and must sort after its existing
+                values.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
@@ -2208,13 +2211,19 @@ class Transaction:
             flags |= _lib.MDB_NODUPDATA
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
+        db = db or self._db
         if append:
-            flags |= _lib.MDB_APPEND
+            # On a dupsort database, append a duplicate (MDB_APPEND would
+            # reject the last key itself), as Cursor.put does.  Issue #504.
+            if db._flags & _lib.MDB_DUPSORT:
+                flags |= _lib.MDB_APPENDDUP
+            else:
+                flags |= _lib.MDB_APPEND
 
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
         with self._pyenv._close_lock:
-            rc = self._lib.pymdb_put(self._txn, (db or self._db)._dbi,
+            rc = self._lib.pymdb_put(self._txn, db._dbi,
                                 key, len(key), value, len(value), flags)
         self._mutations += 1
         if rc:
@@ -3004,6 +3013,9 @@ class Cursor:
                 If ``True``, append the pair to the end of the database without
                 comparing its order first. Appending a key that is not greater
                 than the highest existing key will fail and return ``False``.
+                On a `dupsort=True` database, `value` is appended as the last
+                duplicate of `key` instead, and must sort after its existing
+                values.
         """
         flags = 0
         if not dupdata:
@@ -3011,7 +3023,9 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
+            # The cursor's own database decides, not the transaction's
+            # default one.  Issue #504.
+            if self._pydb._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
@@ -3063,7 +3077,9 @@ class Cursor:
         if not overwrite:
             flags |= _lib.MDB_NOOVERWRITE
         if append:
-            if self._pytxn._db._flags & _lib.MDB_DUPSORT:
+            # The cursor's own database decides, not the transaction's
+            # default one.  Issue #504.
+            if self._pydb._flags & _lib.MDB_DUPSORT:
                 flags |= _lib.MDB_APPENDDUP
             else:
                 flags |= _lib.MDB_APPEND
