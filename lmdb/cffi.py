@@ -513,7 +513,7 @@ class TlsFullError(Error):
     MDB_NAME = 'MDB_TLS_FULL'
 
 class TxnFullError(Error):
-    """Transaciton has too many dirty pages - transaction too big."""
+    """Transaction has too many dirty pages - transaction too big."""
     MDB_NAME = 'MDB_TXN_FULL'
     MDB_HINT = 'Please do less work within your transaction'
 
@@ -526,7 +526,8 @@ class PageFullError(Error):
     MDB_NAME = 'MDB_PAGE_FULL'
 
 class MapResizedError(Error):
-    """Database contents grew beyond environment map_size=."""
+    """Another process grew the database beyond this environment's map
+    size; call :py:meth:`Environment.set_mapsize` to adopt the new size."""
     MDB_NAME = 'MDB_MAP_RESIZED'
 
 class IncompatibleError(Error):
@@ -542,15 +543,18 @@ class BadDbiError(Error):
     MDB_NAME = 'MDB_BAD_DBI'
 
 class BadTxnError(Error):
-    """Transaction cannot recover - it must be aborted."""
+    """Transaction must abort, has an active child transaction, or is
+    invalid."""
     MDB_NAME = 'MDB_BAD_TXN'
 
 class BadValsizeError(Error):
-    """Too big key/data, key is empty, or wrong DUPFIXED size."""
+    """Too big key/data, key is empty, wrong DUPFIXED size, or empty value
+    in a ``dupsort=True`` database."""
     MDB_NAME = 'MDB_BAD_VALSIZE'
 
 class ReadonlyError(Error):
-    """An attempt was made to modify a read-only database."""
+    """A write was attempted in a read-only transaction or environment
+    (``EACCES`` on LMDB 0.9, ``MDB_IS_READONLY`` on LMDB 1.0)."""
     MDB_NAME = 'EACCES'
 
 class InvalidParameterError(Error):
@@ -1764,7 +1768,7 @@ class Transaction:
 
             # Transaction commits automatically:
             with env.begin(write=True) as txn:
-                txn.put('a', 'b')
+                txn.put(b'a', b'b')
 
     Equivalent to `mdb_txn_begin()
     <http://lmdb.tech/doc/group__mdb.html#gad7ea55da06b77513609efebd44b26920>`_
@@ -1778,12 +1782,16 @@ class Transaction:
             basis below.
 
         `parent`:
-            ``None``, or a parent transaction (see lmdb.h).
+            ``None``, or a parent write transaction, in which case `write`
+            must also be ``True``.  While the child is active, the parent
+            must not be used.  Only one top-level write transaction may be
+            active in an environment at a time.
 
         `write`:
             Transactions are read-only by default. To modify the database, you
-            must pass `write=True`. This flag is ignored if
-            :py:class:`Environment` was opened with ``readonly=True``.
+            must pass `write=True`. If the :py:class:`Environment` was opened
+            with ``readonly=True``, passing ``write=True`` raises
+            :py:class:`ReadonlyError`.
 
         `buffers`:
             If ``True``, indicates :py:class:`memoryview` objects should be
@@ -1943,6 +1951,13 @@ class Transaction:
 
         Equivalent to `mdb_drop()
         <http://lmdb.tech/doc/group__mdb.html#gab966fab3840fc54a6571dfb32b00f2db>`_
+
+            `db`:
+                Database handle returned by :py:meth:`Environment.open_db`.
+
+            `delete`:
+                If ``True`` (the default), also delete the named database and
+                invalidate the handle; if ``False``, only empty it.
         """
         while db._deps:
             db._deps.pop()._invalidate()
@@ -2042,6 +2057,10 @@ class Transaction:
 
         Equivalent to `mdb_get()
         <http://lmdb.tech/doc/group__mdb.html#ga8bf10cd91d3f3a83a34d04ce6b07992d>`_
+
+            `db`:
+                Named database to operate on. If unspecified, defaults to the
+                database given to the :py:class:`Transaction` constructor.
         """
         # Hold _close_lock so close()/set_mapsize() cannot abort the txn or
         # remap the environment during the C call.  Issue #475.
@@ -2060,7 +2079,6 @@ class Transaction:
             db=None):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `overwrite=False`.
-        On success, the cursor is positioned on the new record.
 
         Equivalent to `mdb_put()
         <http://lmdb.tech/doc/group__mdb.html#ga4fa8573d9236d54687c61827ebf8cac0>`_
@@ -2111,7 +2129,9 @@ class Transaction:
         return True
 
     def replace(self, key, value, db=None):
-        """Use a temporary cursor to invoke :py:meth:`Cursor.replace`.
+        """Use a temporary cursor to invoke :py:meth:`Cursor.replace`,
+        returning the previous value as a bytestring, or ``None`` if `key` was
+        not present.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
@@ -2121,7 +2141,9 @@ class Transaction:
             return curs.replace(key, value)
 
     def pop(self, key, db=None):
-        """Use a temporary cursor to invoke :py:meth:`Cursor.pop`.
+        """Use a temporary cursor to invoke :py:meth:`Cursor.pop`,
+        returning the deleted value as a bytestring, or ``None`` if `key` was
+        not present.
 
             `db`:
                 Named database to operate on. If unspecified, defaults to the
@@ -2139,10 +2161,15 @@ class Transaction:
             `key`:
                 The key to delete.
 
-            value:
+            `value`:
                 If the database was opened with dupsort=True and value is not
-                the empty bytestring, then delete elements matching only this
-                `(key, value)` pair, otherwise all values for key are deleted.
+                the empty bytestring (or ``None``), then delete elements
+                matching only this `(key, value)` pair, otherwise all values
+                for key are deleted.
+
+            `db`:
+                Named database to operate on. If unspecified, defaults to the
+                database given to the :py:class:`Transaction` constructor.
 
         Returns True if at least one key was deleted.
         """
@@ -2185,7 +2212,7 @@ class Cursor:
         ::
 
             >>> env = lmdb.open('/tmp/foo')
-            >>> child_db = env.open_db('child_db')
+            >>> child_db = env.open_db(b'child_db')
             >>> with env.begin() as txn:
             ...     cursor = txn.cursor()           # Cursor on main database.
             ...     cursor2 = txn.cursor(child_db)  # Cursor on child database.
@@ -2205,7 +2232,7 @@ class Cursor:
         consistent semantics in the face of any error condition.
 
         When the Cursor returns to an unpositioned state, its :py:meth:`key`
-        and :py:meth:`value` return empty strings to indicate there is no
+        and :py:meth:`value` return empty bytestrings to indicate there is no
         active position, although internally the LMDB cursor may still have a
         valid position.
 
@@ -2221,8 +2248,9 @@ class Cursor:
 
     Iterator methods such as :py:meth:`iternext` and :py:meth:`iterprev` accept
     `keys` and `values` arguments. If both are ``True``, then the value of
-    :py:meth:`item` is yielded on each iteration. If only `keys` is ``True``,
-    :py:meth:`key` is yielded, otherwise only :py:meth:`value` is yielded.
+    :py:meth:`item` is yielded on each iteration. If `values` is ``False``,
+    :py:meth:`key` is yielded; otherwise, if `keys` is ``False``, only
+    :py:meth:`value` is yielded.
 
     Prior to iteration, a cursor can be positioned anywhere in the database:
 
@@ -2230,10 +2258,10 @@ class Cursor:
 
             >>> with env.begin() as txn:
             ...     cursor = txn.cursor()
-            ...     if not cursor.set_range('5'): # Position at first key >= '5'.
+            ...     if not cursor.set_range(b'5'): # Position at first key >= b'5'.
             ...         print('Not found!')
             ...     else:
-            ...         for key, value in cursor: # Iterate from first key >= '5'.
+            ...         for key, value in cursor: # Iterate from first key >= b'5'.
             ...             print((key, value))
 
     Iteration is not required to navigate, and sometimes results in ugly or
@@ -2245,8 +2273,8 @@ class Cursor:
         ::
 
             >>> # Record the path from a child to the root of a tree.
-            >>> path = ['child14123']
-            >>> while path[-1] != 'root':
+            >>> path = [b'child14123']
+            >>> while path[-1] != b'root':
             ...     assert cursor.set_key(path[-1]), \\
             ...         'Tree is broken! Path: %s' % (path,)
             ...     path.append(cursor.value())
@@ -2397,10 +2425,9 @@ class Cursor:
         return self._iter(_lib.MDB_NEXT_DUP, keys, values)
 
     def iternext_nodup(self, keys=True, values=False):
-        """Return a forward iterator that yields the current value
-        ("duplicate") of the current key before calling
-        :py:meth:`~lmdb.Cursor.next_nodup`, repeating until the end of the
-        database is reached.
+        """Return a forward iterator that yields the current key before
+        calling :py:meth:`~lmdb.Cursor.next_nodup`, repeating until the end of
+        the database is reached.
 
         Only meaningful for databases opened with `dupsort=True`.
 
@@ -2445,10 +2472,9 @@ class Cursor:
         return self._iter(_lib.MDB_PREV_DUP, keys, values)
 
     def iterprev_nodup(self, keys=True, values=False):
-        """Return a reverse iterator that yields the current value
-        ("duplicate") of the current key before calling
-        :py:meth:`~lmdb.Cursor.prev_nodup`, repeating until the start of the
-        database is reached.
+        """Return a reverse iterator that yields the current key before
+        calling :py:meth:`~lmdb.Cursor.prev_nodup`, repeating until the start
+        of the database is reached.
 
         If the cursor is not yet positioned, it is moved to the last key in
         the database, otherwise iteration proceeds from the current position.
@@ -2510,9 +2536,10 @@ class Cursor:
 
     def first_dup(self):
         """Move to the first value ("duplicate") for the current key, returning
-        ``True`` on success or ``False`` if the database is empty.
+        ``True`` on success or ``False`` if there is no current key.
 
-        Only meaningful for databases opened with `dupsort=True`.
+        Only valid for databases opened with `dupsort=True`, and on a
+        positioned cursor; otherwise an :py:class:`Error` subclass is raised.
 
         Equivalent to `mdb_cursor_get()
         <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -2537,9 +2564,10 @@ class Cursor:
 
     def last_dup(self):
         """Move to the last value ("duplicate") for the current key, returning
-        ``True`` on success or ``False`` if the database is empty.
+        ``True`` on success or ``False`` if there is no current key.
 
-        Only meaningful for databases opened with `dupsort=True`.
+        Only valid for databases opened with `dupsort=True`, and on a
+        positioned cursor; otherwise an :py:class:`Error` subclass is raised.
 
         Equivalent to `mdb_cursor_get()
         <http://lmdb.tech/doc/group__mdb.html#ga48df35fb102536b32dfbb801a47b4cb0>`_
@@ -2649,7 +2677,7 @@ class Cursor:
     def set_key_dup(self, key, value):
         """Seek exactly to `(key, value)`, returning ``True`` on success or
         ``False`` if the exact key and value was not found. It is an error
-        to :py:meth:`set_key` the empty bytestring.
+        to pass an empty `key`.
 
         Only meaningful for databases opened with `dupsort=True`.
 
@@ -2670,8 +2698,10 @@ class Cursor:
 
     def getmulti(self, keys, dupdata=False, dupfixed_bytes=None, keyfixed=False,
                  values=True):
-        """Returns an iterable of `(key, value)` 2-tuples containing results
-        for each key in the iterable `keys`.
+        """Returns a list of `(key, value)` 2-tuples containing results for
+        each key in the iterable `keys` (a :py:class:`memoryview` when
+        `keyfixed=True`, or a list of keys when `values=False`). Keys that are
+        not found are omitted.
 
             `keys`:
                 Iterable to read keys from.
@@ -2695,10 +2725,12 @@ class Cursor:
                 .. code-block:: python
 
                     key_bytes, val_bytes = 4, 8
-                    dtype = np.dtype([(f'S{key_bytes}', f'S{val_bytes}}')])
+                    dtype = np.dtype([('key', f'S{key_bytes}'),
+                                      ('value', f'S{val_bytes}')])
                     arr = np.frombuffer(
-                        cur.getmulti(keys, dupdata=True, dupfixed_bytes=val_bytes, keyfixed=True)
-                    )
+                        cur.getmulti(keys, dupdata=True,
+                                     dupfixed_bytes=val_bytes, keyfixed=True),
+                        dtype=dtype)
 
             `values`:
                 If ``False``, return a flat list of keys that exist in the
@@ -2789,9 +2821,9 @@ class Cursor:
         return self._cursor_get_kv(_lib.MDB_SET_RANGE, key, EMPTY_BYTES)
 
     def set_range_dup(self, key, value):
-        """Seek to the first key/value pair greater than or equal to `key`,
-        returning ``True`` on success, or ``False`` to indicate that `value` was past the
-        last value of `key` or that `(key, value)` was past the end end of database.
+        """Seek to `key` exactly and position on its first value greater than
+        or equal to `value`, returning ``True`` on success, or ``False`` if
+        `key` does not exist or `value` is past its last value.
 
         Only meaningful for databases opened with `dupsort=True`.
 
@@ -2809,7 +2841,7 @@ class Cursor:
 
     def delete(self, dupdata=False):
         """Delete the current element and move to the next, returning ``True``
-        on success or ``False`` if the database was empty.
+        on success or ``False`` if the cursor was not positioned.
 
         If `dupdata` is ``True``, delete all values ("duplicates") for the
         current key, otherwise delete only the currently positioned value. Only
@@ -2836,7 +2868,8 @@ class Cursor:
     def count(self):
         """Return the number of values ("duplicates") for the current key.
 
-        Only meaningful for databases opened with `dupsort=True`.
+        Only valid for databases opened with `dupsort=True`; raises
+        :py:class:`IncompatibleError` otherwise.
 
         Equivalent to `mdb_cursor_count()
         <http://lmdb.tech/doc/group__mdb.html#ga4041fd1e1862c6b7d5f10590b86ffbe2>`_
@@ -2871,11 +2904,9 @@ class Cursor:
                 affects the return value.
 
             `overwrite`:
-                If ``False``, do not overwrite the value for the key if it
-                exists, just return ``False``. For databases opened with
-                `dupsort=True`, ``False`` will always be returned if a
-                duplicate key/value pair is inserted, regardless of the setting
-                for `overwrite`.
+                If ``False``, do not write anything if the key already exists,
+                just return ``False``.  For databases opened with
+                `dupsort=True` this applies even if the value differs.
 
             `append`:
                 If ``True``, append the pair to the end of the database without
@@ -2914,27 +2945,26 @@ class Cursor:
         Returns a tuple `(consumed, added)`, where `consumed` is the number of
         elements read from the iterable, and `added` is the number of new
         entries added to the database. `added` may be less than `consumed` when
-        `overwrite=False`.
+        records were not written: with `overwrite=False` or `dupdata=False`,
+        or when an `append=True` record is out of order.
 
             `items`:
                 Iterable to read records from.
 
             `dupdata`:
-                If ``True`` and database was opened with `dupsort=True`, add
-                pair as a duplicate if the given key already exists. Otherwise
-                overwrite any existing matching key.
+                If ``False`` and database was opened with `dupsort=True`, a
+                pair that already exists is not written (or counted in
+                `added`).
 
             `overwrite`:
-                If ``False``, do not overwrite the value for the key if it
-                exists, just return ``False``. For databases opened with
-                `dupsort=True`, ``False`` will always be returned if a
-                duplicate key/value pair is inserted, regardless of the setting
-                for `overwrite`.
+                If ``False``, skip records whose key already exists; they are
+                counted in `consumed` but not `added`.  For databases opened
+                with `dupsort=True` this applies even if the value differs.
 
             `append`:
                 If ``True``, append records to the end of the database without
-                comparing their order first. Appending a key that is not
-                greater than the highest existing key will cause corruption.
+                comparing their order first. A record whose key is not greater
+                than the highest existing key is not written.
         """
         flags = 0
         if not dupdata:
