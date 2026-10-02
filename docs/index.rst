@@ -10,7 +10,7 @@ lmdb
 
 This is a universal Python binding for the `LMDB 'Lightning' Database
 <http://lmdb.tech/>`_. Two variants are provided and automatically selected
-during install: a `CFFI <https://cffi.readthedocs.io/en/release-0.5/>`_ variant
+during install: a `CFFI <https://cffi.readthedocs.io/>`_ variant
 that supports `PyPy <http://www.pypy.org/>`_ and all versions of CPython >=3.9,
 and a C extension that supports CPython >=3.9. Both variants provide the same
 interface.
@@ -27,7 +27,7 @@ LMDB is a tiny database with some excellent properties:
 * Multiple named databases may be created with transactions covering all
   named databases.
 * Memory mapped, allowing for zero copy lookup and iteration. This is
-  optionally exposed to Python using the :py:func:`memoryview` interface.
+  optionally exposed to Python using the :py:class:`memoryview` interface.
 * Maintenance requires no external process or background threads.
 * No application-level caching is required: LMDB fully exploits the operating
   system's buffer cache.
@@ -83,7 +83,7 @@ is a simple ``mmap`` lookup with no copying, making it significantly
 faster for read-dominated workloads.  RocksDB also has a much larger
 dependency footprint.
 
-**vs. pickle (shelve, JSON files)**
+**vs. pickle / JSON files**
 
 Serializing a Python ``dict`` to a pickle or JSON file is the simplest
 form of persistence, but it requires loading the entire dataset into memory
@@ -165,12 +165,13 @@ and more robust.
      - No
 
 
-Installation: Windows
-+++++++++++++++++++++
+Installation: binary wheels
++++++++++++++++++++++++++++
 
-Binary wheels are published via PyPI for Windows, allowing the binding to be
-installed via pip without the need for a compiler to be present. The binary
-releases statically link against the bundled version of LMDB.
+Binary wheels are published via PyPI for Linux (glibc), macOS and Windows,
+allowing the binding to be installed via pip without the need for a compiler
+to be present. The binary releases statically link against both bundled
+versions of LMDB.
 
 To install:
 
@@ -179,18 +180,24 @@ To install:
         pip install lmdb
 
 
-Installation: UNIX
-++++++++++++++++++
+Installation: from source
++++++++++++++++++++++++++
 
-For convenience, a supported version of LMDB is bundled with the binding and
-built statically by default. If your system distribution includes LMDB, set the
-``LMDB_FORCE_SYSTEM`` environment variable, and optionally ``LMDB_INCLUDEDIR``
-and ``LMDB_LIBDIR`` prior to invoking ``setup.py``.
+A compiler is needed only when no wheel matches the platform (for example on
+musl-based Linux), or to build with any of the options below.
 
-By default, the bundled LMDB library is patched before building.  The patches
-(located in ``lib/py-lmdb/``) provide security hardening, bug fixes, and the
-ability to copy/backup an environment under a particular transaction.  If you
-prefer to build without patches, set the environment variable ``LMDB_PURE``.
+For convenience, both supported versions of LMDB (0.9.x and 1.0.x; see `LMDB
+versions`_) are bundled with the binding and built statically by default. If
+your system distribution includes LMDB, set the ``LMDB_FORCE_SYSTEM``
+environment variable, and optionally ``LMDB_INCLUDEDIR`` and ``LMDB_LIBDIR``,
+before building; this produces a build with a single engine, matching the
+system library's version.
+
+By default, the bundled LMDB libraries are patched before building.  The
+patches (located in ``lib/py-lmdb/`` and ``lib1/py-lmdb/``) provide security
+hardening, bug fixes, and the ability to copy/backup an environment under a
+particular transaction.  If you prefer to build both bundled versions without
+patches, set the environment variable ``LMDB_PURE``.
 
 The CFFI variant depends on CFFI, which in turn depends on ``libffi``, which
 may need to be installed from a package. On CPython, both variants additionally
@@ -200,16 +207,16 @@ depend on the CPython development headers. On Debian/Ubuntu:
 
         apt-get install libffi-dev python3-dev build-essential
 
-To install the C extension, ensure a C compiler and `pip` are
+To build the C extension from source, ensure a C compiler and ``pip`` are
 available and type:
 
     ::
 
-        pip install lmdb
+        pip install --no-binary lmdb lmdb
 
 The CFFI variant may be used on CPython by setting the ``LMDB_FORCE_CFFI``
-environment variable before installation, or before module import with an
-existing installation:
+environment variable before installation, or, for an installation built from
+source, before module import:
 
     ::
 
@@ -256,8 +263,9 @@ engine when it is constructed:
 
 Pass ``lib_version=`` to :py:func:`lmdb.open` to choose explicitly — ``0`` for
 0.9.x, ``1`` for 1.0.x.  It applies only when creating a new environment; for
-an existing one the file's own format wins, and forcing the wrong engine
-raises rather than converting anything::
+an existing one, leave it unset and the file's own format is detected.
+Passing a version that does not match an existing file raises
+:py:class:`lmdb.InvalidError` rather than converting anything::
 
     env = lmdb.open('/tmp/db', lib_version=1)   # new database in v3 format
 
@@ -288,16 +296,19 @@ Two differences do remain visible:
 
 Building with ``LMDB_FORCE_SYSTEM=1`` produces a single-engine build against
 whatever version the system ``liblmdb`` provides.  ``lib_version=`` then
-accepts only that version, and the 1.0-only exception classes above are not
-defined at all.
+accepts only that version.  When that system library is 0.9, the C extension
+does not define the 1.0-only exception classes above (the CFFI variant always
+defines them), so portable code should look them up with
+``getattr(lmdb, 'ProblemError', ())``.
 
 
 Named Databases
 +++++++++++++++
 
-Named databases require the `max_dbs=` parameter to be provided when calling
-:py:func:`lmdb.open` or :py:class:`lmdb.Environment`. This must be done by the
-first process or thread opening the environment.
+Named databases require the ``max_dbs=`` parameter to be provided when calling
+:py:func:`lmdb.open` or :py:class:`lmdb.Environment`. The limit is not stored
+in the environment, so every process (and every :py:class:`Environment`
+instance) that uses named databases must pass it.
 
 Once a correctly configured :py:class:`Environment` is created, new named
 databases may be created via :py:meth:`Environment.open_db`.
@@ -319,7 +330,7 @@ in a database.  Cursors are created from a transaction and share its lifetime.
 
     with env.begin() as txn:
         with txn.cursor() as cur:
-            # use the cursor ...
+            ...  # use the cursor
 
 Full scan
 #########
@@ -439,6 +450,10 @@ improvement — LMDB skips its internal search and appends directly:
             sorted_items = sorted(items)
             cur.putmulti(sorted_items, append=True)
 
+``append=True`` requires every key to sort after all keys already in the
+database and after the preceding key in the batch.  A record that breaks this
+is silently skipped and not counted in ``added``.
+
 Cursor positioning
 ##################
 
@@ -505,9 +520,11 @@ record.
         txn.put(b'node2', b'node5')
 
 Duplicate values for a key are always sorted lexicographically, just like keys.
-The maximum size of a duplicate value is limited to 511 bytes (the same as the
-maximum key size), because LMDB stores duplicates in a nested B-tree that
-treats each value as a key internally.
+The maximum size of a duplicate value is the same as the maximum key size
+(see :py:meth:`Environment.max_key_size`), because LMDB stores duplicates in a
+nested B-tree that treats each value as a key internally: 511 bytes with LMDB
+0.9, and derived from the page size with LMDB 1.0 (1978 bytes with 4 KiB
+pages).
 
 Reading
 #######
@@ -602,36 +619,38 @@ Storage efficiency & limits
 
 Records are grouped into pages matching the operating system's VM page size,
 which is usually 4096 bytes. Each page must contain at least 2 records, in
-addition to 8 bytes per record and a 16 byte header. Due to this the engine is
-most space-efficient when the combined size of any (8+key+value) combination
-does not exceed 2040 bytes.
+addition to about 10 bytes per record (an 8 byte node header and a 2 byte slot)
+and a page header of 16 bytes with LMDB 0.9 or 24 bytes with LMDB 1.0. Due to
+this the engine is most space-efficient when the combined size of any
+(8+key+value) combination stays under roughly 2KB.
 
 When an attempt to store a record would exceed the maximum size, its value part
 is written separately to one or more dedicated pages. Since the trailer of the
 last page containing the record value cannot be shared with other records, it
 is more efficient when large values are an approximate multiple of 4096 bytes,
-minus 16 bytes for an initial header.
+minus the page header size (16 or 24 bytes, as above).
 
 Space usage can be monitored using :py:meth:`Environment.stat`:
 
         ::
 
             >>> pprint(env.stat())
-            {'branch_pages': 1040L,
-             'depth': 4L,
-             'entries': 3761848L,
-             'leaf_pages': 73658L,
-             'overflow_pages': 0L,
-             'psize': 4096L}
+            {'branch_pages': 1040,
+             'depth': 4,
+             'entries': 3761848,
+             'leaf_pages': 73658,
+             'overflow_pages': 0,
+             'psize': 4096}
 
 This database contains 3,761,848 records and no values were spilled
-(``overflow_pages``).  `Environment.stat` only return information for the
-default database.  If named databases are used, you must add the results
-from `Transaction.stat` on each named database.
+(``overflow_pages``).  :py:meth:`Environment.stat` only returns information
+for the default database.  If named databases are used, you must add the
+results from :py:meth:`Transaction.stat` on each named database.
 
-By default record keys are limited to 511 bytes in length, however this can be
-adjusted by rebuilding the library. The compile-time key length can be queried
-via :py:meth:`Environment.max_key_size()`.
+Record keys are limited to 511 bytes with LMDB 0.9, a compile-time constant.
+With LMDB 1.0 the limit is derived from the page size: 1978 bytes with 4 KiB
+pages. :py:meth:`Environment.max_key_size` reports the limit for a given
+environment.
 
 
 Memory usage
@@ -654,7 +673,7 @@ mapping in a process. To inspect the actual memory usage of an LMDB database,
 look for a ``data.mdb`` entry, then observe its `Dirty` and `Clean` values.
 
 When no write transaction is active, all pages in an LMDB database should be
-marked `clean`, unless the Environment was opened with `sync=False`, and no
+marked `clean`, unless the Environment was opened with ``sync=False``, and no
 explicit :py:meth:`Environment.sync` has been called since the last write
 transaction, and the OS writeback mechanism has not yet opportunistically
 written the dirty pages to disk.
@@ -663,19 +682,21 @@ written the dirty pages to disk.
 Bytestrings
 +++++++++++
 
-This documentation uses `bytestring` to mean the :py:func:`bytes` type.
-All keys and values must be :py:func:`bytes` (not :py:func:`str`).
+This documentation uses `bytestring` to mean the :py:class:`bytes` type.
+All keys and values must be :py:class:`bytes` (not :py:class:`str`).
 
 Buffers
 +++++++
 
 Since LMDB is memory mapped it is possible to access record data without keys
 or values ever being copied by the kernel, database library, or application. To
-exploit this the library can be instructed to return :py:func:`memoryview`
-objects instead of bytestrings by passing `buffers=True` to
-:py:meth:`Environment.begin` or :py:class:`Transaction`.
+exploit this the library can be instructed to return :py:class:`memoryview`
+objects instead of bytestrings by passing ``buffers=True`` to
+:py:meth:`Environment.begin` or :py:class:`Transaction`.  (The CFFI variant
+returns a ``cffi`` buffer object instead; it supports the same operations, but
+indexing it returns a length-1 bytestring rather than an integer.)
 
-:py:func:`memoryview` objects can be used in many places where bytestrings are
+:py:class:`memoryview` objects can be used in many places where bytestrings are
 expected. They support slicing, indexing, iteration, and taking their length.
 Many Python APIs will automatically convert them to bytestrings as necessary:
 
@@ -699,8 +720,8 @@ Many Python APIs will automatically convert them to bytestrings as necessary:
         <class 'bytes'>
 
 It is also possible to pass buffers directly to many native APIs, for example
-:py:meth:`file.write`, :py:meth:`socket.send`, :py:meth:`zlib.decompress` and
-so on. A buffer may be sliced without copying:
+:py:meth:`file.write`, :py:meth:`socket.socket.send`,
+:py:func:`zlib.decompress` and so on. A buffer may be sliced without copying:
 
     ::
 
@@ -711,7 +732,7 @@ so on. A buffer may be sliced without copying:
 
 In both PyPy and CPython, returned buffers *must be discarded* after their
 producing transaction has completed or been modified in any way. To preserve
-buffer's contents, copy it using :py:func:`bytes`:
+buffer's contents, copy it using :py:class:`bytes`:
 
     .. code-block:: python
 
@@ -740,8 +761,9 @@ overwrite the map, resulting in database corruption.
 .. caution::
 
     This option may cause filesystems that don't support sparse files, such as
-    OSX, to immediately preallocate `map_size=` bytes of underlying storage
-    when the environment is opened or closed for the first time.
+    HFS+ on older macOS, to immediately preallocate `map_size=` bytes of
+    underlying storage when the environment is opened or closed for the first
+    time.
 
 .. caution::
 
@@ -808,12 +830,14 @@ transactions. This enables mostly care-free use of read transactions, for
 example when using `gevent <http://www.gevent.org/>`_.
 
 Most objects can be safely called by a single caller from a single thread, and
-usually it only makes sense to to have a single caller, except in the case of
+usually it only makes sense to have a single caller, except in the case of
 :py:class:`Environment`.
 
-Most :py:class:`Environment` methods are thread-safe, and may be called
-concurrently, except for :py:meth:`Environment.close`.  Running `close` at the
-same time as other database operations may crash the interpreter.
+:py:class:`Environment` methods are thread-safe and may be called
+concurrently.  :py:meth:`Environment.close` waits for in-flight operations, and
+for a write transaction owned by another thread, to finish; it then
+invalidates every transaction and cursor, and later use of them raises an
+exception.
 
 A write :py:class:`Transaction` may only be used from the thread it was created
 on.
@@ -843,14 +867,19 @@ The safe patterns for multiprocessing are:
 1. **Open after fork**: Open a fresh :py:class:`Environment` in each child
    process.  The children can safely share the same database path.
 
-2. **Use spawn**: Use ``multiprocessing.get_context('spawn')`` instead of the
-   default ``fork`` context.  ``spawn`` starts a new Python interpreter,
-   avoiding the problem entirely.  This is already the default on Windows and
-   macOS (Python 3.14+).
+2. **Use spawn**: Use ``multiprocessing.get_context('spawn')`` (or
+   ``'forkserver'``) rather than ``fork``.  ``spawn`` starts a new Python
+   interpreter, avoiding the problem entirely.  ``spawn`` is the default on
+   Windows and macOS, and since Python 3.14 the default elsewhere on POSIX is
+   ``forkserver``, which also avoids inheriting an open environment.
+   ``fork`` remains the default only on Linux and other POSIX systems with
+   Python 3.13 and earlier.
 
 .. code-block:: python
 
     import multiprocessing
+
+    import lmdb
 
     def worker(path):
         env = lmdb.open(path)          # open fresh in child
@@ -858,14 +887,15 @@ The safe patterns for multiprocessing are:
             print(txn.get(b'key'))
         env.close()
 
-    env = lmdb.open('/tmp/mydb')
-    with env.begin(write=True) as txn:
-        txn.put(b'key', b'value')
-    env.close()                        # close before forking
+    if __name__ == '__main__':
+        env = lmdb.open('/tmp/mydb')
+        with env.begin(write=True) as txn:
+            txn.put(b'key', b'value')
+        env.close()                    # close before starting children
 
-    p = multiprocessing.Process(target=worker, args=('/tmp/mydb',))
-    p.start()
-    p.join()
+        p = multiprocessing.Process(target=worker, args=('/tmp/mydb',))
+        p.start()
+        p.join()
 
 .. caution::
 
@@ -880,12 +910,15 @@ Asyncio
 +++++++
 
 LMDB is fundamentally synchronous (memory-mapped file I/O), but py-lmdb's C
-extension releases the GIL during all database operations, making it safe to
-offload calls to a thread pool via :func:`asyncio.loop.run_in_executor`.
+extension releases the GIL during nearly all LMDB calls, so read operations
+can be offloaded to a thread pool via :meth:`asyncio.loop.run_in_executor`.  A
+write transaction, however, must begin, operate and commit or abort on a single
+OS thread, so it cannot simply be dispatched to a shared multi-threaded pool.
 
-The :mod:`lmdb.aio` module provides thin async wrappers that do this
-automatically.  The synchronous code path is completely unaffected — this is
-an opt-in import.
+The ``lmdb.aio`` module provides thin async wrappers that handle this
+automatically, giving each write transaction its own single-thread executor.
+The synchronous code path is completely unaffected — this is an opt-in
+import.
 
 .. code-block:: python
 
@@ -918,10 +951,10 @@ are committed on clean exit and aborted on exception, matching the synchronous
 behavior.
 
 Because LMDB transactions are not thread-safe, each
-:class:`AsyncTransaction` holds an :class:`asyncio.Lock` that serializes all
-operations dispatched through it (including operations on its cursors).  This
-means :func:`asyncio.gather` and other forms of concurrency are safe on the
-same transaction — calls are automatically queued.
+:class:`lmdb.aio.AsyncTransaction` holds an :class:`asyncio.Lock` that
+serializes all operations dispatched through it (including operations on its
+cursors).  This means :func:`asyncio.gather` and other forms of concurrency are
+safe on the same transaction — calls are automatically queued.
 
 .. caution::
 
@@ -956,8 +989,10 @@ GiB) when opening the environment:
     systems, choose a map size closer to the expected data size and use
     ``set_mapsize()`` to grow as needed.
 
-    py-lmdb enables sparse files on Windows (NTFS) automatically, so large
-    ``map_size`` values do not waste disk space there.
+    On Windows, the bundled LMDB 0.9 engine marks the data file sparse and the
+    LMDB 1.0 engine grows the file incrementally, so large ``map_size`` values
+    do not waste disk space there.  This does not apply to ``LMDB_PURE=1`` or
+    system-``liblmdb`` builds of the 0.9 engine.
 
 **Resize at runtime with set_mapsize()**
 
@@ -1008,10 +1043,11 @@ A typical pattern for applications that grow organically is a retry loop:
 .. caution::
 
     In multi-process scenarios, all processes sharing the environment should
-    use the same map size.  If one process resizes the map, other processes
-    will receive :py:class:`lmdb.MapResizedError` on their next transaction
-    and must call ``set_mapsize(0)`` (which re-reads the current size from the
-    file) or ``set_mapsize(new_size)`` to pick up the change.
+    use the same map size.  If another process enlarges the map and the data
+    then grows past this process's map size, this process's next transaction
+    raises :py:class:`lmdb.MapResizedError`.  Call ``set_mapsize(0)`` (which
+    adopts the current size from the file) or ``set_mapsize(new_size)`` to pick
+    up the change, then retry.
 
 **32-bit processes**
 
@@ -1033,7 +1069,7 @@ This is not a concern for 64-bit processes.
 Interface
 +++++++++
 
-.. py:function:: lmdb.open(path, **kwargs)
+.. py:function:: open(path, **kwargs)
 
    Shortcut for :py:class:`Environment` constructor.
 
@@ -1072,20 +1108,22 @@ Async classes
 .. autoclass:: lmdb.aio.AsyncEnvironment
     :members: begin
 
-    All other :py:class:`Environment` methods are available as coroutines via
-    ``__getattr__`` proxy.
+    All other :py:class:`~lmdb.Environment` methods are available as
+    coroutines, except the accessors ``path()``, ``lib_version()``,
+    ``max_key_size()``, ``max_readers()`` and ``flags()``, which are called
+    directly.
 
 .. autoclass:: lmdb.aio.AsyncTransaction
     :members: cursor
 
-    All other :py:class:`Transaction` methods are available as coroutines via
-    ``__getattr__`` proxy.
+    All other :py:class:`~lmdb.Transaction` methods are available as
+    coroutines, except ``id()``, which is called directly.
 
 .. autoclass:: lmdb.aio.AsyncCursor
     :members: iternext, iternext_dup, iternext_nodup, iterprev, iterprev_dup, iterprev_nodup
 
-    All other :py:class:`Cursor` methods are available as coroutines via
-    ``__getattr__`` proxy.
+    All other :py:class:`~lmdb.Cursor` methods are available as coroutines,
+    except ``key()``, ``value()`` and ``item()``, which are called directly.
 
 Exceptions
 ##########
@@ -1117,9 +1155,10 @@ Exceptions
 .. autoclass:: lmdb.MemoryError ()
 .. autoclass:: lmdb.DiskError ()
 
-The following correspond to error codes added in LMDB 1.0.  They exist only
-when the 1.0 engine is present, so they are absent from builds made with
-``LMDB_FORCE_SYSTEM=1`` against a 0.9 system ``liblmdb``.  Use
+The following correspond to error codes added in LMDB 1.0.  With the C
+extension they exist only when the 1.0 engine is present, so they are absent
+from builds made with ``LMDB_FORCE_SYSTEM=1`` against a 0.9 system
+``liblmdb``; the CFFI variant always defines them.  Use
 ``getattr(lmdb, 'ProblemError', ())`` in an ``except`` clause if you need to
 handle them in code that must also import against such a build.
 
@@ -1153,9 +1192,9 @@ steer those reads out of bounds. py-lmdb's threat model is layered:
 - **If an unverified file is opened anyway, the protection is for the
   process, not the data.** The bundled engines carry a series of hardening patches that bound
   every structure the read and write paths consume at its point of use, so
-  traversing even a malformed file fails cleanly with
-  :py:class:`lmdb.CorruptedError` or :py:class:`lmdb.InvalidError` instead of
-  a segfault. This backstop does not weaken the rule above: it is
+  traversing even a malformed file fails cleanly with an
+  :py:class:`lmdb.Error` subclass (typically :py:class:`lmdb.CorruptedError`)
+  instead of a segfault. This backstop does not weaken the rule above: it is
   best-effort, it is absent from builds that omit the bundled patches
   (``LMDB_PURE=1``, or ``LMDB_FORCE_SYSTEM=1`` against a system
   ``liblmdb``), and it cannot make the file's contents true.
@@ -1186,10 +1225,12 @@ every tree from the committed roots, the structural bounds the engine
 enforces, key ordering and per-database page/entry counters, the absence of
 dirty markers at rest, and — the check only an offline pass can make — that
 the set of free pages and the set of reachable pages are disjoint and together
-cover the whole file. It exits ``0`` on success and ``1`` (printing each
-problem) on failure. The check is also available in Python as
-``from lmdb import verify; verify.verify(path)``, which returns a list of
-problem strings.
+cover every page up to the committed high-water mark. It exits ``0`` on success
+and ``1`` (printing each problem) on failure. The check is also available in
+Python as ``from lmdb import verify; verify.verify(path)``, which returns a
+list of problem strings (empty if the file is sound) and raises
+``verify.VerifyError`` if the file cannot be verified at all, for example
+because it is not an LMDB file or is a 32-bit or foreign-endian file.
 
 Once a file passes ``verify``, you may treat it as trusted, subject to these
 operational caveats:
@@ -1287,7 +1328,9 @@ These functions are useful for e.g. backup jobs.
       -r READ, --read=READ  Open environment read-only
       -S MAP_SIZE, --map_size=MAP_SIZE
                             Map size in megabytes (default: 10)
-      -a, --all             Make "dump" dump all databases
+      -s, --use-single-file
+                            The database was created as a single file and not a
+                            subdirectory
       -E TARGET_ENV, --target_env=TARGET_ENV
                             Target environment file for "dumpfd"
       -x, --xxd             Print values in xxd format
@@ -1411,8 +1454,8 @@ weaving a linked list into all ``PyObject`` structures. This avoids the need to
 maintain a separate heap-allocated structure, or produce excess ``weakref``
 objects (which internally simply manage their own lists).
 
-With CFFI this isn't possible. Instead each object has a ``_deps`` dict that
-maps dependent object IDs to the corresponding objects. Weakrefs are avoided
+With CFFI this isn't possible. Instead each object has a ``_deps`` set
+holding its dependent objects. Weakrefs are avoided
 since they are very inefficient on PyPy. Prior to invalidation ``_deps`` is
 walked to notify each dependent that the resource is about to disappear.
 

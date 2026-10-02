@@ -5,208 +5,208 @@ Features
 --------
 
 - py-lmdb now bundles both LMDB release lines and links them into a single
-    extension module: LMDB 0.9.36 (data format v1) and LMDB 1.0.2 (data
-    format v3).  The two formats are mutually unreadable, so each
-    ``Environment`` is bound to one engine at construction: an existing
-    database is opened with whatever engine matches its on-disk format, and a
-    new one uses LMDB 0.9 unless told otherwise.  Databases written by either
-    version can therefore be opened without the caller doing anything.
+  extension module: LMDB 0.9.36 (data format v1) and LMDB 1.0.2 (data
+  format v3).  The two formats are mutually unreadable, so each
+  ``Environment`` is bound to one engine at construction: an existing
+  database is opened with whatever engine matches its on-disk format, and a
+  new one uses LMDB 0.9 unless told otherwise.  Databases written by either
+  version can therefore be opened without the caller doing anything.
 
 - Update the bundled LMDB 0.9 tree from 0.9.35 to 0.9.36 (2026-08-06).
-    It brings ITS#7772 (a sub-page is no longer grown when the data being
-    re-added already fits), ITS#9388 (``stat()`` reported wrong
-    ``branch_pages``/``leaf_pages`` for ``dupsort`` databases), ITS#8335
-    (input validation for ``MDB_MULTIPLE`` puts), ITS#10454 (metapage sync on
-    macOS), ITS#8590 (``SIGPIPE`` handling in the compacting copy on macOS)
-    and ITS#10522, which is a visible change of behaviour — see below.  It
-    also retires two of py-lmdb's own patches: ``fix-win-flush-large-write``
-    was contributed upstream and landed as ITS#10538, and ``fix-large-write``
-    is reduced to its compacting-copy hunk now that ITS#10054 has fixed
-    ``mdb_page_flush``.
+  It brings ITS#7772 (a sub-page is no longer grown when the data being
+  re-added already fits), ITS#9388 (``stat()`` reported wrong
+  ``branch_pages``/``leaf_pages`` for ``dupsort`` databases), ITS#8335
+  (input validation for ``MDB_MULTIPLE`` puts), ITS#10454 (metapage sync on
+  macOS), ITS#8590 (``SIGPIPE`` handling in the compacting copy on macOS)
+  and ITS#10522, which is a visible change of behaviour — see below.  It
+  also retires two of py-lmdb's own patches: ``fix-win-flush-large-write``
+  was contributed upstream and landed as ITS#10538, and ``fix-large-write``
+  is reduced to its compacting-copy hunk now that ITS#10054 has fixed
+  ``mdb_page_flush``.
 
 - Update the bundled LMDB 1.0 tree from 1.0.1 to 1.0.2 (2026-09-08).  Its
-    only code change is ITS#10575, which fixes committing a write transaction
-    under ``writemap=True`` on Windows with the 1.0 engine.  The commit failed
-    with "The handle is invalid" unless ``sync=False`` or
-    ``metasync=False`` was also given (issue #486).  Every py-lmdb patch is
-    still needed on 1.0.2; the series was regenerated only for shifted line
-    numbers.
+  only code change is ITS#10575, which fixes committing a write transaction
+  under ``writemap=True`` on Windows with the 1.0 engine.  The commit failed
+  with "The handle is invalid" unless ``sync=False`` or
+  ``metasync=False`` was also given (issue #486).  Every py-lmdb patch is
+  still needed on 1.0.2; the series was regenerated only for shifted line
+  numbers.
 
 - New ``lib_version=`` argument to ``lmdb.open()``/``Environment()`` selects
-    the LMDB version for a *new* environment (``0`` for 0.9.x, ``1`` for
-    1.0.x).  For an existing environment the file's own format wins.  New
-    ``Environment.lib_version()`` reports the engine backing an environment,
-    and ``lmdb.version()`` gained a ``lib_version=`` argument to report either
-    bundled version.  Setting ``LMDB_DEFAULT_LIB_VERSION`` changes the default
-    for new environments process-wide.
+  the LMDB version for a *new* environment (``0`` for 0.9.x, ``1`` for
+  1.0.x).  For an existing environment the file's own format wins.  New
+  ``Environment.lib_version()`` reports the engine backing an environment,
+  and ``lmdb.version()`` gained a ``lib_version=`` argument to report either
+  bundled version.  Setting ``LMDB_DEFAULT_LIB_VERSION`` changes the default
+  for new environments process-wide.
 
 - New exception classes for the error codes LMDB 1.0 adds: ``ProblemError``,
-    ``BadChecksumError``, ``CryptoFailError`` and ``EnvEncryptionError``.
-    LMDB 1.0's ``MDB_IS_READONLY`` maps to the existing ``ReadonlyError``,
-    which 0.9 raises as ``EACCES``, so writing in a read-only transaction
-    raises the same class on both engines.
+  ``BadChecksumError``, ``CryptoFailError`` and ``EnvEncryptionError``.
+  LMDB 1.0's ``MDB_IS_READONLY`` maps to the existing ``ReadonlyError``,
+  which 0.9 raises as ``EACCES``, so writing in a read-only transaction
+  raises the same class on both engines.
 
 - New offline verifier for the "verify-then-trust" model:
-    ``python -m lmdb verify <path>``, and the underlying
-    ``lmdb.verify.verify(path)``.  It is a pure-Python byte walker that never
-    hands the file to the C engine, so it is safe to run on a data file
-    from an untrusted source before opening it.  It uses a global view of the
-    file to check every invariant the write paths assume — meta-page
-    selection, a full tree walk from the committed roots, structural bounds,
-    key ordering, per-database counters, the absence of dirty markers at
-    rest, and that the free and reachable page sets are disjoint and cover
-    the file.  The last of these catches a coherent forged free-database
-    record that names a genuinely live page, the residual left over from the
-    ``validate-freedb-record`` engine patch and issue #484 that no
-    per-transaction check can reach.  Works on every build (patched, pure,
-    system, cffi); assumes a 64-bit, native-byte-order file and reports
-    anything else as unsupported.  See "Trust model and offline verification"
-    in the documentation, which also states py-lmdb's threat model and the
-    tool's operational caveats (verify a private copy; discard a supplied
-    lock file; trust extends to every later co-writer) for the first time in
-    user-facing form.
+  ``python -m lmdb verify <path>``, and the underlying
+  ``lmdb.verify.verify(path)``.  It is a pure-Python byte walker that never
+  hands the file to the C engine, so it is safe to run on a data file
+  from an untrusted source before opening it.  It uses a global view of the
+  file to check every invariant the write paths assume — meta-page
+  selection, a full tree walk from the committed roots, structural bounds,
+  key ordering, per-database counters, the absence of dirty markers at
+  rest, and that the free and reachable page sets are disjoint and cover
+  the file.  The last of these catches a coherent forged free-database
+  record that names a genuinely live page, the residual left over from the
+  ``validate-freedb-record`` engine patch and issue #484 that no
+  per-transaction check can reach.  Works on every build (patched, pure,
+  system, cffi); assumes a 64-bit, native-byte-order file and reports
+  anything else as unsupported.  See "Trust model and offline verification"
+  in the documentation, which also states py-lmdb's threat model and the
+  tool's operational caveats (verify a private copy; discard a supplied
+  lock file; trust extends to every later co-writer) for the first time in
+  user-facing form.
 
 Bug fixes
 ---------
 
 - ``Environment.dbs()`` strips the trailing NUL that LMDB 1.0 stores with
-    sub-database names, so it returns the same list on either engine.
+  sub-database names, so it returns the same list on either engine.
 
 - Building against a system LMDB 1.0.x (``LMDB_FORCE_SYSTEM=1``) no longer
-    fails the test suite (issue #493).  2.3.0 raised a plain ``lmdb.Error``
-    rather than ``ReadonlyError`` for a write in a read-only transaction, and
-    ``dbs()`` returned names with a trailing NUL.  Both are fixed by the 1.0
-    support above.
+  fails the test suite (issue #493).  2.3.0 raised a plain ``lmdb.Error``
+  rather than ``ReadonlyError`` for a write in a read-only transaction, and
+  ``dbs()`` returned names with a trailing NUL.  Both are fixed by the 1.0
+  support above.
 
 - The guard against opening one environment twice in a process (#230, added
-    in 2.0.0) now compares files rather than paths (issue #491).  It keyed on
-    ``os.path.realpath()``, so an environment deleted and re-created at the
-    same path could not be opened while an ``Environment`` on the old,
-    deleted files was still open -- a transaction still reading them, say --
-    although the two share nothing.  Each environment is now identified by
-    the ``(st_dev, st_ino)`` of its data file and of its lock file, so that
-    case is allowed, while the same files reached through a hard link, which
-    the path check missed, are now refused.  An environment whose data file
-    alone was replaced is still refused: it would share the lock file, and
-    with it the reader table and ``fcntl()`` locks, of the one still open.
-    Where a filesystem reports no inode number the resolved path is used as
-    before.
+  in 2.0.0) now compares files rather than paths (issue #491).  It keyed on
+  ``os.path.realpath()``, so an environment deleted and re-created at the
+  same path could not be opened while an ``Environment`` on the old,
+  deleted files was still open -- a transaction still reading them, say --
+  although the two share nothing.  Each environment is now identified by
+  the ``(st_dev, st_ino)`` of its data file and of its lock file, so that
+  case is allowed, while the same files reached through a hard link, which
+  the path check missed, are now refused.  An environment whose data file
+  alone was replaced is still refused: it would share the lock file, and
+  with it the reader table and ``fcntl()`` locks, of the one still open.
+  Where a filesystem reports no inode number the resolved path is used as
+  before.
 
 - An ``MDB_DUPFIXED`` database with 1-byte values no longer fails with
-    ``MDB_CORRUPTED`` from the fifth duplicate onwards (issue #481,
-    a regression in 2.3.0 affecting both engines).  py-lmdb's
-    ``validate-subpage-bounds`` hardening patch bounded a sub-page's
-    ``mp_upper`` by the sub-page size, which does not hold for a LEAF2
-    page: ``mdb_node_add`` adjusts ``mp_upper`` by
-    ``ksize - sizeof(indx_t)``, a negative delta once the fixed key size
-    is below ``sizeof(indx_t)``, so it legitimately grows past the
-    sub-page.  Unpatched LMDB was never affected.
+  ``MDB_CORRUPTED`` from the fifth duplicate onwards (issue #481,
+  a regression in 2.3.0 affecting both engines).  py-lmdb's
+  ``validate-subpage-bounds`` hardening patch bounded a sub-page's
+  ``mp_upper`` by the sub-page size, which does not hold for a LEAF2
+  page: ``mdb_node_add`` adjusts ``mp_upper`` by
+  ``ksize - sizeof(indx_t)``, a negative delta once the fixed key size
+  is below ``sizeof(indx_t)``, so it legitimately grows past the
+  sub-page.  Unpatched LMDB was never affected.
 
-    **The defect did not corrupt data.**  It rejected valid writes rather
-    than mis-performing them: the check runs before the page is modified,
-    and the error marks the transaction unusable, so the affected
-    transaction aborts with nothing committed.  Databases were left byte
-    for byte as they were, remained readable, and 1-byte ``MDB_DUPFIXED``
-    data written by an unaffected build still read back correctly on an
-    affected one — only the write path consulted the faulty check.
+  **The defect did not corrupt data.**  It rejected valid writes rather
+  than mis-performing them: the check runs before the page is modified,
+  and the error marks the transaction unusable, so the affected
+  transaction aborts with nothing committed.  Databases were left byte
+  for byte as they were, remained readable, and 1-byte ``MDB_DUPFIXED``
+  data written by an unaffected build still read back correctly on an
+  affected one — only the write path consulted the faulty check.
 
 - New ``validate-freedb-record`` hardening patch for both bundled engines:
-    ``mdb_page_alloc()`` trusted a free-database record's structure
-    completely.  Its element count was never checked against the record's
-    node size, so a forged count read past the end of the node
-    (``mdb_midl_xmerge`` SIGBUS) and merged garbage page numbers into the
-    in-memory free list.  A page number taken from a record was never
-    range-checked either — the reuse path jumps past the bound the
-    fresh-page path applies — so a crafted number could be handed out
-    directly: under ``MDB_WRITEMAP`` the store lands outside the map
-    (SIGSEGV), and without it ``mdb_page_flush()`` later pwrites at an
-    arbitrary file offset, committing silently and growing the file
-    without limit.  The record's node size must now equal
-    ``(count+1)*sizeof(pgno)``, and a reused page number must fall within
-    ``[NUM_METAS, next_pgno)`` with room for the whole run.  A forged
-    record listing the same page twice also tripped an assertion in
-    ``mdb_page_dirty()`` (``abort()``); it now returns ``MDB_CORRUPTED``.
-    As with the rest of the series this matters only if you open a database
-    file you do not trust.  These checks are structural only: a record that
-    lists a genuinely live page in range still passes, which is left to an
-    offline verifier.
+  ``mdb_page_alloc()`` trusted a free-database record's structure
+  completely.  Its element count was never checked against the record's
+  node size, so a forged count read past the end of the node
+  (``mdb_midl_xmerge`` SIGBUS) and merged garbage page numbers into the
+  in-memory free list.  A page number taken from a record was never
+  range-checked either — the reuse path jumps past the bound the
+  fresh-page path applies — so a crafted number could be handed out
+  directly: under ``MDB_WRITEMAP`` the store lands outside the map
+  (SIGSEGV), and without it ``mdb_page_flush()`` later pwrites at an
+  arbitrary file offset, committing silently and growing the file
+  without limit.  The record's node size must now equal
+  ``(count+1)*sizeof(pgno)``, and a reused page number must fall within
+  ``[NUM_METAS, next_pgno)`` with room for the whole run.  A forged
+  record listing the same page twice also tripped an assertion in
+  ``mdb_page_dirty()`` (``abort()``); it now returns ``MDB_CORRUPTED``.
+  As with the rest of the series this matters only if you open a database
+  file you do not trust.  These checks are structural only: a record that
+  lists a genuinely live page in range still passes, which is left to an
+  offline verifier.
 
 - New ``cve-2019-16225-validate-mp-txnid`` hardening patch for the bundled
-    LMDB 1.0 engine, restoring a protection 0.9 has had since CVE-2019-16225.
-    0.9 rejects a mapped page claiming ``P_DIRTY``; 1.0 removed that flag and
-    derives dirtiness from a new ``mp_txnid`` page field, which no read path
-    validated.  ``mdb_page_touch()`` skips the copy-on-write for any page
-    whose ``mp_txnid`` is new enough, so a crafted value made it write to a
-    page it does not own: without ``MDB_WRITEMAP`` that is a write through a
-    read-only mapping (SIGSEGV), and with it the page is silently modified in
-    place.  The 0.9 engine was never affected.  As with the rest of the
-    series this matters only if you open a database file you do not trust.
+  LMDB 1.0 engine, restoring a protection 0.9 has had since CVE-2019-16225.
+  0.9 rejects a mapped page claiming ``P_DIRTY``; 1.0 removed that flag and
+  derives dirtiness from a new ``mp_txnid`` page field, which no read path
+  validated.  ``mdb_page_touch()`` skips the copy-on-write for any page
+  whose ``mp_txnid`` is new enough, so a crafted value made it write to a
+  page it does not own: without ``MDB_WRITEMAP`` that is a write through a
+  read-only mapping (SIGSEGV), and with it the page is silently modified in
+  place.  The 0.9 engine was never affected.  As with the rest of the
+  series this matters only if you open a database file you do not trust.
 
-    One case is not covered, under ``MDB_WRITEMAP``; see the scope note at
-    the end of this section.
+  One case is not covered, under ``MDB_WRITEMAP``; see the scope note at
+  the end of this section.
 
 - New ``validate-ovpage-free`` hardening patch for both bundled engines.
-    ``mdb_ovpage_free()`` took the overflow extent from the page header and
-    used it as an allocation size, as the number of page numbers appended to
-    the transaction's free list, and as a loop bound, without bounding it.
-    ``validate-overflow-pages`` covered the two other sites reading that
-    field but not this one, so deleting a record whose value lives on
-    overflow pages reached it unchecked.  A crafted ``data.mdb`` could
-    segfault the process outright, but the more serious case is a merely
-    large count: the delete committed silently, leaving the free database
-    holding page numbers past the end of the file for a later transaction to
-    hand out.  As with the rest of the series this matters only if you open
-    a database file you do not trust.
+  ``mdb_ovpage_free()`` took the overflow extent from the page header and
+  used it as an allocation size, as the number of page numbers appended to
+  the transaction's free list, and as a loop bound, without bounding it.
+  ``validate-overflow-pages`` covered the two other sites reading that
+  field but not this one, so deleting a record whose value lives on
+  overflow pages reached it unchecked.  A crafted ``data.mdb`` could
+  segfault the process outright, but the more serious case is a merely
+  large count: the delete committed silently, leaving the free database
+  holding page numbers past the end of the file for a later transaction to
+  hand out.  As with the rest of the series this matters only if you open
+  a database file you do not trust.
 
 - New ``validate-md-pad`` hardening patch for both bundled engines: the
-    LEAF2 fixed key size was bounded only on the page (``mp_pad``), never on
-    the database record (``md_pad``) that every LEAF2 computation actually
-    uses.  A crafted ``data.mdb`` could set it arbitrarily while leaving
-    every page internally consistent, turning it into an out-of-bounds read
-    that silently returned adjacent mapping contents to the caller, and — via
-    ``mdb_node_add`` — an out-of-bounds write.  The key size is now bounded
-    both on its own and against the number of keys the page says it holds,
-    since ``LEAF2KEY()`` multiplies the two: a size that fits the page still
-    addresses far outside it partway through a full page.  As with the rest
-    of the series this matters only if you open a database file you do not
-    trust.  Reproducer in ``misc/md_pad_repro.py``.
+  LEAF2 fixed key size was bounded only on the page (``mp_pad``), never on
+  the database record (``md_pad``) that every LEAF2 computation actually
+  uses.  A crafted ``data.mdb`` could set it arbitrarily while leaving
+  every page internally consistent, turning it into an out-of-bounds read
+  that silently returned adjacent mapping contents to the caller, and — via
+  ``mdb_node_add`` — an out-of-bounds write.  The key size is now bounded
+  both on its own and against the number of keys the page says it holds,
+  since ``LEAF2KEY()`` multiplies the two: a size that fits the page still
+  addresses far outside it partway through a full page.  As with the rest
+  of the series this matters only if you open a database file you do not
+  trust.  Reproducer in ``misc/md_pad_repro.py``.
 
 - **Scope of the hardening series: it does not extend to**
-    ``writemap=True``.  py-lmdb's bundled patches harden LMDB against
-    hostile or damaged database files, which upstream LMDB does not treat
-    as an attack surface.  That hardening covers the default configuration.
-    It does *not* cover ``MDB_WRITEMAP``, on either engine: under
-    ``writemap=True`` a crafted page can still be taken for one the current
-    transaction already dirtied, which bypasses copy-on-write, so writes
-    land directly on pages of the previous snapshot and ``abort()`` does not
-    roll them back.  Both engines skip the dirty-page lookup that would
-    distinguish the two, so nothing in the read path can tell them apart.
-    0.9 is affected across the board here; 1.0 only for a page forged to
-    exactly the next transaction's id.  If you open files you do not
-    control, leave ``writemap`` at its default of ``False``.  Tracked in
-    issue #484; the analysis is in ``lib1/py-lmdb/PATCH-STATUS.md``.
+  ``writemap=True``.  py-lmdb's bundled patches harden LMDB against
+  hostile or damaged database files, which upstream LMDB does not treat
+  as an attack surface.  That hardening covers the default configuration.
+  It does *not* cover ``MDB_WRITEMAP``, on either engine: under
+  ``writemap=True`` a crafted page can still be taken for one the current
+  transaction already dirtied, which bypasses copy-on-write, so writes
+  land directly on pages of the previous snapshot and ``abort()`` does not
+  roll them back.  Both engines skip the dirty-page lookup that would
+  distinguish the two, so nothing in the read path can tell them apart.
+  0.9 is affected across the board here; 1.0 only for a page forged to
+  exactly the next transaction's id.  If you open files you do not
+  control, leave ``writemap`` at its default of ``False``.  Tracked in
+  issue #484; the analysis is in ``lib1/py-lmdb/PATCH-STATUS.md``.
 
 Behaviour changes
 -----------------
 
 - Storing a **zero-length value** in a ``dupsort`` database now raises
-    ``BadValsizeError`` on the 0.9 engine, where LMDB 0.9.35 and earlier
-    accepted it.  This is upstream ITS#10522, and it removes a divergence
-    rather than creating one: LMDB 1.0 already rejected it, so both engines
-    now behave the same.  Zero-length values in non-``dupsort`` databases are
-    unaffected and remain valid.
+  ``BadValsizeError`` on the 0.9 engine, where LMDB 0.9.35 and earlier
+  accepted it.  This is upstream ITS#10522, and it removes a divergence
+  rather than creating one: LMDB 1.0 already rejected it, so both engines
+  now behave the same.  Zero-length values in non-``dupsort`` databases are
+  unaffected and remain valid.
 
 Notes
 -----
 
 - ``LMDB_FORCE_SYSTEM=1`` still builds a single engine against the system
-    liblmdb; ``lib_version=`` then accepts only that version.
+  liblmdb; ``lib_version=`` then accepts only that version.
 
 - The py-lmdb hardening patch series has been ported to the 1.0 tree.  Three
-    patches are not carried there: ``fix-large-write``'s remaining hunk landed
-    upstream as ITS#9223, LMDB 1.0's incremental file growth removes the need
-    for the Windows sparse-file patch, and the CVE-2019-16225 patch keys on a
-    page flag 1.0 no longer has.  See ``lib1/py-lmdb/PATCH-STATUS.md``.
+  patches are not carried there: ``fix-large-write``'s remaining hunk landed
+  upstream as ITS#9223, LMDB 1.0's incremental file growth removes the need
+  for the Windows sparse-file patch, and the CVE-2019-16225 patch keys on a
+  page flag 1.0 no longer has.  See ``lib1/py-lmdb/PATCH-STATUS.md``.
 
 2026-07-12 2.3.0
 #################
@@ -215,84 +215,84 @@ Bug fixes
 ---------
 
 - ``lmdb.aio``: an async write transaction is now pinned to a private
-    single-thread executor, so its ``begin``, operations, and
-    ``commit``/``abort`` all run on one OS thread. Previously they were
-    dispatched across the shared, multi-threaded default executor, which could
-    release LMDB's thread-bound robust write mutex on the wrong thread (the
-    failure mode of #465). ``AsyncCursor``/``AsyncEnvironment`` close on
-    context exit now also acquire the lock and run on the executor, so closing
-    can no longer race an in-flight operation on the same transaction. (#471)
+  single-thread executor, so its ``begin``, operations, and
+  ``commit``/``abort`` all run on one OS thread. Previously they were
+  dispatched across the shared, multi-threaded default executor, which could
+  release LMDB's thread-bound robust write mutex on the wrong thread (the
+  failure mode of #465). ``AsyncCursor``/``AsyncEnvironment`` close on
+  context exit now also acquire the lock and run on the executor, so closing
+  can no longer race an in-flight operation on the same transaction. (#471)
 
 - Fix committing values larger than ~2 GiB. A single LMDB value is written
-    in one call, exceeding per-call platform write limits: on POSIX,
-    ``write()`` returns a short count that was treated as fatal, so the
-    commit failed with ``mdb_txn_commit: Input/output error``; the bundled
-    liblmdb now resumes after short writes. On Windows, the compacting-copy
-    writer thread passed the full length to ``WriteFile``, whose 32-bit
-    length truncates; it now caps each write at 1 GiB. (#474; patch to the
-    bundled liblmdb — not applied when building with ``LMDB_PURE`` or a
-    system liblmdb)
+  in one call, exceeding per-call platform write limits: on POSIX,
+  ``write()`` returns a short count that was treated as fatal, so the
+  commit failed with ``mdb_txn_commit: Input/output error``; the bundled
+  liblmdb now resumes after short writes. On Windows, the compacting-copy
+  writer thread passed the full length to ``WriteFile``, whose 32-bit
+  length truncates; it now caps each write at 1 GiB. (#474; patch to the
+  bundled liblmdb — not applied when building with ``LMDB_PURE`` or a
+  system liblmdb)
 
 - Fix silent data loss on Windows committing values near the 4 GiB maximum.
-    ``mdb_page_flush`` wrote each overflow extent with a single ``WriteFile``
-    whose 32-bit length truncates — an extent of exactly 4 GiB wrote nothing
-    at all, committing a value of zeroes. Writes are now chunked with the
-    bytes-written count checked. (#476; patch to the bundled liblmdb — not
-    applied when building with ``LMDB_PURE`` or a system liblmdb)
+  ``mdb_page_flush`` wrote each overflow extent with a single ``WriteFile``
+  whose 32-bit length truncates — an extent of exactly 4 GiB wrote nothing
+  at all, committing a value of zeroes. Writes are now chunked with the
+  bytes-written count checked. (#476; patch to the bundled liblmdb — not
+  applied when building with ``LMDB_PURE`` or a system liblmdb)
 
 - Fix 32-bit overflow in the bundled liblmdb's overflow-page byte-length
-    math. For values within one page of the 4 GiB maximum, the products
-    ``num * me_psize`` (dirty-page spill) and ``me_psize * (mp_pages - 1)``
-    (compacting copy) wrapped on 64-bit builds, truncating the copied value
-    or crashing. Both multiplications are widened to ``size_t``. (#473;
-    patch to the bundled liblmdb — not applied when building with
-    ``LMDB_PURE`` or a system liblmdb)
+  math. For values within one page of the 4 GiB maximum, the products
+  ``num * me_psize`` (dirty-page spill) and ``me_psize * (mp_pages - 1)``
+  (compacting copy) wrapped on 64-bit builds, truncating the copied value
+  or crashing. Both multiplications are widened to ``size_t``. (#473;
+  patch to the bundled liblmdb — not applied when building with
+  ``LMDB_PURE`` or a system liblmdb)
 
 - Fix ``Environment.set_mapsize()`` invalidating open database handles.
-    Since 2.2.0 (#443), calling ``set_mapsize()`` between transactions
-    invalidated all named- and main-database handles, so a handle opened
-    before the resize raised ``lmdb.Error: Database handle belongs to
-    another environment`` (CPython) or an invalid-dbi ``TypeError`` (CFFI)
-    on next use. Database handles hold only an integer ``MDB_dbi`` that
-    stays valid across the remap, so they are now preserved; only open
-    transactions and cursors are invalidated. (#475)
+  Since 2.2.0 (#443), calling ``set_mapsize()`` between transactions
+  invalidated all named- and main-database handles, so a handle opened
+  before the resize raised ``lmdb.Error: Database handle belongs to
+  another environment`` (CPython) or an invalid-dbi ``TypeError`` (CFFI)
+  on next use. Database handles hold only an integer ``MDB_dbi`` that
+  stays valid across the remap, so they are now preserved; only open
+  transactions and cursors are invalidated. (#475)
 
 - Fix races between ``Environment.set_mapsize()`` and concurrent operations
-    on other threads. An operation starting during the resize's remap window
-    could touch the old memory map after ``munmap`` (crash or corruption); a
-    write-transaction abort racing the resize could deadlock it or leave a
-    transaction alive at remap time (failing the resize and invalidating the
-    environment); and in the CFFI backend a write transaction beginning
-    during the resize could orphan its thread-id record, deadlocking a later
-    ``close()``. LMDB operations that would race a resize now fail fast with
-    ``lmdb.Error`` instead; retry them after the resize completes. The CFFI
-    backend now also serializes ``Transaction.get``/``put``/``delete``/
-    ``stat``/``drop`` and the environment-level ``stat``/``info``/``sync``/
-    ``copy``/``copyfd``/``readers``/``reader_check`` against
-    ``close()``/``set_mapsize()``, closing long-standing crash races with
-    ``close()`` as well. Operations racing a ``set_mapsize()`` on another
-    thread now raise a transient ``lmdb.Error`` (CPython) or the CFFI
-    invalid-handle ``TypeError`` instead of crashing or deadlocking. (#475)
+  on other threads. An operation starting during the resize's remap window
+  could touch the old memory map after ``munmap`` (crash or corruption); a
+  write-transaction abort racing the resize could deadlock it or leave a
+  transaction alive at remap time (failing the resize and invalidating the
+  environment); and in the CFFI backend a write transaction beginning
+  during the resize could orphan its thread-id record, deadlocking a later
+  ``close()``. LMDB operations that would race a resize now fail fast with
+  ``lmdb.Error`` instead; retry them after the resize completes. The CFFI
+  backend now also serializes ``Transaction.get``/``put``/``delete``/
+  ``stat``/``drop`` and the environment-level ``stat``/``info``/``sync``/
+  ``copy``/``copyfd``/``readers``/``reader_check`` against
+  ``close()``/``set_mapsize()``, closing long-standing crash races with
+  ``close()`` as well. Operations racing a ``set_mapsize()`` on another
+  thread now raise a transient ``lmdb.Error`` (CPython) or the CFFI
+  invalid-handle ``TypeError`` instead of crashing or deadlocking. (#475)
 
 Improvements
 ------------
 
 - The unit test suite is now type-checked in CI with both mypy and pyright,
-    and the shipped stubs are validated against the runtime module with
-    stubtest, so the public typed API stays usable regardless of which type
-    checker downstream users run. (#469, #470)
+  and the shipped stubs are validated against the runtime module with
+  stubtest, so the public typed API stays usable regardless of which type
+  checker downstream users run. (#469, #470)
 
 - Add missing ``lmdb.aio.AsyncEnvironment`` method stubs.
-    (#468, contributed by jorenham)
+  (#468, contributed by jorenham)
 
 - ``lmdb.version(subpatch=True)`` is now correctly typed via overloads,
-    returning a 4-tuple instead of a 3-tuple. (#469)
+  returning a 4-tuple instead of a 3-tuple. (#469)
 
 - The CFFI backend's internal reference-holding attributes ``Transaction.env``,
-    ``Cursor.db``, and ``Cursor.txn`` are now private (``_pyenv``, ``_pydb``,
-    ``_pytxn``). They were never exposed by the CPython extension, so this
-    aligns the two backends. These were undocumented implementation details.
-    (#469, #470)
+  ``Cursor.db``, and ``Cursor.txn`` are now private (``_pyenv``, ``_pydb``,
+  ``_pytxn``). They were never exposed by the CPython extension, so this
+  aligns the two backends. These were undocumented implementation details.
+  (#469, #470)
 
 2026-06-03 2.2.1
 #################
@@ -301,44 +301,44 @@ Improvements
 ------------
 
 - ``lmdb.aio`` async wrapper methods (on ``AsyncEnvironment``,
-    ``AsyncTransaction``, and ``AsyncCursor``) are now real class
-    attributes rather than synthesized by ``__getattr__``, making them
-    visible to ``dir()``, ``inspect.signature()``, ``help()``, IPython,
-    and stubtest. Non-callable attributes still proxy through.
-    (#460, contributed by jorenham)
+  ``AsyncTransaction``, and ``AsyncCursor``) are now real class
+  attributes rather than synthesized by ``__getattr__``, making them
+  visible to ``dir()``, ``inspect.signature()``, ``help()``, IPython,
+  and stubtest. Non-callable attributes still proxy through.
+  (#460, contributed by jorenham)
 
 - Added type stubs for the ``lmdb.aio`` module.
-    (#455, contributed by jorenham)
+  (#455, contributed by jorenham)
 
 Fixes
 -----
 
 - Fix a segmentation fault on Linux/aarch64 when an ``Environment`` is
-    closed from a different thread than the one holding an active write
-    transaction. ``Environment.close()`` now waits for the owning thread
-    to release the write transaction before unmapping the lock file.
-    (#465, reported by sdvillal)
+  closed from a different thread than the one holding an active write
+  transaction. ``Environment.close()`` now waits for the owning thread
+  to release the write transaction before unmapping the lock file.
+  (#465, reported by sdvillal)
 
 - Reject adversarial on-disk values that could overflow size arithmetic
-    or cause implementation-defined narrowing of ``mv_size`` when reading
-    crafted databases. (#462, #463; patches to the bundled liblmdb — not
-    applied when building with ``LMDB_PURE`` or a system liblmdb)
+  or cause implementation-defined narrowing of ``mv_size`` when reading
+  crafted databases. (#462, #463; patches to the bundled liblmdb — not
+  applied when building with ``LMDB_PURE`` or a system liblmdb)
 
 - Fix crashes on out-of-memory conditions in the CPython extension's
-    error paths. (#453)
+  error paths. (#453)
 
 - Fix and modernize the type stubs, including ``__all__`` exports and the
-    ``Cursor.iter*`` parameter defaults in ``__init__.pyi``.
-    (#454, #457, #459, contributed by jorenham)
+  ``Cursor.iter*`` parameter defaults in ``__init__.pyi``.
+  (#454, #457, #459, contributed by jorenham)
 
 Other
 -----
 
 - Remove remaining Python 2 compatibility code.
-    (#456, contributed by jorenham)
+  (#456, contributed by jorenham)
 
 - Run the test suite natively on Linux/aarch64 in CI; previously aarch64
-    wheels were built but never tested. (#465)
+  wheels were built but never tested. (#465)
 
 
 2026-03-29 2.2.0
@@ -348,32 +348,32 @@ New features
 ------------
 
 - New ``lmdb.aio`` module providing asyncio support with
-    ``AsyncEnvironment`` and ``AsyncTransaction``. (#434)
+  ``AsyncEnvironment`` and ``AsyncTransaction``. (#434)
 
 - ``Environment.dbs()`` lists all named databases in an environment.
-    (#253, #438)
+  (#253, #438)
 
 - ``Cursor.getmulti()`` accepts ``values=False`` for batch key-existence
-    checks without fetching values. (#435)
+  checks without fetching values. (#435)
 
 - ``Transaction.stat()`` now defaults to the main database when no ``db``
-    argument is given. (#366, #439)
+  argument is given. (#366, #439)
 
 - ``Environment.set_mapsize()`` now safely invalidates open transactions
-    and cursors before remapping, preventing use-after-free crashes. (#443)
+  and cursors before remapping, preventing use-after-free crashes. (#443)
 
 - Enable sparse files on Windows so NTFS does not preallocate the full
-    ``map_size`` on disk. (#444; patch to the bundled liblmdb — not applied
-    when building with ``LMDB_PURE`` or a system liblmdb)
+  ``map_size`` on disk. (#444; patch to the bundled liblmdb — not applied
+  when building with ``LMDB_PURE`` or a system liblmdb)
 
 Bug fixes
 ---------
 
 - Fix type stubs: return types now use ``Union[bytes, memoryview]`` to
-    reflect the ``buffers=`` parameter, and ``dbs()`` is included. (#448, #449)
+  reflect the ``buffers=`` parameter, and ``dbs()`` is included. (#448, #449)
 
 - Declare ``python_requires='>=3.9'`` so pip skips this package on
-    Python 2. (#447)
+  Python 2. (#447)
 
 Documentation
 -------------
@@ -396,15 +396,15 @@ Other
 -----
 
 - Add LMDB data layout validation tests and patched/pure equivalence
-    checks. (#433)
+  checks. (#433)
 
 2026-03-19 2.1.1
 ################
 
 - Fix false `MDB_CORRUPTED` error when overwriting values larger than the page
-    size (overflow/bigdata values) with `txn.put(key, value, overwrite=True)`.
-    Two hardening checks from 2.1.0 did not account for `F_BIGDATA` nodes where
-    `NODEDSZ()` returns the logical data size, not the on-page size. (#431)
+  size (overflow/bigdata values) with `txn.put(key, value, overwrite=True)`.
+  Two hardening checks from 2.1.0 did not account for `F_BIGDATA` nodes where
+  `NODEDSZ()` returns the logical data size, not the on-page size. (#431)
 
 2026-03-19 2.1.0
 ################
@@ -425,58 +425,58 @@ when building with `LMDB_PURE` or against a system liblmdb** — such builds
 remain vulnerable.
 
 - **CVE-2019-16224**: heap buffer overflow via `MDB_DUPFIXED` without
-    `MDB_DUPSORT` in on-disk `md_flags`. (#429)
+  `MDB_DUPSORT` in on-disk `md_flags`. (#429)
 
 - **CVE-2019-16225**: `SIGSEGV` from `P_DIRTY` flag set on mmap'd disk pages,
-    causing `mdb_page_touch()` to skip copy-on-write. (#429)
+  causing `mdb_page_touch()` to skip copy-on-write. (#429)
 
 - **CVE-2019-16226**: out-of-bounds `memmove` in `mdb_node_del` via corrupt
-    `mn_hi` making `NODEDSZ()` huge. (#429)
+  `mn_hi` making `NODEDSZ()` huge. (#429)
 
 - **CVE-2019-16227**: NULL pointer dereference of `mc_xcursor` when
-    `F_DUPDATA` is set on a node in a non-DUPSORT database. (#429)
+  `F_DUPDATA` is set on a node in a non-DUPSORT database. (#429)
 
 - **CVE-2019-16228**: divide-by-zero from zero `mm_psize` in meta page
-    header. (#429)
+  header. (#429)
 
 - **13 additional hardening patches** from variant analysis of the same code
-    (#430), including:
+  (#430), including:
 
-    - Validate `mp_lower`/`mp_upper` bounds on every page fetch — prevents
-      `NUMKEYS()` unsigned wrap and `SIZELEFT()` underflow.
-    - Bounds-check `NODEDSZ()` in `mdb_node_read`, `mdb_cursor_put`, and
-      `mdb_page_split` — prevents OOB reads and heap overflows from corrupt
-      node sizes.
-    - Validate DUPSORT sub-page headers before copying — prevents `memcpy`
-      size underflow (unsigned wrap to huge value).
-    - Check `NODEDSZ >= sizeof(MDB_db)` before `memcpy` in
-      `mdb_xcursor_init1` — prevents read past node boundary.
-    - Validate LEAF2 `mp_pad` (key size) — zero or huge values cause OOB
-      via `LEAF2KEY()`.
-    - Guard `mc_xcursor` NULL in `MDB_GET_CURRENT` and `_mdb_cursor_del` —
-      two call sites missed by the CVE-2019-16227 fix.
-    - Guard `nsize` underflow in `mdb_node_shrink`.
-    - Validate overflow page extent (`pgno + mp_pages`) stays within the
-      database.
-    - Reject meta page numbers (0, 1) as B-tree roots.
-    - Validate `md_depth <= CURSOR_STACK` to prevent stack buffer overrun.
+  - Validate `mp_lower`/`mp_upper` bounds on every page fetch — prevents
+    `NUMKEYS()` unsigned wrap and `SIZELEFT()` underflow.
+  - Bounds-check `NODEDSZ()` in `mdb_node_read`, `mdb_cursor_put`, and
+    `mdb_page_split` — prevents OOB reads and heap overflows from corrupt
+    node sizes.
+  - Validate DUPSORT sub-page headers before copying — prevents `memcpy`
+    size underflow (unsigned wrap to huge value).
+  - Check `NODEDSZ >= sizeof(MDB_db)` before `memcpy` in
+    `mdb_xcursor_init1` — prevents read past node boundary.
+  - Validate LEAF2 `mp_pad` (key size) — zero or huge values cause OOB
+    via `LEAF2KEY()`.
+  - Guard `mc_xcursor` NULL in `MDB_GET_CURRENT` and `_mdb_cursor_del` —
+    two call sites missed by the CVE-2019-16227 fix.
+  - Guard `nsize` underflow in `mdb_node_shrink`.
+  - Validate overflow page extent (`pgno + mp_pages`) stays within the
+    database.
+  - Reject meta page numbers (0, 1) as B-tree roots.
+  - Validate `md_depth <= CURSOR_STACK` to prevent stack buffer overrun.
 
 Bug fixes
 ---------
 
 - Cross-thread write transactions now block instead of raising
-    `lmdb.Error("Attempt to operate on closed/deleted/dropped object.")`.
-    The check added in 1.8.0 was overly strict: it rejected all concurrent
-    write transactions, but only same-thread re-entrance is actually
-    incorrect. The cpython implementation now releases the GIL during
-    `mdb_txn_begin` for write transactions, allowing another thread to
-    block until the first commits. (#427, #428)
+  `lmdb.Error("Attempt to operate on closed/deleted/dropped object.")`.
+  The check added in 1.8.0 was overly strict: it rejected all concurrent
+  write transactions, but only same-thread re-entrance is actually
+  incorrect. The cpython implementation now releases the GIL during
+  `mdb_txn_begin` for write transactions, allowing another thread to
+  block until the first commits. (#427, #428)
 
 Other
 -----
 
 - Refactored `setup.py` patch application into a single loop with a shared
-    patch list, replacing duplicated `os.system()` blocks.
+  patch list, replacing duplicated `os.system()` blocks.
 
 2026-03-17 2.0.0
 ################
@@ -489,53 +489,53 @@ Potentially breaking changes
 ----------------------------
 
 - **Thread-safety overhaul (#180).** Environment.close(), Transaction.abort(),
-    Transaction.commit(), and cursor operations are now serialized with locks
-    to prevent use-after-free and double-free crashes when called concurrently.
-    Code that previously "worked" by luck with racy close/abort patterns may
-    now block where it previously crashed or silently corrupted memory. If you
-    relied on the old undefined behavior, review your threading model.
+  Transaction.commit(), and cursor operations are now serialized with locks
+  to prevent use-after-free and double-free crashes when called concurrently.
+  Code that previously "worked" by luck with racy close/abort patterns may
+  now block where it previously crashed or silently corrupted memory. If you
+  relied on the old undefined behavior, review your threading model.
 
 - **Duplicate environment path rejection (#230).** Opening the same LMDB path
-    twice in one process now raises lmdb.Error instead of silently proceeding
-    to a likely segfault. This will surface latent bugs in code that
-    accidentally opened the same environment twice.
+  twice in one process now raises lmdb.Error instead of silently proceeding
+  to a likely segfault. This will surface latent bugs in code that
+  accidentally opened the same environment twice.
 
 - **Minimum Python version is now 3.9.** Python 2.7 and 3.5-3.8 are no longer
-    supported. Python 2 compatibility shims have been removed from the
-    codebase.
+  supported. Python 2 compatibility shims have been removed from the
+  codebase.
 
 New features
 ------------
 
 - PEP 561 type stubs (py.typed) are now shipped (#257). IDEs and type
-    checkers will pick up lmdb's types automatically.
+  checkers will pick up lmdb's types automatically.
 
 - Cache getpid() result to avoid a syscall on every transaction dealloc.
-    Since glibc 2.25, getpid() is no longer cached in userspace; this showed
-    up in profiles for workloads with many short-lived transactions.
-    Contributed by @ltfish (#421).
+  Since glibc 2.25, getpid() is no longer cached in userspace; this showed
+  up in profiles for workloads with many short-lived transactions.
+  Contributed by @ltfish (#421).
 
 Bug fixes
 ---------
 
 - Fix memory safety issues across cpython and CFFI implementations (#420):
-    multiple reference count leaks in cpython.c (env_readers_callback,
-    db_flags, env_flags, env_copy, env_new, make_arg_cache, cursor_get_multi),
-    a getmulti validation bug in cffi.py, and a cursor leak on
-    mdb_cursor_open failure.
+  multiple reference count leaks in cpython.c (env_readers_callback,
+  db_flags, env_flags, env_copy, env_new, make_arg_cache, cursor_get_multi),
+  a getmulti validation bug in cffi.py, and a cursor leak on
+  mdb_cursor_open failure.
 
 - Fix unsafe buffer protocol usage in cpython.c that could read freed memory
-    (#372).
+  (#372).
 
 - Fix cmd_copyfd fd validation to use os.fstat() instead of os.fdopen(),
-    which consumed the fd.
+  which consumed the fd.
 
 - Add fork detection to CFFI implementation. Previously, Transaction.__del__
-    and Environment.__del__ would call mdb_txn_abort / mdb_env_close in forked
-    child processes, risking corruption of the parent's environment.
+  and Environment.__del__ would call mdb_txn_abort / mdb_env_close in forked
+  child processes, risking corruption of the parent's environment.
 
 - Release GIL during mdb_env_close (#418) so the event loop isn't blocked
-    while msync/fsync runs on large writemap databases.
+  while msync/fsync runs on large writemap databases.
 
 Other
 -----
@@ -557,25 +557,25 @@ Other
 - Update bundled LMDB from 0.9.33 to 0.9.35.
 
 - Fix Windows heap corruption caused by recursive write mutex. Replace
-    Windows Mutex objects with Semaphores for LMDB's read and write locks,
-    preventing concurrent write transactions on the same thread.
-    Reported by @RogueZamboni (#394). (Shipped as a patch to the bundled
-    liblmdb — not applied when building with ``LMDB_PURE`` or a system
-    liblmdb. Upstream rejected the patch (ITS#10463); since 2.0.0 py-lmdb
-    prevents the recursion in its own code instead and no longer applies
-    the patch.)
+  Windows Mutex objects with Semaphores for LMDB's read and write locks,
+  preventing concurrent write transactions on the same thread.
+  Reported by @RogueZamboni (#394). (Shipped as a patch to the bundled
+  liblmdb — not applied when building with ``LMDB_PURE`` or a system
+  liblmdb. Upstream rejected the patch (ITS#10463); since 2.0.0 py-lmdb
+  prevents the recursion in its own code instead and no longer applies
+  the patch.)
 
 - Fix infinite loop with next_nodup/prev_nodup on the sole key in a
-    dupsort database after delete+put.
-    Reported by @RogerMarsh (#388). (Patch to the bundled liblmdb — not
-    applied when building with ``LMDB_PURE`` or a system liblmdb.)
+  dupsort database after delete+put.
+  Reported by @RogerMarsh (#388). (Patch to the bundled liblmdb — not
+  applied when building with ``LMDB_PURE`` or a system liblmdb.)
 
 - Fix METH_NOARGS function signatures to include the required second
-    parameter (CPython 3.14 compatibility).
-    Reported by @dw (#182).
+  parameter (CPython 3.14 compatibility).
+  Reported by @dw (#182).
 
 - Fix installing and running on PyPy.
-    Reported by and fix contributed by @mgorny (#403).
+  Reported by and fix contributed by @mgorny (#403).
 
 - Fix PreloadTest on openSUSE. Contributed by @mgrossu (#400).
 
@@ -614,10 +614,10 @@ Other
 - Rewrite CI to use cibuildwheel.
 
 - Update bundled LMDB to 0.9.33, plus a patch to fix ITS#10346 (not
-    applied when building with ``LMDB_PURE`` or a system liblmdb).
+  applied when building with ``LMDB_PURE`` or a system liblmdb).
 
 - Prevent some accidental use of LMDB objects by child processes.
-    Contributed by Callum Walker.
+  Contributed by Callum Walker.
 
 2025-01-05 1.6.2
 ################
@@ -663,7 +663,7 @@ Other
 - Add Python 3.10 support.
 
 - Fix crash relating to caching of transactions.  The 'max_spare_txns'
-    parameter to Environment/open is currently ignored in cpython.
+  parameter to Environment/open is currently ignored in cpython.
 
 2021-04-19 v1.2.1
 #################
@@ -676,15 +676,15 @@ Other
 - Add non-bundled testing to CI.
 
 - Remove wheel generation for 2.7 because the manylinux images no longer
-    support it.
+  support it.
 
 - Allow passing None as a value to transaction.del in CFFI implementation
-    for parity with cpython implementation.
+  for parity with cpython implementation.
 
 - Fix Cursor.put behavior on a dupsort DB with append=True.
 
 - Add warning to docs about use of Environment.set_mapsize. This is currently
-    an unresolved issue with upstream LMDB.
+  an unresolved issue with upstream LMDB.
 
 - CFFI implementation:  fix a seg fault when open_db returns map full.
 
@@ -694,19 +694,19 @@ Other
 2021-02-05 v1.1.1
 #################
 - Dowgrade underlying LMDB to 0.9.26.  0.9.27 has a minor defect that will
-    need to get resolved.
+  need to get resolved.
 
 
 2021-02-04 v1.1.0
 #################
 - Migrate CI pipeline from Travis and AppVeyor to Github Actions.  Now
-    includes comprehensive testing across 4 dimensions (OS, Python version,
-    cpython/CFFI, pure/with mods).  Also includes publishing to PyPI.
+  includes comprehensive testing across 4 dimensions (OS, Python version,
+  cpython/CFFI, pure/with mods).  Also includes publishing to PyPI.
 
 - Prevent invalid flag combinations when creating a database.
 
 - Add a Cursor.getmulti method with optional buffer support.  Contributed by
-    Will Thompson <willsthompson@gmail.com>.
+  Will Thompson <willsthompson@gmail.com>.
 
 - Upgrade underlying LMDB to 0.9.27.
 
@@ -714,12 +714,12 @@ Other
 2020-08-28 v1.0.0
 #################
 - Start of new semantic versioning scheme.  This would be a minor version
-    bump from the 0.99 release if it were semantically versioned.
+  bump from the 0.99 release if it were semantically versioned.
 
 - Allow environment copy to take a passed-in transaction.  This is the
-    first released feature that requires a (very small) patch to the
-    underlying C library.  By default, the patch will be applied unless
-    this module is built with LMDB_PURE environment variable set.
+  first released feature that requires a (very small) patch to the
+  underlying C library.  By default, the patch will be applied unless
+  this module is built with LMDB_PURE environment variable set.
 
 
 2020-08-13 v0.99
@@ -737,7 +737,7 @@ Other
 - Resolve a bug when using cursor.putmulti and append=True on dupsort DBs.
 
 - Allow _Database.flags method to take no arguments since the one argument
-    wasn't being used.
+  wasn't being used.
 
 
 2019-11-06 v0.98
@@ -745,7 +745,7 @@ Other
 - Fix that a duplicate argument to a lmdb method would cause an assert.
 
 - Solaris needs ``#include "python.h"`` as soon as possible.  Fix
-    contributed by Jesús Cea.
+  contributed by Jesús Cea.
 
 - Fix crash under debug cpython when mdb_cursor_open failed
 
@@ -756,7 +756,7 @@ Other
 - Fix a missed GIL unlock sequence.  Reported by ajschorr.
 
 - Fix argv check in JEP (cpython under Java) environment.  Contributed by
-    de-code.
+  de-code.
 
 
 2019-07-14 v0.96
@@ -769,8 +769,8 @@ Other
 - More removal of code for now-unsupported Python versions.
 
 - Only preload the value with the GIL unlocked when the value is actually
-    requested. This significantly improves read performance to retrieve keys
-    with large values when the value isn't retrieved. Reported by Dan Patton.
+  requested. This significantly improves read performance to retrieve keys
+  with large values when the value isn't retrieved. Reported by Dan Patton.
 
 
 2019-06-08 v0.95
@@ -781,23 +781,23 @@ Other
 - The library is no longer tested on Python 3.2.
 
 - The address-book.py example was updated for Python 3. Contributed by Jamie
-    Bliss.
+  Bliss.
 
 - Development-related files were removed from the distribution tarball.
 
 - Handling of the Environment(create=True) flag was improved. Fix contributed
-    by Nir Soffer.
+  by Nir Soffer.
 
 - Database names may be reused after they are dropped on CFFI, without
-    reopening the environment. Fix contributed by Gareth Bult.
+  reopening the environment. Fix contributed by Gareth Bult.
 
 
 2018-04-09 v0.94
 ################
 
 - CPython argument parsing now matches the behaviour of CFFI, and most sane
-    Python APIs: a bool parameter is considered to be true if it is any truthy
-    value, not just if it is exactly True. Reported by Nic Watson.
+  Python APIs: a bool parameter is considered to be true if it is any truthy
+  value, not just if it is exactly True. Reported by Nic Watson.
 
 - Removed Python 2.6 support due to urllib3 warnings and pytest dropping it.
 
@@ -810,107 +810,107 @@ Other
 ################
 
 - py-lmdb is now built with AppVeyor CI, providing early feedback on Windows
-    build health. Egg and wheel artifacts are being generated, removing the need
-    for a dedicated Windows build machine, however there is no mechanism to
-    paublish these to PyPI yet.
+  build health. Egg and wheel artifacts are being generated, removing the need
+  for a dedicated Windows build machine, however there is no mechanism to
+  paublish these to PyPI yet.
 
 - The "warm" tool command did not function on Python 3.x. Reported by Github
-    user dev351.
+  user dev351.
 
 - Tests now pass on non-4kb page-sized machines, such as ppc64le. Reported by
-    Jonathan J. Helmus.
+  Jonathan J. Helmus.
 
 - Windows 3.6 eggs and wheels are now available on PyPI, and tests are run
-    against 3.6. Reported by Ofek Lev.
+  against 3.6. Reported by Ofek Lev.
 
 - Python 3.2 is no longer supported, due to yet more pointless breakage
-    introduced in pip/pkg_resources.
+  introduced in pip/pkg_resources.
 
 - py-lmdb currently does not support LMDB >=0.9.19 due to interface changes in
-    LMDB. Support will appear in a future release.
+  LMDB. Support will appear in a future release.
 
 
 2016-10-17 v0.92
 ################
 
 - Changes to support __all__ caused the CPython module to fail to import at
-    runtime on Python 3. This was hidden during testing as the CFFI module was
-    successfully imported.
+  runtime on Python 3. This was hidden during testing as the CFFI module was
+  successfully imported.
 
 
 2016-10-17 v0.91
 ################
 
 - The docstring for NotFoundError was clarified to indicate that it is
-    not raised in normal circumstances.
+  not raised in normal circumstances.
 
 - CFFI open_db() would always attempt to use a write transaction, even if the
-    environment was opened with readonly=True. Now both CPython and CFFI will
-    use a read-only transaction in this case. Reported by Github user
-    handloomweaver.
+  environment was opened with readonly=True. Now both CPython and CFFI will
+  use a read-only transaction in this case. Reported by Github user
+  handloomweaver.
 
 - The source distribution previously did not include a LICENSE file, and may
-    have included random cached junk from the source tree during build. Reported
-    by Thomas Petazzoni.
+  have included random cached junk from the source tree during build. Reported
+  by Thomas Petazzoni.
 
 - Transaction.id() was broken on Python 2.5.
 
 - Repair Travis CI build again.
 
 - CFFI Cursor did not correctly return empty strings for key()/value()/item()
-    when iternext()/iterprev() had reached the start/end of the database.
-    Detected by tests contributed by Ong Teck Wu.
+  when iternext()/iterprev() had reached the start/end of the database.
+  Detected by tests contributed by Ong Teck Wu.
 
 - The package can now be imported from within a CPython subinterpreter. Fix
-    contributed by Vitaly Repin.
+  contributed by Vitaly Repin.
 
 - lmdb.tool --delete would not delete keys in some circumstances. Fix
-    contributed by Vitaly Repin.
+  contributed by Vitaly Repin.
 
 - Calls to Cursor.set_range_dup() could lead to memory corruption due to
-    Cursor's idea of the key and value failing to be updated correctly. Reported
-    by Michael Lazarev.
+  Cursor's idea of the key and value failing to be updated correctly. Reported
+  by Michael Lazarev.
 
 - The lmdb.tool copy command now supports a --compact flag. Contributed by
-    Achal Dave.
+  Achal Dave.
 
 - The lmdb.tool edit command selects the correct database when --delete is
-    specified. Contributed by ispequalnp.
+  specified. Contributed by ispequalnp.
 
 - lmdb.tool correctly supports the -r flag to select a read-only environment.
-    Contributed by ispequalnp.
+  Contributed by ispequalnp.
 
 - The lmdb.tool --txn_size parameter was removed, as it was never implemented,
-    and its original function is no longer necessary with modern LMDB. Reported
-    by Achal Dave.
+  and its original function is no longer necessary with modern LMDB. Reported
+  by Achal Dave.
 
 - The documentation template was updated to fix broken links. Contributed by
-    Adam Chainz.
+  Adam Chainz.
 
 - The Travis CI build configuration was heavily refactored by Alexander Zhukov.
-    Automated tests are running under Travis CI once more.
+  Automated tests are running under Travis CI once more.
 
 - The CPython extension module did not define __all__. It is now defined
-    contain the same names as on CFFI.
+  contain the same names as on CFFI.
 
 - Both implementations were updated to remove lmdb.open() from __all__,
-    ensuring ``from lmdb import *`` does not shadow the builtin open(). The
-    function can still be invoked using its fully qualified name, and the alias
-    "Environment" may be used when ``from lmdb import *`` is used. Reported by
-    Alexander Zhukov.
+  ensuring ``from lmdb import *`` does not shadow the builtin open(). The
+  function can still be invoked using its fully qualified name, and the alias
+  "Environment" may be used when ``from lmdb import *`` is used. Reported by
+  Alexander Zhukov.
 
 - The CPython extension exported BadRSlotError, instead of BadRslotError. The
-    exception's name was corrected to match CFFI.
+  exception's name was corrected to match CFFI.
 
 - Environment.open_db() now supports integerdup=True, dupfixed=True, and
-    integerkey=True flags. Based on a patch by Jonathan Heyman.
+  integerkey=True flags. Based on a patch by Jonathan Heyman.
 
 
 2016-07-11 v0.90
 ################
 
 - This release was deleted from PyPI due to an erroneous pull request
-    upgrading the bundled LMDB to mdb.master.
+  upgrading the bundled LMDB to mdb.master.
 
 
 2016-02-12 v0.89
@@ -919,8 +919,8 @@ Other
 - LMDB 0.9.18 is bundled.
 
 - CPython Iterator.next() was incorrectly defined as pointing at the
-    implementation for Cursor.next(), triggering a crash if the method was ever
-    invoked manually. Reported by Kimikazu Kato.
+  implementation for Cursor.next(), triggering a crash if the method was ever
+  invoked manually. Reported by Kimikazu Kato.
 
 
 2016-01-24 v0.88
@@ -937,22 +937,22 @@ Other
 ################
 
 - Environment.set_mapsize() was added to allow runtime adjustment of the
-    environment map size.
+  environment map size.
 
 - Remove non-determinism from setup.py, to support Debian's reproducible
-    builds project. Patch by Chris Lamb.
+  builds project. Patch by Chris Lamb.
 
 - Documentation correctness and typo fixes. Patch by Gustav Larsson.
 
 - examples/keystore: beginnings of example that integrates py-lmdb with an
-    asynchronous IO loop.
+  asynchronous IO loop.
 
 
 2015-06-07 v0.86
 ################
 
 - LMDB_FORCE_SYSTEM builds were broken by the GIL/page fault change. This
-    release fixes the problem.
+  release fixes the problem.
 
 - Various cosmetic fixes to documentation.
 
@@ -963,37 +963,37 @@ Other
 - New exception class: lmdb.BadDbiError.
 
 - Environment.copy() and Environment.copyfd() now support compact=True, to
-    trigger database compaction while copying.
+  trigger database compaction while copying.
 
 - Various small documentation updates.
 
 - CPython set_range_dup() and set_key_dup() both invoked MDB_GET_BOTH, however
-    set_range_dup() should have instead invoked MDB_GET_BOTH_RANGE. Fix by
-    Matthew Battifarano.
+  set_range_dup() should have instead invoked MDB_GET_BOTH_RANGE. Fix by
+  Matthew Battifarano.
 
 - lmdb.tool module was broken on Win32, since Win32 lacks signal.SIGWINCH. Fix
-    suggested by David Khess.
+  suggested by David Khess.
 
 - LMDB 0.9.14 is bundled along with extra fixes from mdb.RE/0.9 (release
-    engineering) branch.
+  engineering) branch.
 
 - CPython previously lacked a Cursor.close() method. Problem was noticed by
-    Jos Vos.
+  Jos Vos.
 
 - Several memory leaks affecting the CFFI implementation when running on
-    CPython were fixed, apparent only when repeatedly opening and discarding a
-    large number of environments. Noticed by Jos Vos.
+  CPython were fixed, apparent only when repeatedly opening and discarding a
+  large number of environments. Noticed by Jos Vos.
 
 - The CPython extension previously did not support weakrefs on Environment
-    objects, and the implementation for Transaction objects was flawed. The
-    extension now correctly invalidates weakrefs during deallocation.
+  objects, and the implementation for Transaction objects was flawed. The
+  extension now correctly invalidates weakrefs during deallocation.
 
 - Both variants now try to avoid taking page faults with the GIL held,
-    accomplished by touching one byte of every page in a value during reads.
-    This does not guarantee faults will never occur with the GIL held, but it
-    drastically reduces the possibility. The binding should now be suitable for
-    use in multi-threaded applications with databases containing >2KB values
-    where the entire database does not fit in RAM.
+  accomplished by touching one byte of every page in a value during reads.
+  This does not guarantee faults will never occur with the GIL held, but it
+  drastically reduces the possibility. The binding should now be suitable for
+  use in multi-threaded applications with databases containing >2KB values
+  where the entire database does not fit in RAM.
 
 
 2014-09-22 v0.84
@@ -1002,7 +1002,7 @@ Other
 - LMDB 0.9.14 is bundled.
 
 - CFFI Cursor.putmulti() could crash when append=False and a key already
-    existed.
+  existed.
 
 
 2014-06-24 v0.83
@@ -1011,17 +1011,17 @@ Other
 - LMDB 0.9.13 is bundled along with extra fixes from upstream Git.
 
 - Environment.__enter__() and __exit__() are implemented, allowing
-    Environments to behave like context managers.
+  Environments to behave like context managers.
 
 - Cursor.close(), __enter__() and __exit__() are implemented, allowing Cursors
-    to be explicitly closed. In CFFI this mechanism *must* be used when many
-    cursors are used within a single transaction, otherwise a resource leak will
-    occur.
+  to be explicitly closed. In CFFI this mechanism *must* be used when many
+  cursors are used within a single transaction, otherwise a resource leak will
+  occur.
 
 - Dependency tracking in CFFI is now much faster, especially on PyPy, however
-    at a cost: Cursor use must always be wrapped in a context manager, or
-    .close() must be manually invoked for discarded Cursors when the parent
-    transaction is long lived.
+  at a cost: Cursor use must always be wrapped in a context manager, or
+  .close() must be manually invoked for discarded Cursors when the parent
+  transaction is long lived.
 
 - Fixed crash in CFFI Cursor.putmulti().
 
@@ -1030,39 +1030,39 @@ Other
 ################
 
 - Both variants now implement max_spare_txns, reducing the cost of creating a
-    read-only transaction 4x for an uncontended database and by up to 20x for
-    very read-busy environments. By default only 1 read-only transaction is
-    cached, adjust max_spare_txns= parameter if your script operates multiple
-    simultaneous read transactions.
+  read-only transaction 4x for an uncontended database and by up to 20x for
+  very read-busy environments. By default only 1 read-only transaction is
+  cached, adjust max_spare_txns= parameter if your script operates multiple
+  simultaneous read transactions.
 
 - Patch from Vladimir Vladimirov implementing MDB_NOLOCK.
 
 - The max_spare_iters and max_spare_cursors parameters were removed, neither
-    ever had any effect.
+  ever had any effect.
 
 - Cursor.putmulti() implemented based on a patch from Luke Kenneth Casson
-    Leighton. This function moves the loop required to batch populate a
-    database out of Python and into C.
+  Leighton. This function moves the loop required to batch populate a
+  database out of Python and into C.
 
 - The bundled LMDB 0.9.11 has been updated with several fixes from upstream
-    Git.
+  Git.
 
 - The cost of using keyword arguments in the CPython extension was
-    significantly reduced.
+  significantly reduced.
 
 
 2014-04-26 v0.81
 ################
 
 - On Python 2.x the extension module would silently interpret Unicode
-    instances as buffer objects, causing UCS-2/UCS-4 string data to end up in
-    the database. This was never intentional and now raises TypeError. Any
-    Unicode data passed to py-lmdb must explicitly be encoded with .encode()
-    first.
+  instances as buffer objects, causing UCS-2/UCS-4 string data to end up in
+  the database. This was never intentional and now raises TypeError. Any
+  Unicode data passed to py-lmdb must explicitly be encoded with .encode()
+  first.
 
 - open_db()'s name argument was renamed to key, and its semantics now match
-    get() and put(): in other words the key must be a bytestring, and passing
-    Unicode will raise TypeError.
+  get() and put(): in other words the key must be a bytestring, and passing
+  Unicode will raise TypeError.
 
 - The extension module now builds under Python 3.4 on Windows.
 
@@ -1071,16 +1071,16 @@ Other
 ################
 
 - Both variants now build successfully as 32 bit / 64bit binaries on
-    Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
-    py-lmdb to be installed via pip on Windows without requiring a compiler to
-    be available. In future, .egg/.whl releases will be pre-built for all recent
-    Python versions on Windows.
+  Windows under Visual Studio 9.0, the compiler for Python 2.7. This enables
+  py-lmdb to be installed via pip on Windows without requiring a compiler to
+  be available. In future, .egg/.whl releases will be pre-built for all recent
+  Python versions on Windows.
 
-    Known bugs: Environment.copy() and Environment.copyfd() currently produce a
-    database that cannot be reopened.
+  Known bugs: Environment.copy() and Environment.copyfd() currently produce a
+  database that cannot be reopened.
 
 - The lmdb.enable_drop_gil() function was removed. Its purpose was
-    experimental at best, confusing at worst.
+  experimental at best, confusing at worst.
 
 
 2014-03-17 v0.79
@@ -1089,20 +1089,20 @@ Other
 - CPython Cursor.delete() lacked dupdata argument, fixed.
 
 - Fixed minor bug where CFFI _get_cursor() did not note its idea of
-    the current key and value were up to date.
+  the current key and value were up to date.
 
 - Cursor.replace() and Cursor.pop() updated for MDB_DUPSORT databases. For
-    pop(), the first data item is popped and returned. For replace(), the first
-    data item is returned, and all duplicates for the key are replaced.
+  pop(), the first data item is popped and returned. For replace(), the first
+  data item is returned, and all duplicates for the key are replaced.
 
 - Implement remaining Cursor methods necessary for working with MDB_DUPSORT
-    databases: next_dup(), next_nodup(), prev_dup(), prev_nodup(), first_dup(),
-    last_dup(), set_key_dup(), set_range_dup(), iternext_dup(),
-    iternext_nodup(), iterprev_dup(), iterprev_nodup().
+  databases: next_dup(), next_nodup(), prev_dup(), prev_nodup(), first_dup(),
+  last_dup(), set_key_dup(), set_range_dup(), iternext_dup(),
+  iternext_nodup(), iterprev_dup(), iterprev_nodup().
 
 - The default for Transaction.put(dupdata=...) and Cursor.put(dupdata=...) has
-    changed from False to True. The previous default did not reflect LMDB's
-    normal mode of operation.
+  changed from False to True. The previous default did not reflect LMDB's
+  normal mode of operation.
 
 - LMDB 0.9.11 is bundled along with extra fixes from upstream Git.
 
@@ -1121,9 +1121,9 @@ Other
 - To work around install failures minimum CFFI version is now >=0.8.0.
 
 - ticket #38: remove all buffer object hacks. This results in ~50% slowdown
-    for cursor enumeration, but results in far simpler object lifetimes. A
-    future version may introduce a better mechanism for achieving the same
-    performance without loss of sanity.
+  for cursor enumeration, but results in far simpler object lifetimes. A
+  future version may introduce a better mechanism for achieving the same
+  performance without loss of sanity.
 
 
 2013-11-30 v0.77
@@ -1132,7 +1132,7 @@ Other
 - Added Environment.max_key_size(), Environment.max_readers().
 
 - CFFI now raises the correct Error subclass associated with an MDB_* return
-    code.
+  code.
 
 - Numerous CFFI vs. CPython behavioural inconsistencies have been fixed.
 
@@ -1151,19 +1151,19 @@ Other
 - LMDB 0.9.9 is now bundled.
 
 - Many Python 2.5 and 3.x fixes were made. Future changes are automatically
-    tested via Travis CI <https://travis-ci.org/dw/py-lmdb>.
+  tested via Travis CI <https://travis-ci.org/dw/py-lmdb>.
 
 - When multiple cursors exist, and one cursor performs a mutation,
-    remaining cursors may have returned corrupt results via key(), value(),
-    or item(). Mutations are now explicitly tracked and cause the cursor's
-    data to be refreshed in this case.
+  remaining cursors may have returned corrupt results via key(), value(),
+  or item(). Mutations are now explicitly tracked and cause the cursor's
+  data to be refreshed in this case.
 
 - setup.py was adjusted to ensure the distutils default of '-DNDEBUG' is never
-    defined while building LMDB. This caused many important checks in the engine
-    to be disabled.
+  defined while building LMDB. This caused many important checks in the engine
+  to be disabled.
 
 - The old 'transactionless' API was removed. A future version may support the
-    same API, but the implementation will be different.
+  same API, but the implementation will be different.
 
 - Transaction.pop() and Cursor.pop() helpers added, to complement
-    Transaction.replace() and Cursor.replace().
+  Transaction.replace() and Cursor.replace().

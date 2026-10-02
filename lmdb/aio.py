@@ -44,8 +44,10 @@ from . import Cursor, Environment, Transaction
 def wrap(env, executor=None):
     """Wrap an :class:`lmdb.Environment` for async use.
 
-    *executor* is passed to :meth:`loop.run_in_executor`.  ``None`` (the
-    default) uses the loop's default executor.
+    *executor* is passed to :meth:`asyncio.loop.run_in_executor`.  ``None``
+    (the default) uses the loop's default executor.  Write transactions
+    always run on a private single-thread executor instead; see
+    :py:meth:`AsyncEnvironment.begin`.
     """
     return AsyncEnvironment(env, executor)
 
@@ -125,6 +127,10 @@ def _collect_locked(sync):
                 self._executor,
                 lambda: list(sync(getattr(self, self._WRAPS), *args, **kwargs)),
             )
+    method.__doc__ = (
+        'Coroutine: like :py:meth:`lmdb.Cursor.%s`, but the iterator is '
+        'consumed in the executor and its items are returned as a list.'
+        % sync.__name__)
     return method
 
 
@@ -138,8 +144,8 @@ class AsyncEnvironment:
     Created by :py:func:`wrap`.  All methods of the underlying
     :py:class:`~lmdb.Environment` are available and are dispatched to an
     executor, except for the low-overhead accessors ``path()``,
-    ``max_key_size()``, ``max_readers()``, and ``flags()``, which are called
-    directly.
+    ``lib_version()``, ``max_key_size()``, ``max_readers()``, and ``flags()``,
+    which are called directly.
 
     Supports ``async with`` for lifetime management — the environment is
     closed on exit.
@@ -167,7 +173,8 @@ class AsyncEnvironment:
     def begin(self, *args, **kwargs):
         """Start a new transaction, returning an :py:class:`AsyncTransaction`.
 
-        Accepts the same arguments as :py:meth:`lmdb.Environment.begin`.
+        Accepts the same arguments as :py:meth:`lmdb.Environment.begin`,
+        except that nested transactions (``parent=``) are not supported.
         Can be used with ``await`` or ``async with``::
 
             async with aenv.begin(write=True) as txn:
@@ -241,8 +248,8 @@ class AsyncTransaction:
     this transaction, including operations on its cursors.  This makes
     :py:func:`asyncio.gather` safe on the same transaction.
 
-    Supports ``async with`` — write transactions are committed on clean exit
-    and aborted on exception.
+    Supports ``async with`` — the transaction is committed on clean exit and
+    aborted on exception.
     """
 
     __slots__ = ('_txn', '_executor', '_lock', '_owns_executor', '_done')
