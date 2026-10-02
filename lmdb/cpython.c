@@ -2950,7 +2950,7 @@ env_reader_set_mapsize(EnvObject *self, PyObject *args, PyObject *kwargs)
  * Environment.sync()
  */
 static PyObject *
-env_sync(EnvObject *self, PyObject *args)
+env_sync(EnvObject *self, PyObject *args, PyObject *kwds)
 {
     const MdbApi *V = self->libv;
     struct env_sync {
@@ -2963,7 +2963,7 @@ env_sync(EnvObject *self, PyObject *args)
     int rc;
 
     static PyObject *cache = NULL;
-    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, NULL, &arg, NULL)) {
+    if(parse_args(self->valid, SPECSIZE(), argspec, &cache, args, kwds, &arg, NULL)) {
         return NULL;
     }
 
@@ -3012,7 +3012,7 @@ static struct PyMethodDef env_methods[] = {
     {"reader_check", (PyCFunction)env_reader_check, METH_NOARGS},
     {"set_mapsize", (PyCFunction)env_reader_set_mapsize,
      METH_VARARGS|METH_KEYWORDS},
-    {"sync", (PyCFunction)env_sync, METH_VARARGS},
+    {"sync", (PyCFunction)env_sync, METH_VARARGS|METH_KEYWORDS},
     {NULL, NULL}
 };
 

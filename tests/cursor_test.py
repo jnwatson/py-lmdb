@@ -264,6 +264,14 @@ class ReplaceTest(CursorTestBase):
         assert B('') == self.c.replace(B('a'), B('x'))
         assert B('x') == self.c.replace(B('a'), B('y'))
 
+    def test_value_keyword(self):
+        '''Issue #498: the value argument of Cursor.put/replace is named
+        `value` on both implementations, as on Transaction.put.'''
+        assert self.c.put(B('k'), value=B('1'))
+        assert B('1') == self.c.replace(B('k'), value=B('2'))
+        self.assertRaises(TypeError,
+            lambda: self.c.put(B('k'), val=B('3')))  # type: ignore[call-arg]
+
 
 class ContextManagerTest2(CursorTestBase):
     def test_enter(self):

@@ -936,6 +936,7 @@ class OtherMethodsTest(unittest.TestCase):
         _, env = testlib.temp_env()
         env.sync(False)
         env.sync(True)
+        env.sync(force=True)  # keyword accepted on both (issue #499)
         env.close()
         self.assertRaises(Exception,
             lambda: env.sync(False))

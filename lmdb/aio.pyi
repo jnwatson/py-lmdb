@@ -321,7 +321,7 @@ class AsyncCursor(Generic[_VT_co]):
     async def put(
         self,
         key: Buffer,
-        val: Buffer,
+        value: Buffer,
         dupdata: bool = True,
         overwrite: bool = True,
         append: bool = False,
@@ -333,7 +333,7 @@ class AsyncCursor(Generic[_VT_co]):
         overwrite: bool = True,
         append: bool = False,
     ) -> tuple[int, int]: ...
-    async def replace(self, key: Buffer, val: Buffer) -> _VT_co | None: ...
+    async def replace(self, key: Buffer, value: Buffer) -> _VT_co | None: ...
     async def pop(self, key: Buffer) -> _VT_co | None: ...
 
     #

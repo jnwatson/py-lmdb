@@ -2942,7 +2942,7 @@ class Cursor:
             raise _error("mdb_cursor_count", rc)
         return countp[0]
 
-    def put(self, key, val, dupdata=True, overwrite=True, append=False):
+    def put(self, key, value, dupdata=True, overwrite=True, append=False):
         """Store a record, returning ``True`` if it was written, or ``False``
         to indicate the key was already present and `overwrite=False`. On
         success, the cursor is positioned on the key.
@@ -2953,7 +2953,7 @@ class Cursor:
             `key`:
                 Bytestring key to store.
 
-            `val`:
+            `value`:
                 Bytestring value to store.
 
             `dupdata`:
@@ -2986,7 +2986,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), val, len(val), flags)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, len(key), value, len(value), flags)
         self._pytxn._mutations += 1
         if rc:
             if rc == _lib.MDB_KEYEXIST:
@@ -3054,7 +3054,7 @@ class Cursor:
         self._cursor_get(_lib.MDB_GET_CURRENT)
         return added, added - skipped
 
-    def replace(self, key, val):
+    def replace(self, key, value):
         """Store a record, returning its previous value if one existed. Returns
         ``None`` if no previous value existed. This uses the best available
         mechanism to minimize the cost of a `set-and-return-previous`
@@ -3077,7 +3077,7 @@ class Cursor:
                 self.delete(True)
             else:
                 old = None
-            self.put(key, val)
+            self.put(key, value)
             return old
 
         flags = _lib.MDB_NOOVERWRITE
@@ -3086,7 +3086,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), flags)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), flags)
         self._pytxn._mutations += 1
         if not rc:
             return
@@ -3100,7 +3100,7 @@ class Cursor:
             if not self._cur:
                 raise _error("Attempt to operate on closed cursor",
                               _lib.EINVAL)
-            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, val, len(val), 0)
+            rc = self._lib.pymdb_cursor_put(self._cur, key, keylen, value, len(value), 0)
         self._pytxn._mutations += 1
         if rc:
             raise _error("mdb_cursor_put", rc)
