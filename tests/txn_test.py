@@ -746,6 +746,27 @@ class DoubleWriteTxnTest(unittest.TestCase):
                           lambda: env2.begin(write=True, parent=parent))
         parent.abort()
 
+    def test_explicit_finish_inside_with(self):
+        '''Issue #497: commit()/abort() inside a with-block finishes the
+        transaction; leaving the block is then a no-op on both
+        implementations, and an exception from the block still
+        propagates.'''
+        for finish in ('commit', 'abort'):
+            _, env = testlib.temp_env()
+            with env.begin(write=True) as txn:
+                txn.put(B('k'), B('v'))
+                getattr(txn, finish)()
+            with env.begin() as txn:
+                expected = B('v') if finish == 'commit' else None
+                self.assertEqual(txn.get(B('k')), expected)
+
+            def raising():
+                with env.begin(write=True) as txn:
+                    getattr(txn, finish)()
+                    raise ValueError('from the block')
+            self.assertRaises(ValueError, raising)
+            env.close()
+
     def test_write_txn_after_context_manager(self):
         _, env = testlib.temp_env()
         with env.begin(write=True) as txn:

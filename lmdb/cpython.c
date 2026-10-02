@@ -5178,8 +5178,12 @@ static PyObject *trans_enter(TransObject *self, PyObject *Py_UNUSED(ignored))
  */
 static PyObject *trans_exit(TransObject *self, PyObject *args)
 {
+    /* Already finished -- by an explicit commit()/abort() inside the block,
+     * by its parent finishing, or by env.close() -- so there is nothing to
+     * commit or abort.  Returning None (falsy) still propagates any
+     * exception from the block.  Matches CFFI.  Issues #180, #497. */
     if(! self->valid) {
-        return err_invalid();
+        Py_RETURN_NONE;
     }
     if(PyTuple_GET_ITEM(args, 0) == Py_None) {
         return trans_commit(self, NULL);
