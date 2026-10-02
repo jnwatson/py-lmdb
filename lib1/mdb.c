@@ -4893,7 +4893,8 @@ mdb_env_write_meta(MDB_txn *txn)
 	if (mapsize < env->me_mapsize)
 		mapsize = env->me_mapsize;
 
-#ifndef _WIN32 /* We don't want to ever use MSYNC/FlushViewOfFile in Windows */
+	/* If on Windows with MDB_USE_WRITE_THROUGH, don't use MSYNC/FlushViewOfFile */
+#if !defined(_WIN32) || !MDB_USE_WRITE_THROUGH
 	if (flags & MDB_WRITEMAP) {
 		mp->mm_mapsize = mapsize;
 		mp->mm_dbs[FREE_DBI] = txn->mt_dbs[FREE_DBI];
@@ -6376,8 +6377,13 @@ mdb_env_open(MDB_env *env, const char *path, unsigned int flags, mdb_mode_t mode
 	if ((rc = mdb_env_open2(env, flags & MDB_PREVSNAPSHOT)) == MDB_SUCCESS) {
 		/* Synchronous fd for meta writes. Needed even with
 		 * MDB_NOSYNC/MDB_NOMETASYNC, in case these get reset.
+		 * Not needed for WRITEMAP except on WIN32 when using WRITE_THROUGH.
 		 */
-		if (!(flags & (MDB_RDONLY|MDB_WRITEMAP))) {
+		if (!(flags & (MDB_RDONLY
+#if !defined(_WIN32) || !MDB_USE_WRITE_THROUGH
+						|MDB_WRITEMAP
+#endif
+			))) {
 			rc = mdb_fopen(env, &fname, MDB_O_META, mode, &env->me_mfd);
 			if (rc)
 				goto leave;

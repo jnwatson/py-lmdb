@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -7473,6 +7473,14 @@
+@@ -7479,6 +7479,14 @@
  			txn->mt_flags |= MDB_TXN_ERROR;
  			return MDB_CORRUPTED;
  		}

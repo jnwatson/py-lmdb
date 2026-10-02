@@ -70,7 +70,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  	} else {
  		return MDB_SUCCESS;
  	}
-@@ -7473,11 +7528,16 @@
+@@ -7479,11 +7534,16 @@
  			txn->mt_flags |= MDB_TXN_ERROR;
  			return MDB_CORRUPTED;
  		}
@@ -91,7 +91,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  			txn->mt_flags |= MDB_TXN_ERROR;
  			return MDB_CORRUPTED;
  		}
-@@ -7648,6 +7708,9 @@
+@@ -7654,6 +7714,9 @@
  					if (BAD_DB_FLAGS(flags))
  						return MDB_INVALID;
  					memcpy(mc->mc_db, data.mv_data, sizeof(MDB_db));
@@ -101,7 +101,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					if (mc->mc_db->md_depth > CURSOR_STACK)
  						return MDB_CORRUPTED;
  				}
-@@ -8980,7 +9043,19 @@
+@@ -8986,7 +9049,19 @@
  					MP_LOWER(fp) > MP_UPPER(fp) ||
  					MP_UPPER(fp) + PAGEBASE > ((fp_flags & P_LEAF2) ?
  						olddata.mv_size + 2 * (unsigned)NUMKEYS(fp) :
@@ -122,7 +122,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  					mc->mc_txn->mt_flags |= MDB_TXN_ERROR;
  					return MDB_CORRUPTED;
  				}
-@@ -9751,11 +9826,36 @@
+@@ -9757,11 +9832,36 @@
  			return;
  		}
  		memcpy(&mx->mx_db, NODEDATA(node), sizeof(MDB_db));
@@ -159,7 +159,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  		mx->mx_db.md_pad = 0;
  		mx->mx_db.md_flags = 0;
  		mx->mx_db.md_depth = 1;
-@@ -12557,6 +12657,12 @@
+@@ -12563,6 +12663,12 @@
  		txn->mt_dbiseqs[slot] = seq;
  
  		memcpy(&txn->mt_dbs[slot], data.mv_data, sizeof(MDB_db));

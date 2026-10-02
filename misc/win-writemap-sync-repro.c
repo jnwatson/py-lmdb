@@ -4,7 +4,8 @@
  * mdb_txn_commit() returns ERROR_INVALID_HANDLE ("The handle is invalid").
  *
  * LMDB 1.0.1 only: 0.9.35 runs the same sequence on the same machine without
- * error.
+ * error.  Fixed upstream in LMDB 1.0.2 (ITS#10575), which opens me_mfd under
+ * MDB_WRITEMAP on Windows; against 1.0.2 all cases should succeed.
  *
  * Derived cause (from reading 1.0.1; the cases below are chosen to confirm or
  * refute it from outside the library):

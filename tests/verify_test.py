@@ -36,7 +36,6 @@ for the engine" claim the tool rests on.
 
 import os
 import struct
-import sys
 import unittest
 
 import lmdb
@@ -306,9 +305,6 @@ class VerifyPositiveTest(LmdbTest):
                     t.put(b'k%06d' % i, b'v', db=db)
         self._check(fn)
 
-    @unittest.skipIf(sys.platform == 'win32' and lmdb.version()[0] >= 1,
-                     'writemap + sync=True cannot commit on Windows with '
-                     'LMDB 1.0; upstream defect (issue #486)')
     def test_writemap_env(self):
         # writemap mode flushes pages through the map rather than write(); the
         # at-rest file must look identical to the verifier (in particular, no

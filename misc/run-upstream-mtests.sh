@@ -7,10 +7,12 @@
 #
 # The mtest programs are not part of the py-lmdb distribution -- lib/ and
 # lib1/ carry only the library sources -- so this fetches them from the
-# upstream tags matching what we bundle.  Requires network access to
-# raw.githubusercontent.com, a compiler, and a prior `setup.py build_ext`
-# (the patched trees it compares against are build/lib09-plain and
-# build/lib10-plain).
+# upstream tags matching what we bundle.  Requires git access to
+# git.openldap.org, a compiler, and a prior `setup.py build_ext` (the patched
+# trees it compares against are build/lib09-plain and build/lib10-plain).
+# The GitHub mirror (github.com/LMDB/lmdb) lags behind upstream releases and
+# the git.openldap.org web interface is not scriptable, so this fetches the
+# tags over git.
 #
 # The comparison, not the exit status, is the point: a hardening patch that
 # rejects corrupt input should be indistinguishable from pristine LMDB on
@@ -25,7 +27,7 @@ set -u
 
 work="${1:-$(mktemp -d)}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
-raw="https://raw.githubusercontent.com/LMDB/lmdb"
+upstream="https://git.openldap.org/openldap/openldap.git"
 tests="mtest mtest2 mtest3 mtest4 mtest5"
 fail=0
 
@@ -49,7 +51,7 @@ build_and_run() {   # <tag> <tree> <label>
 }
 
 for spec in "LMDB_0.9.36 lib build/lib09-plain 0.9" \
-            "LMDB_1.0.1  lib1 build/lib10-plain 1.0"; do
+            "LMDB_1.0.2  lib1 build/lib10-plain 1.0"; do
     set -- $spec
     tag="$1"; pristine="$here/$2"; patched="$here/$3"; name="$4"
 
@@ -60,8 +62,12 @@ for spec in "LMDB_0.9.36 lib build/lib09-plain 0.9" \
     fi
 
     mkdir -p "$work/$tag"
+    repo="$work/upstream.git"
+    [ -d "$repo" ] || git init -q --bare "$repo"
+    git -C "$repo" fetch -q --depth 1 "$upstream" "refs/tags/$tag:refs/tags/$tag" \
+        || { echo "  fetch failed: $tag" >&2; exit 2; }
     for t in $tests; do
-        curl -sSf -o "$work/$tag/$t.c" "$raw/$tag/libraries/liblmdb/$t.c" \
+        git -C "$repo" show "$tag:libraries/liblmdb/$t.c" > "$work/$tag/$t.c" \
             || { echo "  fetch failed: $t.c" >&2; exit 2; }
         # Pin the seed so both builds see identical data.
         sed -i 's/srand(time(NULL));/srand(20260818);/' "$work/$tag/$t.c"
@@ -70,7 +76,7 @@ for spec in "LMDB_0.9.36 lib build/lib09-plain 0.9" \
     # Confirm the bundled tree really is the upstream tag, or "pristine"
     # means nothing.
     for f in mdb.c midl.c lmdb.h midl.h; do
-        curl -sSf -o "$work/$tag/up-$f" "$raw/$tag/libraries/liblmdb/$f" || exit 2
+        git -C "$repo" show "$tag:libraries/liblmdb/$f" > "$work/$tag/up-$f" || exit 2
         if ! cmp -s "$work/$tag/up-$f" "$pristine/$f"; then
             echo "  WARNING: $2/$f differs from $tag upstream"
             fail=1

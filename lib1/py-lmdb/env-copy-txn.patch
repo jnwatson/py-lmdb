@@ -1,7 +1,7 @@
 diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
 --- a/libraries/liblmdb/mdb.c
 +++ b/libraries/liblmdb/mdb.c
-@@ -11508,12 +11508,12 @@
+@@ -11514,12 +11514,12 @@
  
  	/** Copy environment with compaction. */
  static int ESECT
@@ -16,7 +16,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  	pthread_t thr;
  	pgno_t root, new_root;
  	int rc = MDB_SUCCESS;
-@@ -11543,9 +11543,11 @@
+@@ -11549,9 +11549,11 @@
  	if (rc)
  		goto done;
  
@@ -31,7 +31,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  
  	mp = (MDB_page *)my.mc_wbuf[0];
  	memset(mp, 0, NUM_METAS * env->me_psize);
-@@ -11605,7 +11607,8 @@
+@@ -11611,7 +11613,8 @@
  		my.mc_error = rc;
  	mdb_env_cthr_toggle(&my, 1 | MDB_EOF);
  	rc = THREAD_FINISH(thr);
@@ -41,7 +41,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  
  done:
  #ifdef _WIN32
-@@ -11744,12 +11747,22 @@
+@@ -11750,12 +11753,22 @@
  }
  
  int ESECT
@@ -66,7 +66,7 @@ diff --git a/libraries/liblmdb/mdb.c b/libraries/liblmdb/mdb.c
  }
  
  int ESECT
-@@ -11775,13 +11788,19 @@
+@@ -11781,13 +11794,19 @@
  int ESECT
  mdb_env_copy2(MDB_env *env, const char *path, unsigned int flags)
  {
