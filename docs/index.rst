@@ -175,9 +175,12 @@ versions of LMDB.
 
 Wheels are also published for the free-threaded builds of CPython (3.14 and
 later), but py-lmdb has not yet declared that it is safe to run without the
-GIL. Importing it on a free-threaded interpreter therefore re-enables the GIL,
-with a ``RuntimeWarning``, and it then behaves as on a regular build. Forcing
-the GIL off with ``PYTHON_GIL=0`` or ``-X gil=0`` is unsupported.
+GIL. Importing the C extension, which is what the wheels contain, on a
+free-threaded interpreter therefore re-enables the GIL, with a
+``RuntimeWarning``, and it then behaves as on a regular build. Forcing the GIL
+off with ``PYTHON_GIL=0`` or ``-X gil=0`` is unsupported, as is selecting the
+CFFI implementation (``LMDB_FORCE_CFFI=1``) on a free-threaded interpreter,
+which leaves the GIL off.
 
 To install:
 

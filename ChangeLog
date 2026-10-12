@@ -9,12 +9,14 @@ Features
   shipped ``cp314t`` wheels, but 2.0.0 through 3.0.0 did not: the wheel
   build's interpreter list stopped matching the free-threaded identifiers.
 
-  This is not free-threading support.  py-lmdb does not yet declare that it
-  can run without the GIL, so on a free-threaded interpreter Python
-  re-enables the GIL when ``lmdb`` is imported and prints a
-  ``RuntimeWarning``; it then behaves exactly as on a regular build.
-  Forcing the GIL off with ``PYTHON_GIL=0`` or ``-X gil=0`` is unsupported.
-  See ``misc/FREE_THREADING.md``.
+  This is not free-threading support.  The C extension, which is what the
+  wheels contain, does not yet declare that it can run without the GIL, so
+  on a free-threaded interpreter Python re-enables the GIL when it is
+  imported and prints a ``RuntimeWarning``; it then behaves exactly as on a
+  regular build.  Forcing the GIL off with ``PYTHON_GIL=0`` or ``-X gil=0``
+  is unsupported, as is selecting the CFFI implementation
+  (``LMDB_FORCE_CFFI=1``) on a free-threaded interpreter, which leaves the
+  GIL off.  See ``misc/FREE_THREADING.md``.
 
 
 2026-10-02 3.0.0
