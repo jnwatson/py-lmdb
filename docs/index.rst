@@ -173,6 +173,12 @@ allowing the binding to be installed via pip without the need for a compiler
 to be present. The binary releases statically link against both bundled
 versions of LMDB.
 
+Wheels are also published for the free-threaded builds of CPython (3.14 and
+later), but py-lmdb has not yet declared that it is safe to run without the
+GIL. Importing it on a free-threaded interpreter therefore re-enables the GIL,
+with a ``RuntimeWarning``, and it then behaves as on a regular build. Forcing
+the GIL off with ``PYTHON_GIL=0`` or ``-X gil=0`` is unsupported.
+
 To install:
 
     ::

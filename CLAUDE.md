@@ -44,7 +44,7 @@ python -m unittest discover -s tests -p "*_test.py"
 LMDB_DEFAULT_LIB_VERSION=1 python -m pytest
 ```
 
-CI runs tests across a matrix: Python 3.8/3.11/3.13/3.14 + PyPy-3.10, on Linux/Windows/macOS, with both cpython and cffi implementations, and both patched and pure LMDB variants. Every job runs the suite twice — once per bundled LMDB engine — since both are linked into a single build, so the engine dimension costs test time rather than extra jobs.
+CI runs tests across a matrix: Python 3.11/3.13/3.14/3.15 + PyPy-3.10 (plus free-threaded 3.14t/3.15t, cpython impl only), on Linux/Windows/macOS, with both cpython and cffi implementations, and both patched and pure LMDB variants. Every job runs the suite twice — once per bundled LMDB engine — since both are linked into a single build, so the engine dimension costs test time rather than extra jobs.
 
 `tests/cve_test.py` detects `PAGEHDRSZ`/`PAGEBASE` at import so its corruption recipes work on either engine; cases not yet re-derived for 1.0 are marked with its `only_v09` decorator.
 
