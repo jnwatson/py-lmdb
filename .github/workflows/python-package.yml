@@ -15,6 +15,8 @@ jobs:
   test:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
     runs-on: ${{ matrix.os }}
+    # A hang would otherwise hold the job for GitHub's 6-hour default.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -170,6 +172,7 @@ jobs:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

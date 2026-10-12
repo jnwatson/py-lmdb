@@ -25,6 +25,7 @@ import gc
 import os
 import shutil
 import stat
+import sysconfig
 import tempfile
 import traceback
 import unittest
@@ -83,7 +84,12 @@ def path_mode(path):
 
 
 def debug_collect():
-    if hasattr(gc, 'set_debug') and hasattr(gc, 'get_debug'):
+    # Not on free-threaded builds: there the collector's DEBUG_LEAK output
+    # runs sys.stderr.write() mid-collection, which hangs on Windows when
+    # stderr is pytest's fd-capture file (a Python-level TemporaryFile
+    # wrapper there).  Seen on 3.14.8t without lmdb involved.
+    if (hasattr(gc, 'set_debug') and hasattr(gc, 'get_debug')
+            and not sysconfig.get_config_var('Py_GIL_DISABLED')):
         old = gc.get_debug()
         gc.set_debug(gc.DEBUG_LEAK)
         gc.collect()
