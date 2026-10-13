@@ -15,6 +15,8 @@ jobs:
   test:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
     runs-on: ${{ matrix.os }}
+    # A hang would otherwise hold the job for GitHub's 6-hour default.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -23,30 +25,40 @@ jobs:
           - {os: ubuntu-24.04, python-version: '3.11', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.13', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.15', impl: cpython, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.11', impl: cffi, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.13', impl: cffi, purity: patched}
           - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.15', impl: cffi, purity: patched}
+          # Linux - free-threaded builds, which get cp314t/cp315t wheels.
+          # py-lmdb does not declare Py_mod_gil, so the interpreter
+          # re-enables the GIL on import; these jobs check that the
+          # extension builds, imports and passes there, not that it is
+          # safe without the GIL (see misc/FREE_THREADING.md).  cpython
+          # impl only, matching the wheels.
+          - {os: ubuntu-24.04, python-version: '3.14t', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.15t', impl: cpython, purity: patched}
           # Linux - pure variant on latest Python only
-          - {os: ubuntu-24.04, python-version: '3.14', impl: cpython, purity: pure}
-          - {os: ubuntu-24.04, python-version: '3.14', impl: cffi, purity: pure}
+          - {os: ubuntu-24.04, python-version: '3.15', impl: cpython, purity: pure}
+          - {os: ubuntu-24.04, python-version: '3.15', impl: cffi, purity: pure}
           # Linux aarch64 (native ARM runners) - guards against
           # architecture-specific crashes such as issue #465, which the
           # x86_64 and macOS-arm64 (POSIX semaphore) jobs do not exercise.
           - {os: ubuntu-24.04-arm, python-version: '3.11', impl: cpython, purity: patched}
-          - {os: ubuntu-24.04-arm, python-version: '3.14', impl: cpython, purity: patched}
-          - {os: ubuntu-24.04-arm, python-version: '3.14', impl: cffi, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.15', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.15', impl: cffi, purity: patched}
           # Windows - newest + one older, both impls
           - {os: windows-latest, python-version: '3.11', impl: cpython, purity: patched}
-          - {os: windows-latest, python-version: '3.14', impl: cpython, purity: patched}
-          - {os: windows-latest, python-version: '3.14', impl: cffi, purity: patched}
+          - {os: windows-latest, python-version: '3.15', impl: cpython, purity: patched}
+          - {os: windows-latest, python-version: '3.15', impl: cffi, purity: patched}
           # Windows - pure variant.  The pure jobs were Linux-only, so a
           # Windows-specific failure could not be attributed to the patch
           # series or to upstream without one; see issue #486.
-          - {os: windows-latest, python-version: '3.14', impl: cpython, purity: pure}
+          - {os: windows-latest, python-version: '3.15', impl: cpython, purity: pure}
           # macOS - newest + one older, both impls
           - {os: macos-latest, python-version: '3.11', impl: cpython, purity: patched}
-          - {os: macos-latest, python-version: '3.14', impl: cpython, purity: patched}
-          - {os: macos-latest, python-version: '3.14', impl: cffi, purity: patched}
+          - {os: macos-latest, python-version: '3.15', impl: cpython, purity: patched}
+          - {os: macos-latest, python-version: '3.15', impl: cffi, purity: patched}
           # PyPy
           - {os: ubuntu-24.04, python-version: 'pypy-3.10', impl: cffi, purity: patched}
 
@@ -160,14 +172,25 @@ jobs:
     name: Test ${{ matrix.os }} (py${{ matrix.python-version }}, ${{ matrix.impl }}, ${{ matrix.purity }})
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, windows-latest, macos-latest]
-        python-version: ['3.11', '3.13', '3.14']
+        python-version: ['3.11', '3.13', '3.14', '3.15']
         impl: [cpython, cffi]
         purity: [patched, pure]
         include:
+          # Free-threaded builds on every wheel platform; see the comment
+          # on the corresponding jobs in the test matrix.
+          - {os: ubuntu-24.04, python-version: '3.14t', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04, python-version: '3.15t', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.14t', impl: cpython, purity: patched}
+          - {os: ubuntu-24.04-arm, python-version: '3.15t', impl: cpython, purity: patched}
+          - {os: windows-latest, python-version: '3.14t', impl: cpython, purity: patched}
+          - {os: windows-latest, python-version: '3.15t', impl: cpython, purity: patched}
+          - {os: macos-latest, python-version: '3.14t', impl: cpython, purity: patched}
+          - {os: macos-latest, python-version: '3.15t', impl: cpython, purity: patched}
           - os: ubuntu-24.04
             python-version: 'pypy-3.10'
             impl: 'cffi'
@@ -319,10 +342,13 @@ jobs:
         if: runner.os == 'Linux'
         uses: docker/setup-qemu-action@v3
 
+      # Free-threaded builds have their own identifiers (cp314t-*), which
+      # cp314-* does not match, so each must be listed; 2.0.0 through 3.0.0
+      # shipped without them because of that.
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.2.1
+        uses: pypa/cibuildwheel@v4.3.1
         env:
-          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-* cp314t-* cp315-* cp315t-*"
           CIBW_SKIP: "*-musllinux_*"
           LMDB_FORCE_CPYTHON: 1
           CIBW_TEST_COMMAND: ""
