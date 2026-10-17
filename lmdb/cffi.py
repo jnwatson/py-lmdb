@@ -1954,6 +1954,17 @@ class Transaction:
                                 raise _error("mdb_txn_begin", rc)
                             self._txn = txnpp[0]
                 break
+        except BaseException:
+            # This transaction never started, so don't leave it registered
+            # with its environment or parent: _deps holds strong references,
+            # and every failed begin() (e.g. ReadersFullError on retry)
+            # would otherwise stay alive until the environment closes.
+            # Issue #512.
+            if env._deps is not None:
+                env._deps.discard(self)
+            if parent and parent._deps is not None:
+                parent._deps.discard(self)
+            raise
         finally:
             if claimed:
                 env._release_write_txn()
@@ -1968,7 +1979,12 @@ class Transaction:
         self._env = _invalid
 
     def __del__(self):
-        if _cached_pid != self._pyenv._pid:
+        # The environment has no _pid while Environment.__init__ is still
+        # opening it, e.g. when the main-DB transaction it begins there
+        # fails.  Nothing needs aborting then: a failed mdb_txn_begin left
+        # no transaction, and one that began was aborted by its `with`
+        # block.  Matches Environment.__del__.  Issue #512.
+        if _cached_pid != getattr(self._pyenv, '_pid', None):
             return
         self.abort()
 

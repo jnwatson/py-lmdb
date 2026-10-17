@@ -1382,6 +1382,84 @@ class LeakTest(unittest.TestCase):
         assert count[0] == 1
 
 
+class FailedBeginTest(unittest.TestCase):
+    '''Issue #512: a transaction whose mdb_txn_begin fails must not raise
+    from __del__ (CFFI raised AttributeError when that happened inside
+    Environment()), nor stay registered with its environment.
+
+    The failure is a full reader table: a child process holds reader slots
+    of an environment opened with a small max_readers.'''
+
+    HOLDER = ('import sys, lmdb; '
+              'env = lmdb.open(sys.argv[1], max_readers=int(sys.argv[2])); '
+              'txn = env.begin(); '
+              'print("ready", flush=True); '
+              'sys.stdin.readline()')
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    def _hold_reader(self, path, max_readers):
+        child_env = dict(os.environ)
+        # Let the child import the lmdb under test, whether installed or not.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(lmdb.__file__)))
+        child_env['PYTHONPATH'] = os.pathsep.join(
+            p for p in (root, child_env.get('PYTHONPATH')) if p)
+        holder = subprocess.Popen(
+            [sys.executable, '-c', self.HOLDER, path, str(max_readers)],
+            env=child_env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, universal_newlines=True)
+        stdin, stdout, stderr = holder.stdin, holder.stdout, holder.stderr
+        assert stdin is not None and stdout is not None and stderr is not None
+
+        def release():
+            if not stdin.closed:
+                stdin.close()
+            holder.wait()
+            stdout.close()
+            stderr.close()
+        self.addCleanup(release)
+        if stdout.readline().strip() != 'ready':
+            stdin.close()
+            self.fail('reader-holding child failed: %s' % stderr.read())
+
+    def test_failed_open_raises_nothing_from_del(self):
+        import gc
+        path = testlib.temp_dir()
+        self._hold_reader(path, max_readers=1)  # the only slot
+
+        unraisable = []
+        old_hook = sys.unraisablehook
+        sys.unraisablehook = unraisable.append
+        try:
+            self.assertRaises(lmdb.ReadersFullError,
+                              lambda: lmdb.open(path, max_readers=1))
+            for _ in range(3):
+                gc.collect()
+        finally:
+            sys.unraisablehook = old_hook
+        self.assertEqual(
+            ['%s: %s' % (u.exc_type.__name__, u.exc_value)
+             for u in unraisable], [])
+
+    @unittest.skipUnless(lmdb.Environment.__module__ == 'lmdb.cffi',
+                         'checks the CFFI implementation\'s _deps set')
+    def test_failed_begin_not_retained(self):
+        path, env = testlib.temp_env(max_readers=2)
+        env.close()
+        self._hold_reader(path, max_readers=2)  # one of two slots
+        env = lmdb.open(path, max_readers=2)
+        txn = env.begin()  # takes the last free slot
+        deps = getattr(env, '_deps')
+        before = len(deps)
+        for _ in range(5):
+            self.assertRaises(lmdb.ReadersFullError, env.begin)
+        self.assertEqual(len(deps), before)
+        txn.abort()
+        env.close()
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test_reader_check_child':
         OtherMethodsTest._test_reader_check_child(sys.argv[2])

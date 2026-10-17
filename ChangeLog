@@ -18,6 +18,17 @@ Features
   (``LMDB_FORCE_CFFI=1``) on a free-threaded interpreter, which leaves the
   GIL off.  See ``misc/FREE_THREADING.md``.
 
+Bug fixes
+---------
+
+- CFFI: when ``lmdb.open()`` failed while beginning the transaction it uses
+  to open the main database (e.g. with ``ReadersFullError``), the half-built
+  ``Transaction`` printed an ignored ``AttributeError`` about
+  ``Environment._pid`` when it was collected, burying the real error.  And a
+  ``begin()`` that failed on an open environment stayed registered with it
+  until it closed, so an application retrying on such errors accumulated
+  dead transactions (issue #512).
+
 
 2026-10-02 3.0.0
 ################
