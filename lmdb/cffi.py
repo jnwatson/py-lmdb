@@ -1742,7 +1742,6 @@ class _Database:
     """
     def __init__(self, env, txn, name, reverse_key, dupsort, create,
                  integerkey, integerdup, dupfixed):
-        env._deps.add(self)
         self._deps = set()
         self._name = name
         self._lib = env._lib
@@ -1767,6 +1766,11 @@ class _Database:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
         self._load_flags(txn)
+        # Registered only once open: _deps holds strong references, and a
+        # failed open (e.g. NotFoundError for create=False, which dbs()
+        # hits for every plain key in the main database) would otherwise
+        # stay alive until the environment closes.  Issue #512.
+        env._deps.add(self)
 
     def _load_flags(self, txn):
         """Load MDB's notion of the database flags."""
@@ -1954,6 +1958,17 @@ class Transaction:
                                 raise _error("mdb_txn_begin", rc)
                             self._txn = txnpp[0]
                 break
+        except BaseException:
+            # This transaction never started, so don't leave it registered
+            # with its environment or parent: _deps holds strong references,
+            # and every failed begin() (e.g. ReadersFullError on retry)
+            # would otherwise stay alive until the environment closes.
+            # Issue #512.
+            if env._deps is not None:
+                env._deps.discard(self)
+            if parent and parent._deps is not None:
+                parent._deps.discard(self)
+            raise
         finally:
             if claimed:
                 env._release_write_txn()
@@ -1968,7 +1983,12 @@ class Transaction:
         self._env = _invalid
 
     def __del__(self):
-        if _cached_pid != self._pyenv._pid:
+        # The environment has no _pid while Environment.__init__ is still
+        # opening it, e.g. when the main-DB transaction it begins there
+        # fails.  Nothing needs aborting then: a failed mdb_txn_begin left
+        # no transaction, and one that began was aborted by its `with`
+        # block.  Matches Environment.__del__.  Issue #512.
+        if _cached_pid != getattr(self._pyenv, '_pid', None):
             return
         self.abort()
 
@@ -2383,9 +2403,11 @@ class Cursor:
             ...         'Tree is broken! Path: %s' % (path,)
             ...     path.append(cursor.value())
     """
+    # Lets __del__ run on a Cursor whose __init__ raised early, e.g. on a
+    # `db` argument that isn't a _Database.  Issue #512.
+    _cur = None
+
     def __init__(self, db, txn):
-        db._deps.add(self)
-        txn._deps.add(self)
         self._pydb = db # hold ref
         self._pytxn = txn # hold ref
         self._lib = txn._lib
@@ -2396,7 +2418,8 @@ class Cursor:
         self._valid = False
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
-        self._cur = None
+        db._deps.add(self)
+        txn._deps.add(self)
         rc = self._lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
             db._deps.discard(self)
