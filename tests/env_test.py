@@ -1460,6 +1460,52 @@ class FailedBeginTest(unittest.TestCase):
         env.close()
 
 
+class FailedConstructionTest(unittest.TestCase):
+    '''Issue #512's siblings: a _Database or Cursor whose construction
+    fails must not raise from __del__, nor stay registered with its
+    environment or transaction.'''
+
+    def tearDown(self):
+        testlib.cleanup()
+
+    @unittest.skipUnless(lmdb.Environment.__module__ == 'lmdb.cffi',
+                         'checks the CFFI implementation\'s _deps set')
+    def test_failed_open_db_not_retained(self):
+        _, env = testlib.temp_env(max_dbs=2)
+        with env.begin(write=True) as txn:
+            for i in range(5):
+                txn.put(b'plain%d' % i, b'value')
+        deps = getattr(env, '_deps')
+        before = len(deps)
+        for _ in range(3):
+            self.assertRaises(lmdb.NotFoundError,
+                              lambda: env.open_db(b'missing', create=False))
+            # Tries each plain key as a database, which fails.
+            self.assertEqual(env.dbs(), [])
+        self.assertEqual(len(deps), before)
+
+    def test_bad_cursor_db_raises_nothing_from_del(self):
+        import gc
+        _, env = testlib.temp_env()
+        txn = env.begin()
+        unraisable = []
+        old_hook = sys.unraisablehook
+        sys.unraisablehook = unraisable.append
+        try:
+            # TypeError from the C extension, AttributeError from CFFI.
+            self.assertRaises((TypeError, AttributeError),
+                              lambda: txn.cursor(db='not a database'))  # type: ignore[arg-type]
+            gc.collect()
+        finally:
+            sys.unraisablehook = old_hook
+        self.assertEqual(
+            ['%s: %s' % (u.exc_type.__name__, u.exc_value)
+             for u in unraisable], [])
+        if lmdb.Environment.__module__ == 'lmdb.cffi':
+            self.assertEqual(len(getattr(txn, '_deps')), 0)
+        txn.abort()
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'test_reader_check_child':
         OtherMethodsTest._test_reader_check_child(sys.argv[2])

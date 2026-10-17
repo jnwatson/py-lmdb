@@ -29,6 +29,13 @@ Bug fixes
   until it closed, so an application retrying on such errors accumulated
   dead transactions (issue #512).
 
+- CFFI: likewise, an ``open_db()`` that failed (e.g. ``NotFoundError`` with
+  ``create=False``) stayed registered with the environment until it closed.
+  ``Environment.dbs()`` hits this for every plain key in the main database,
+  so each call leaked one handle per such key.  And a ``Cursor`` whose
+  construction failed on a bad ``db`` argument printed an ignored
+  ``AttributeError`` from ``__del__``.
+
 
 2026-10-02 3.0.0
 ################
