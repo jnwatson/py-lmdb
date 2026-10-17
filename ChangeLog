@@ -27,7 +27,7 @@ Bug fixes
   ``Environment._pid`` when it was collected, burying the real error.  And a
   ``begin()`` that failed on an open environment stayed registered with it
   until it closed, so an application retrying on such errors accumulated
-  dead transactions (issue #512).
+  dead transactions.  Reported by @oberstet (#512).
 
 - CFFI: likewise, an ``open_db()`` that failed (e.g. ``NotFoundError`` with
   ``create=False``) stayed registered with the environment until it closed.

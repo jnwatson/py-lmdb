@@ -1766,10 +1766,7 @@ class _Database:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
         self._load_flags(txn)
-        # Registered only once open: _deps holds strong references, and a
-        # failed open (e.g. NotFoundError for create=False, which dbs()
-        # hits for every plain key in the main database) would otherwise
-        # stay alive until the environment closes.  Issue #512.
+        # Register only on success, so failed opens aren't retained.
         env._deps.add(self)
 
     def _load_flags(self, txn):
@@ -1959,11 +1956,7 @@ class Transaction:
                             self._txn = txnpp[0]
                 break
         except BaseException:
-            # This transaction never started, so don't leave it registered
-            # with its environment or parent: _deps holds strong references,
-            # and every failed begin() (e.g. ReadersFullError on retry)
-            # would otherwise stay alive until the environment closes.
-            # Issue #512.
+            # Never started; don't leave it registered.  Issue #512.
             if env._deps is not None:
                 env._deps.discard(self)
             if parent and parent._deps is not None:
@@ -1983,11 +1976,7 @@ class Transaction:
         self._env = _invalid
 
     def __del__(self):
-        # The environment has no _pid while Environment.__init__ is still
-        # opening it, e.g. when the main-DB transaction it begins there
-        # fails.  Nothing needs aborting then: a failed mdb_txn_begin left
-        # no transaction, and one that began was aborted by its `with`
-        # block.  Matches Environment.__del__.  Issue #512.
+        # _pid is unset if Environment.__init__ failed.  Issue #512.
         if _cached_pid != getattr(self._pyenv, '_pid', None):
             return
         self.abort()
@@ -2403,8 +2392,7 @@ class Cursor:
             ...         'Tree is broken! Path: %s' % (path,)
             ...     path.append(cursor.value())
     """
-    # Lets __del__ run on a Cursor whose __init__ raised early, e.g. on a
-    # `db` argument that isn't a _Database.  Issue #512.
+    # For __del__ after a failed __init__.
     _cur = None
 
     def __init__(self, db, txn):
