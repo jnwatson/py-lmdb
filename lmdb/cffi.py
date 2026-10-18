@@ -1742,7 +1742,6 @@ class _Database:
     """
     def __init__(self, env, txn, name, reverse_key, dupsort, create,
                  integerkey, integerdup, dupfixed):
-        env._deps.add(self)
         self._deps = set()
         self._name = name
         self._lib = env._lib
@@ -1767,6 +1766,8 @@ class _Database:
             raise _error("mdb_dbi_open", rc)
         self._dbi = dbipp[0]
         self._load_flags(txn)
+        # Register only on success, so failed opens aren't retained.
+        env._deps.add(self)
 
     def _load_flags(self, txn):
         """Load MDB's notion of the database flags."""
@@ -1954,6 +1955,13 @@ class Transaction:
                                 raise _error("mdb_txn_begin", rc)
                             self._txn = txnpp[0]
                 break
+        except BaseException:
+            # Never started; don't leave it registered.  Issue #512.
+            if env._deps is not None:
+                env._deps.discard(self)
+            if parent and parent._deps is not None:
+                parent._deps.discard(self)
+            raise
         finally:
             if claimed:
                 env._release_write_txn()
@@ -1968,7 +1976,8 @@ class Transaction:
         self._env = _invalid
 
     def __del__(self):
-        if _cached_pid != self._pyenv._pid:
+        # _pid is unset if Environment.__init__ failed.  Issue #512.
+        if _cached_pid != getattr(self._pyenv, '_pid', None):
             return
         self.abort()
 
@@ -2383,9 +2392,10 @@ class Cursor:
             ...         'Tree is broken! Path: %s' % (path,)
             ...     path.append(cursor.value())
     """
+    # For __del__ after a failed __init__.
+    _cur = None
+
     def __init__(self, db, txn):
-        db._deps.add(self)
-        txn._deps.add(self)
         self._pydb = db # hold ref
         self._pytxn = txn # hold ref
         self._lib = txn._lib
@@ -2396,7 +2406,8 @@ class Cursor:
         self._valid = False
         self._to_py = txn._to_py
         curpp = _ffi.new('MDB_cursor **')
-        self._cur = None
+        db._deps.add(self)
+        txn._deps.add(self)
         rc = self._lib.mdb_cursor_open(self._txn, self._dbi, curpp)
         if rc:
             db._deps.discard(self)
